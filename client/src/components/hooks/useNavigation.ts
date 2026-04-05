@@ -68,10 +68,7 @@ export function useNavigation(): void {
         return;
       }
 
-      const distance = Math.hypot(
-        touch2.clientX - touch1.clientX,
-        touch2.clientY - touch1.clientY,
-      );
+      const distance = Math.hypot(touch2.clientX - touch1.clientX, touch2.clientY - touch1.clientY);
 
       if (lastTouchDistance.current !== null) {
         const delta = distance - lastTouchDistance.current;

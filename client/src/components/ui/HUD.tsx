@@ -36,18 +36,10 @@ export function HUD(): JSX.Element {
       </header>
 
       {/* Current zone indicator */}
-      {activeZone && (
-        <div style={styles.zoneIndicator}>
-          {activeZone.label}
-        </div>
-      )}
+      {activeZone && <div style={styles.zoneIndicator}>{activeZone.label}</div>}
 
       {/* Navigation hint — only shown when free-roaming */}
-      {!activeZone && (
-        <div style={styles.hint}>
-          Scroll to explore · Click a marker to visit
-        </div>
-      )}
+      {!activeZone && <div style={styles.hint}>Scroll to explore · Click a marker to visit</div>}
     </div>
   );
 }

@@ -69,12 +69,9 @@ export const useWorldStore = create<AppState & AppActions>((set) => ({
       player: { ...state.player, rotation },
     })),
 
-  setActiveZone: (zoneId) =>
-    set({ activeZoneId: zoneId }),
+  setActiveZone: (zoneId) => set({ activeZoneId: zoneId }),
 
-  updateEnvironment: (config) =>
-    set({ environment: config }),
+  updateEnvironment: (config) => set({ environment: config }),
 
-  setReady: (ready) =>
-    set({ isReady: ready }),
+  setReady: (ready) => set({ isReady: ready }),
 }));

@@ -60,9 +60,7 @@ export function CursorAvatar({
       </mesh>
 
       {/* Point light so the cursor illuminates nearby surfaces */}
-      {isLocal && (
-        <pointLight color={color} intensity={0.5} distance={3} decay={2} />
-      )}
+      {isLocal && <pointLight color={color} intensity={0.5} distance={3} decay={2} />}
     </group>
   );
 }
