@@ -37,7 +37,7 @@ const mockWebGLContext = {
 };
 
 // Override getContext to return our mock for WebGL requests
-const originalGetContext = HTMLCanvasElement.prototype.getContext;
+const originalGetContext = HTMLCanvasElement.prototype.getContext.bind(HTMLCanvasElement.prototype);
 // @ts-expect-error — intentionally overriding with a simplified mock
 HTMLCanvasElement.prototype.getContext = function (contextId: string) {
   if (contextId === 'webgl' || contextId === 'webgl2') {
