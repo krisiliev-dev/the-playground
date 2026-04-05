@@ -89,7 +89,7 @@ async fn handle_ws(socket: WebSocket, state: AppState, ip: String) {
             }
 
             if let Ok(text) = serde_json::to_string(&msg) {
-                let send_result = ws_sender.send(Message::Text(text.into())).await;
+                let send_result = ws_sender.send(Message::Text(text)).await;
                 if send_result.is_err() {
                     break; // Client disconnected
                 }
