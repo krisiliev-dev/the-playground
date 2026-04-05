@@ -47,6 +47,14 @@
     /* React specific */
     "react/prop-types": "off",
     "react-hooks/rules-of-hooks": "error",
-    "react-hooks/exhaustive-deps": "warn"
+    "react-hooks/exhaustive-deps": "warn",
+    "react/no-unknown-property": ["error", {
+      "ignore": [
+        "args", "position", "rotation", "intensity", "distance", "decay",
+        "castShadow", "shadow-mapSize-width", "shadow-mapSize-height",
+        "side", "roughness", "metalness", "emissive", "emissiveIntensity",
+        "transparent", "opacity", "object", "scale", "dispose"
+      ]
+    }]
   }
 }
