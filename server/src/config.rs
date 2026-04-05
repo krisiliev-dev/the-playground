@@ -24,9 +24,7 @@ impl Config {
         Self {
             port: env_var_or("PORT", "8080").parse().unwrap_or(8080),
             allowed_origins: env_var_or("ALLOWED_ORIGINS", "*"),
-            max_connections: env_var_or("MAX_CONNECTIONS", "100")
-                .parse()
-                .unwrap_or(100),
+            max_connections: env_var_or("MAX_CONNECTIONS", "100").parse().unwrap_or(100),
             max_connections_per_ip: env_var_or("MAX_CONNECTIONS_PER_IP", "5")
                 .parse()
                 .unwrap_or(5),

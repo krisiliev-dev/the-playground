@@ -172,8 +172,8 @@ impl AppState {
         }
 
         // Notify other clients that this player left
-        let _ = self.broadcast_tx.send(BroadcastMessage::PlayerLeft {
-            id: id.to_string(),
-        });
+        let _ = self
+            .broadcast_tx
+            .send(BroadcastMessage::PlayerLeft { id: id.to_string() });
     }
 }

@@ -113,11 +113,9 @@ async fn handle_ws(socket: WebSocket, state: AppState, ip: String) {
                         drop(sessions);
 
                         // Broadcast to other clients
-                        let _ = state_clone.broadcast_tx.send(
-                            BroadcastMessage::PlayerUpdate {
-                                player: update,
-                            },
-                        );
+                        let _ = state_clone
+                            .broadcast_tx
+                            .send(BroadcastMessage::PlayerUpdate { player: update });
                     }
                 }
                 Message::Close(_) => break,
