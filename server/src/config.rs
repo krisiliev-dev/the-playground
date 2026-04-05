@@ -4,6 +4,7 @@
 //! This keeps the server 12-factor compliant and easy to configure per environment.
 
 /// Server configuration.
+#[allow(dead_code)]
 pub struct Config {
     /// Port to listen on (default: 8080).
     pub port: u16,
@@ -20,6 +21,7 @@ pub struct Config {
 
 impl Config {
     /// Load configuration from environment variables.
+    #[allow(dead_code)]
     pub fn from_env() -> Self {
         Self {
             port: env_var_or("PORT", "8080").parse().unwrap_or(8080),
@@ -33,6 +35,7 @@ impl Config {
 }
 
 /// Read an environment variable or return the default.
+#[allow(dead_code)]
 fn env_var_or(key: &str, default: &str) -> String {
     std::env::var(key).unwrap_or_else(|_| default.to_string())
 }

@@ -8,8 +8,8 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Json},
 };
+use futures_util::{SinkExt, StreamExt};
 use std::net::SocketAddr;
-use tokio::sync::broadcast;
 use tracing::{info, warn};
 
 use crate::state::{AppState, BroadcastMessage, PlayerSession};
@@ -69,26 +69,28 @@ async fn handle_ws(socket: WebSocket, state: AppState, ip: String) {
     // Subscribe to the broadcast channel for outbound messages
     let mut broadcast_rx = state.broadcast_tx.subscribe();
 
-    // Split the WebSocket into sender and receiver
+    // Split the WebSocket into sender and receiver halves.
+    // split() comes from the StreamExt trait (imported at the top).
+    // SinkExt is needed for ws_sender.send(), StreamExt for ws_receiver.next().
     let (mut ws_sender, mut ws_receiver) = socket.split();
 
     let state_clone = state.clone();
-    let session_id_clone = session_id.clone();
+    let session_id_outbound = session_id.clone();
+    let session_id_inbound = session_id.clone();
 
     // ── Outbound task: broadcast → this client ───────────────────
     let mut outbound_task = tokio::spawn(async move {
-        use futures_util::SinkExt;
-
         while let Ok(msg) = broadcast_rx.recv().await {
             // Don't echo a player's own updates back to them
             if let BroadcastMessage::PlayerUpdate { ref player } = msg {
-                if player.id == session_id_clone {
+                if player.id == session_id_outbound {
                     continue;
                 }
             }
 
             if let Ok(text) = serde_json::to_string(&msg) {
-                if ws_sender.send(Message::Text(text.into())).await.is_err() {
+                let send_result = ws_sender.send(Message::Text(text.into())).await;
+                if send_result.is_err() {
                     break; // Client disconnected
                 }
             }
@@ -97,8 +99,6 @@ async fn handle_ws(socket: WebSocket, state: AppState, ip: String) {
 
     // ── Inbound task: this client → process + broadcast ──────────
     let mut inbound_task = tokio::spawn(async move {
-        use futures_util::StreamExt;
-
         while let Some(Ok(msg)) = ws_receiver.next().await {
             match msg {
                 Message::Text(text) => {
@@ -106,7 +106,7 @@ async fn handle_ws(socket: WebSocket, state: AppState, ip: String) {
                     if let Ok(update) = serde_json::from_str::<PlayerSession>(&text) {
                         // Update the session state
                         let mut sessions = state_clone.sessions.write().await;
-                        if let Some(session) = sessions.get_mut(&session_id) {
+                        if let Some(session) = sessions.get_mut(&session_id_inbound) {
                             session.position = update.position;
                             session.rotation = update.rotation;
                         }
