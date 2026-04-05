@@ -1,0 +1,9 @@
+# Rustfmt configuration — enforced by CI.
+# Keep in sync with what cargo fmt produces by default,
+# with a few opinionated tweaks for readability.
+
+edition = "2021"
+max_width = 100
+tab_spaces = 4
+use_field_init_shorthand = true
+use_try_shorthand = true

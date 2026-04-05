@@ -1,0 +1,42 @@
+# ── Dependencies ────────────────────────────────────────────────────
+node_modules/
+
+# ── Build output ────────────────────────────────────────────────────
+client/dist/
+server/target/
+
+# ── IDE / Editor ────────────────────────────────────────────────────
+.vscode/
+.idea/
+.claude/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ── Environment variables (never commit secrets) ───────────────────
+.env
+.env.local
+.env.production
+.env.*.local
+
+# ── Test & Coverage ─────────────────────────────────────────────────
+coverage/
+*.lcov
+
+# ── OS ──────────────────────────────────────────────────────────────
+.DS_Store
+*.pem
+
+# ── Rust ────────────────────────────────────────────────────────────
+**/*.rs.bk
+*.rlib
+
+# ── Logs ────────────────────────────────────────────────────────────
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# ── Vercel ──────────────────────────────────────────────────────────
+.vercel

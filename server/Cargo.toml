@@ -1,0 +1,40 @@
+[package]
+name = "portfolio-world-server"
+version = "0.1.0"
+edition = "2021"
+description = "WebSocket server for Portfolio World — handles multiplayer sync, live environment editing, and session management."
+
+[dependencies]
+# Web framework — fast, ergonomic, built on hyper + tower
+axum = { version = "0.7", features = ["ws"] }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Serialization — for environment config and WebSocket messages
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Unique IDs for player sessions
+uuid = { version = "1", features = ["v4"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Async stream utilities (for WebSocket split/send/recv)
+futures-util = "0.3"
+
+# Tower middleware for rate limiting, CORS, etc.
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+
+[dev-dependencies]
+# For integration tests
+tokio-tungstenite = "0.24"
+
+[profile.release]
+# Optimize for size + speed in production
+lto = true
+codegen-units = 1
+strip = true
