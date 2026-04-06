@@ -25,11 +25,7 @@ export function HUD(): JSX.Element {
       <header style={styles.header}>
         <h1 style={styles.title}>The Playground</h1>
         {activeZone && (
-          <button
-            onClick={() => setActiveZone(null)}
-            style={styles.backButton}
-            aria-label="Return"
-          >
+          <button onClick={() => setActiveZone(null)} style={styles.backButton} aria-label="Return">
             ← Back
           </button>
         )}
