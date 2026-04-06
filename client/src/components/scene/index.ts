@@ -1,6 +1,4 @@
 export { World } from './World';
 export { BoxEnvironment } from './BoxEnvironment';
-export { CursorAvatar } from './CursorAvatar';
-export { ZoneMarker } from './ZoneMarker';
+export { GridMaterial } from './GridMaterial';
 export { WorldLighting } from './WorldLighting';
-export { NavigationController } from './NavigationController';
