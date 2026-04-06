@@ -28,7 +28,7 @@ export function HUD(): JSX.Element {
           <button
             onClick={() => setActiveZone(null)}
             style={styles.backButton}
-            aria-label="Return to overview"
+            aria-label="Return"
           >
             ← Back
           </button>
