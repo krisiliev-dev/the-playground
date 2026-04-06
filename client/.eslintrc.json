@@ -32,10 +32,13 @@
   "rules": {
     /* Enforce clean code practices */
     "@typescript-eslint/no-unused-vars": ["error", { "argsIgnorePattern": "^_" }],
-    "@typescript-eslint/explicit-function-return-type": ["warn", {
-      "allowExpressions": true,
-      "allowTypedFunctionExpressions": true
-    }],
+    "@typescript-eslint/explicit-function-return-type": [
+      "warn",
+      {
+        "allowExpressions": true,
+        "allowTypedFunctionExpressions": true
+      }
+    ],
     "@typescript-eslint/no-explicit-any": "error",
     "@typescript-eslint/prefer-readonly": "warn",
     "no-console": ["warn", { "allow": ["warn", "error"] }],
@@ -48,13 +51,31 @@
     "react/prop-types": "off",
     "react-hooks/rules-of-hooks": "error",
     "react-hooks/exhaustive-deps": "warn",
-    "react/no-unknown-property": ["error", {
-      "ignore": [
-        "args", "position", "rotation", "intensity", "distance", "decay",
-        "castShadow", "shadow-mapSize-width", "shadow-mapSize-height",
-        "side", "roughness", "metalness", "emissive", "emissiveIntensity",
-        "transparent", "opacity", "object", "scale", "dispose"
-      ]
-    }]
+    "react/no-unknown-property": [
+      "error",
+      {
+        "ignore": [
+          "args",
+          "position",
+          "rotation",
+          "intensity",
+          "distance",
+          "decay",
+          "castShadow",
+          "shadow-mapSize-width",
+          "shadow-mapSize-height",
+          "side",
+          "roughness",
+          "metalness",
+          "emissive",
+          "emissiveIntensity",
+          "transparent",
+          "opacity",
+          "object",
+          "scale",
+          "dispose"
+        ]
+      }
+    ]
   }
 }

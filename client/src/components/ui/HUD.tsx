@@ -23,13 +23,9 @@ export function HUD(): JSX.Element {
     <div style={styles.container}>
       {/* Top bar */}
       <header style={styles.header}>
-        <h1 style={styles.title}>Portfolio World</h1>
+        <h1 style={styles.title}>The Playground</h1>
         {activeZone && (
-          <button
-            onClick={() => setActiveZone(null)}
-            style={styles.backButton}
-            aria-label="Return to overview"
-          >
+          <button onClick={() => setActiveZone(null)} style={styles.backButton} aria-label="Return">
             ← Back
           </button>
         )}
