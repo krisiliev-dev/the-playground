@@ -4,32 +4,34 @@
 
 ### DNS Structure
 
-| Record | Type  | Value                          | Purpose                    |
-|--------|-------|--------------------------------|----------------------------|
-| @      | A     | Vercel IP (76.76.21.21)        | Main site                  |
-| www    | CNAME | cname.vercel-dns.com           | www redirect               |
-| api    | A     | AWS ECS/ALB public IP          | WebSocket server           |
-| demo   | CNAME | (Vercel preview domain)        | Demo environment           |
+| Record | Type  | Value                   | Purpose          |
+| ------ | ----- | ----------------------- | ---------------- |
+| @      | A     | Vercel IP (76.76.21.21) | Main site        |
+| www    | CNAME | cname.vercel-dns.com    | www redirect     |
+| api    | A     | AWS ECS/ALB public IP   | WebSocket server |
+| demo   | CNAME | (Vercel preview domain) | Demo environment |
 
 ### URL Mapping
 
 | URL                    | Points To           | Environment |
-|------------------------|----------------------|-------------|
-| krisiliev.dev          | Vercel (production)  | Production  |
-| demo.krisiliev.dev     | Vercel (preview)     | Demo        |
-| api.krisiliev.dev      | AWS ECS Fargate      | Production  |
-| api-demo.krisiliev.dev | AWS ECS Fargate      | Demo        |
+| ---------------------- | ------------------- | ----------- |
+| krisiliev.dev          | Vercel (production) | Production  |
+| demo.krisiliev.dev     | Vercel (preview)    | Demo        |
+| api.krisiliev.dev      | AWS ECS Fargate     | Production  |
+| api-demo.krisiliev.dev | AWS ECS Fargate     | Demo        |
 
 ## Client Deployment (Vercel)
 
 ### Initial Setup
 
 1. Install the Vercel CLI:
+
    ```bash
    pnpm add -g vercel
    ```
 
 2. Link the project:
+
    ```bash
    cd client
    vercel link
@@ -53,10 +55,10 @@
 
 ### Environment Variables (Vercel Dashboard)
 
-| Variable              | Production               | Demo                          |
-|-----------------------|--------------------------|-------------------------------|
-| VITE_WS_URL           | wss://api.krisiliev.dev  | wss://api-demo.krisiliev.dev  |
-| VITE_ENVIRONMENT      | production               | demo                          |
+| Variable         | Production              | Demo                         |
+| ---------------- | ----------------------- | ---------------------------- |
+| VITE_WS_URL      | wss://api.krisiliev.dev | wss://api-demo.krisiliev.dev |
+| VITE_ENVIRONMENT | production              | demo                         |
 
 ## Server Deployment (AWS)
 
@@ -99,6 +101,7 @@ docker push <ACCOUNT_ID>.dkr.ecr.eu-central-1.amazonaws.com/portfolio-world-serv
 You can do this via the AWS Console (easier for first time) or with the AWS CLI / Terraform.
 
 Key settings:
+
 - **Launch type**: Fargate
 - **CPU**: 256 (0.25 vCPU) — more than enough
 - **Memory**: 512 MB — the Rust binary uses ~10MB
@@ -125,36 +128,36 @@ Add the CNAME validation record at your domain registrar, then attach the certif
 
 #### 6. Add GitHub Secrets for CI/CD
 
-| Secret                  | Value                                    |
-|-------------------------|------------------------------------------|
-| AWS_ACCESS_KEY_ID       | IAM user access key                      |
-| AWS_SECRET_ACCESS_KEY   | IAM user secret key                      |
-| AWS_REGION              | eu-central-1 (or your preferred region)  |
-| AWS_ECR_REPOSITORY      | portfolio-world-server                   |
-| AWS_ECS_CLUSTER_PROD    | portfolio-world-prod                     |
-| AWS_ECS_SERVICE_PROD    | portfolio-world-server-prod              |
-| AWS_ECS_CLUSTER_DEMO    | portfolio-world-demo                     |
-| AWS_ECS_SERVICE_DEMO    | portfolio-world-server-demo              |
+| Secret                | Value                                   |
+| --------------------- | --------------------------------------- |
+| AWS_ACCESS_KEY_ID     | IAM user access key                     |
+| AWS_SECRET_ACCESS_KEY | IAM user secret key                     |
+| AWS_REGION            | eu-central-1 (or your preferred region) |
+| AWS_ECR_REPOSITORY    | portfolio-world-server                  |
+| AWS_ECS_CLUSTER_PROD  | portfolio-world-prod                    |
+| AWS_ECS_SERVICE_PROD  | portfolio-world-server-prod             |
+| AWS_ECS_CLUSTER_DEMO  | portfolio-world-demo                    |
+| AWS_ECS_SERVICE_DEMO  | portfolio-world-server-demo             |
 
 ### Cost Estimate (AWS)
 
-| Resource              | Monthly Cost   |
-|-----------------------|----------------|
-| Fargate (256 CPU/512 MB, always-on) | ~$9    |
-| ALB                   | ~$16 + data    |
-| ECR storage           | ~$1            |
-| Data transfer          | ~$1-5          |
-| **Total**             | **~$27-31/mo** |
+| Resource                            | Monthly Cost   |
+| ----------------------------------- | -------------- |
+| Fargate (256 CPU/512 MB, always-on) | ~$9            |
+| ALB                                 | ~$16 + data    |
+| ECR storage                         | ~$1            |
+| Data transfer                       | ~$1-5          |
+| **Total**                           | **~$27-31/mo** |
 
 #### Cheaper Alternative: EC2
 
 If you want to minimise cost, skip Fargate + ALB and run on a single EC2 instance:
 
-| Resource              | Monthly Cost   |
-|-----------------------|----------------|
-| t4g.nano (ARM, 2 vCPU, 0.5 GB) | ~$3   |
-| Elastic IP            | Free (if attached) |
-| **Total**             | **~$3/mo**     |
+| Resource                       | Monthly Cost       |
+| ------------------------------ | ------------------ |
+| t4g.nano (ARM, 2 vCPU, 0.5 GB) | ~$3                |
+| Elastic IP                     | Free (if attached) |
+| **Total**                      | **~$3/mo**         |
 
 The trade-off is you manage the instance yourself (updates, restarts, SSL via Let's Encrypt instead of ACM). For a portfolio project, this is perfectly fine and saves ~$25/month.
 

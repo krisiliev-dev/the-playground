@@ -6,25 +6,25 @@ The project uses **glTF 2.0** (`.glb` binary or `.gltf` + separate files). This 
 
 ## Where to Find Models
 
-| Source | Cost | Quality | Notes |
-|---|---|---|---|
-| [Sketchfab](https://sketchfab.com) | Free + Paid | High | Largest library, check license |
-| [Poly Pizza](https://poly.pizza) | Free (CC0) | Medium | Low-poly, great for web perf |
-| [Kenney](https://kenney.nl) | Free (CC0) | Medium | Game-ready, stylised |
-| [ReadyPlayerMe](https://readyplayer.me) | Free | High | For your 3D avatar/likeness |
-| [Mixamo](https://mixamo.com) | Free | High | Animated characters |
-| [Quaternius](https://quaternius.com) | Free (CC0) | Medium | Packs with consistent style |
+| Source                                  | Cost        | Quality | Notes                          |
+| --------------------------------------- | ----------- | ------- | ------------------------------ |
+| [Sketchfab](https://sketchfab.com)      | Free + Paid | High    | Largest library, check license |
+| [Poly Pizza](https://poly.pizza)        | Free (CC0)  | Medium  | Low-poly, great for web perf   |
+| [Kenney](https://kenney.nl)             | Free (CC0)  | Medium  | Game-ready, stylised           |
+| [ReadyPlayerMe](https://readyplayer.me) | Free        | High    | For your 3D avatar/likeness    |
+| [Mixamo](https://mixamo.com)            | Free        | High    | Animated characters            |
+| [Quaternius](https://quaternius.com)    | Free (CC0)  | Medium  | Packs with consistent style    |
 
 ## Performance Budget
 
 To keep the experience smooth across devices:
 
-| Asset | Target | Hard Limit |
-|---|---|---|
-| Single model | < 2 MB | 5 MB |
-| Total scene | < 20 MB | 40 MB |
-| Triangles per model | < 50K | 150K |
-| Textures per model | 1024×1024 | 2048×2048 |
+| Asset               | Target    | Hard Limit |
+| ------------------- | --------- | ---------- |
+| Single model        | < 2 MB    | 5 MB       |
+| Total scene         | < 20 MB   | 40 MB      |
+| Triangles per model | < 50K     | 150K       |
+| Textures per model  | 1024×1024 | 2048×2048  |
 
 ## Optimising Models
 
@@ -59,7 +59,7 @@ gltf-transform optimize input.glb output.glb \
 2. Create a component that loads it:
 
 ```tsx
-import { useGLTF } from '@react-three/drei';
+import { useGLTF } from "@react-three/drei";
 
 interface ModelProps {
   readonly position?: [number, number, number];
@@ -68,7 +68,7 @@ interface ModelProps {
 
 export function MyModel({ position = [0, 0, 0], scale = 1 }: ModelProps) {
   // useGLTF automatically handles loading, caching, and disposal
-  const { scene } = useGLTF('/models/my-model.glb');
+  const { scene } = useGLTF("/models/my-model.glb");
 
   return (
     <primitive
@@ -80,7 +80,7 @@ export function MyModel({ position = [0, 0, 0], scale = 1 }: ModelProps) {
 }
 
 // Preload hint — starts downloading before the component mounts
-useGLTF.preload('/models/my-model.glb');
+useGLTF.preload("/models/my-model.glb");
 ```
 
 3. Add it to the `World` component in the appropriate zone.
@@ -90,9 +90,9 @@ useGLTF.preload('/models/my-model.glb');
 For models that are only visible in specific zones, use React Suspense:
 
 ```tsx
-import { Suspense, lazy } from 'react';
+import { Suspense, lazy } from "react";
 
-const HeavyModel = lazy(() => import('./HeavyModel'));
+const HeavyModel = lazy(() => import("./HeavyModel"));
 
 function PortfolioZone() {
   return (

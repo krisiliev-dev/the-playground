@@ -1,16 +1,18 @@
 /**
- * World — the root 3D scene, stripped back to just the cube.
- * Phase 1: clean environment with grid walls and camera facing a wall.
+ * World — root scene component.
+ * Reads environment config from the Zustand store and renders
+ * the box environment with appropriate lighting.
  */
-
+import { useWorldStore } from '@/store';
 import { BoxEnvironment } from './BoxEnvironment';
-import { WorldLighting } from './WorldLighting';
 
 export function World(): JSX.Element {
-    return (
-        <>
-            <WorldLighting />
-            <BoxEnvironment />
-        </>
-    );
+  const environment = useWorldStore((s) => s.environment);
+
+  return (
+    <>
+      <ambientLight color={environment.ambientColor} intensity={environment.ambientIntensity} />
+      <BoxEnvironment dimensions={environment.dimensions} />
+    </>
+  );
 }

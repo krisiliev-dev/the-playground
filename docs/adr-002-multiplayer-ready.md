@@ -35,6 +35,7 @@ The `useNavigation` hook reads browser events and writes position/rotation to th
 ```
 
 Changes required:
+
 1. Add a `remotePlayers` map to the Zustand store
 2. Add a `useMultiplayerSync` hook that sends local state over WebSocket and writes incoming remote state to the store
 3. Map `remotePlayers` to additional `CursorAvatar` instances in the `World` component

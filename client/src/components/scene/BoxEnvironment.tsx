@@ -1,20 +1,22 @@
 /**
- * BoxEnvironment — the cube world with cyberpunk grid walls.
+ * BoxEnvironment — an inverted cube the user sits inside.
  *
- * Renders as an inverted box (BackSide) using our custom grid shader.
- * The camera is positioned to face one wall directly.
+ * Uses THREE.BackSide so the faces render inward, creating a room.
+ * The GridMaterial applies a cyberpunk wireframe shader to the walls.
  */
-
+import { BackSide } from 'three';
+import type { Vector3Tuple } from 'three';
 import { GridMaterial } from './GridMaterial';
 
-/** The cube dimensions: width, height, depth */
-export const CUBE_SIZE: [number, number, number] = [20, 20, 20];
+interface BoxEnvironmentProps {
+  dimensions: Vector3Tuple;
+}
 
-export function BoxEnvironment(): JSX.Element {
-    return (
-        <mesh>
-            <boxGeometry args={CUBE_SIZE} />
-            <GridMaterial />
-        </mesh>
-    );
+export function BoxEnvironment({ dimensions }: BoxEnvironmentProps): JSX.Element {
+  return (
+    <mesh>
+      <boxGeometry args={dimensions} />
+      <GridMaterial side={BackSide} />
+    </mesh>
+  );
 }
