@@ -1,6 +1,7 @@
 import { Suspense, lazy } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { World } from '@/components/scene';
+import { CursorText } from '@/components/overlay';
 
 const AdminPanel = lazy(() =>
   import('@/components/admin/AdminPanel').then((m) => ({ default: m.AdminPanel })),
@@ -34,6 +35,7 @@ export function App(): JSX.Element {
           <World />
         </Suspense>
       </Canvas>
+      <CursorText />
     </div>
   );
 }
