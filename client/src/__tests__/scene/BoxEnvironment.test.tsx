@@ -3,9 +3,19 @@ import { render } from '@testing-library/react';
 import { BoxEnvironment } from '@/components/scene/BoxEnvironment';
 import type { Vector3Tuple } from 'three';
 
+// Mock R3F hooks — they require a Canvas context we don't have in jsdom.
+vi.mock('@react-three/fiber', () => ({
+  useFrame: vi.fn(),
+  useThree: () => ({
+    pointer: { x: 0, y: 0 },
+    camera: { position: { x: 0, y: 0, z: 0 } },
+  }),
+}));
+
 // Mock GridMaterial so we test BoxEnvironment in isolation.
 vi.mock('@/components/scene/GridMaterial', () => ({
   GridMaterial: () => <div data-testid="grid-material" />,
+  GRID_MATERIAL_CONSTANTS: { GRID_SPACING: 2, GRAB_RADIUS: 10 },
 }));
 
 const TEST_DIMS: Vector3Tuple = [80, 80, 80];
@@ -18,7 +28,6 @@ describe('BoxEnvironment', () => {
 
   it('renders a mesh element', () => {
     const { container } = render(<BoxEnvironment dimensions={TEST_DIMS} />);
-    // R3F lowercased elements render as unknown HTML in jsdom
     const mesh = container.querySelector('mesh');
     expect(mesh).toBeTruthy();
   });
