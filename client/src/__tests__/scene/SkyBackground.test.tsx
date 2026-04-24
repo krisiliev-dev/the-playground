@@ -2,22 +2,18 @@ import { describe, it, expect, vi } from 'vitest';
 import { render } from '@testing-library/react';
 import type { Vector3Tuple } from 'three';
 
-// Mock hls.js — we don't want real network requests in tests.
-vi.mock('hls.js', () => {
-  const MockHls = vi.fn().mockImplementation(() => ({
-    loadSource: vi.fn(),
-    attachMedia: vi.fn(),
-    on: vi.fn(),
-    destroy: vi.fn(),
-  }));
-  (MockHls as any).isSupported = () => true;
-  (MockHls as any).Events = { MANIFEST_PARSED: 'hlsManifestParsed' };
-  return { default: MockHls };
-});
-
-// Mock useFrame — it only works inside a real R3F Canvas.
-vi.mock('@react-three/fiber', () => ({
-  useFrame: vi.fn(),
+// SkyBackground calls the video API on mount. Return a ready video.
+vi.mock('@/api/videos', () => ({
+  listReadyVideos: vi.fn().mockResolvedValue([
+    {
+      id: 'test-id',
+      youtube_url: 'https://example.com/x',
+      name: 'test',
+      status: { state: 'ready', url: '/videos/test.mp4' },
+      created_at: '',
+      updated_at: '',
+    },
+  ]),
 }));
 
 import { SkyBackground } from '@/components/scene/SkyBackground';
@@ -25,17 +21,16 @@ import { SkyBackground } from '@/components/scene/SkyBackground';
 const TEST_DIMS: Vector3Tuple = [80, 80, 80];
 
 describe('SkyBackground', () => {
-  it('should render a sphere geometry inside a mesh', () => {
+  it('renders without crashing', () => {
     const { container } = render(<SkyBackground dimensions={TEST_DIMS} />);
-    const mesh = container.querySelector('mesh');
-    expect(mesh).toBeTruthy();
-    const sphere = container.querySelector('sphereGeometry');
-    expect(sphere).toBeTruthy();
+    expect(container).toBeTruthy();
   });
 
-  it('should render a meshBasicMaterial', () => {
+  it('returns null before the video texture is ready', () => {
+    // The real video element needs to fire loadeddata to produce a texture.
+    // In jsdom that never fires, so the component should sit in the null
+    // state and not throw.
     const { container } = render(<SkyBackground dimensions={TEST_DIMS} />);
-    const material = container.querySelector('meshBasicMaterial');
-    expect(material).toBeTruthy();
+    expect(container.querySelector('mesh')).toBeNull();
   });
 });

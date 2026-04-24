@@ -16,6 +16,11 @@ vi.mock('@/components/scene/SkyBackground', () => ({
   ),
 }));
 
+// OrbitControls from drei uses R3F hooks under the hood — stub it out.
+vi.mock('@react-three/drei', () => ({
+  OrbitControls: () => null,
+}));
+
 describe('World', () => {
   it('renders without crashing', () => {
     const { container } = render(<World />);

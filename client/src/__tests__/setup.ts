@@ -3,6 +3,14 @@
  * Configures DOM matchers and mocks browser APIs not available in jsdom.
  */
 import '@testing-library/jest-dom';
+import { cleanup } from '@testing-library/react';
+import { afterEach } from 'vitest';
+
+// Unmount React trees between tests so subsequent `render()` calls don't
+// see lingering DOM from the previous test.
+afterEach(() => {
+  cleanup();
+});
 
 /**
  * Mock WebGL context since jsdom doesn't support it.
