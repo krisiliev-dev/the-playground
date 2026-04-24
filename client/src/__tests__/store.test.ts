@@ -13,14 +13,20 @@ describe('useWorldStore', () => {
   // Reset the store to its initial state before each test.
   // Zustand stores are singletons, so we need to manually reset.
   beforeEach(() => {
-    const { setPlayerPosition, setPlayerRotation, setActiveZone, setReady } =
-      useWorldStore.getState();
+    const {
+      setPlayerPosition,
+      setPlayerRotation,
+      setActiveZone,
+      setReady,
+      setCursorAvatarActive,
+    } = useWorldStore.getState();
 
     // Reset to defaults
     setPlayerPosition([0, 0, 5]);
     setPlayerRotation([0, 0, 0]);
     setActiveZone(null);
     setReady(false);
+    setCursorAvatarActive(false);
   });
 
   // ── Player state ─────────────────────────────────────────────
@@ -121,6 +127,30 @@ describe('useWorldStore', () => {
     it('should mark as ready', () => {
       useWorldStore.getState().setReady(true);
       expect(useWorldStore.getState().isReady).toBe(true);
+    });
+  });
+
+  // ── Cursor avatar (Phase 5) ──────────────────────────────────
+
+  describe('cursorAvatar', () => {
+    it('should default to inactive', () => {
+      expect(useWorldStore.getState().cursorAvatarActive).toBe(false);
+    });
+
+    it('toggleCursorAvatar should flip the flag on each call', () => {
+      const { toggleCursorAvatar } = useWorldStore.getState();
+      toggleCursorAvatar();
+      expect(useWorldStore.getState().cursorAvatarActive).toBe(true);
+      toggleCursorAvatar();
+      expect(useWorldStore.getState().cursorAvatarActive).toBe(false);
+    });
+
+    it('setCursorAvatarActive should set the flag directly', () => {
+      const { setCursorAvatarActive } = useWorldStore.getState();
+      setCursorAvatarActive(true);
+      expect(useWorldStore.getState().cursorAvatarActive).toBe(true);
+      setCursorAvatarActive(false);
+      expect(useWorldStore.getState().cursorAvatarActive).toBe(false);
     });
   });
 });

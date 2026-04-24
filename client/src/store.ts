@@ -27,6 +27,10 @@ interface AppActions {
   updateEnvironment: (config: EnvironmentConfig) => void;
   /** Mark the experience as ready after loading completes. */
   setReady: (ready: boolean) => void;
+  /** Toggle the 3D cursor avatar on/off. */
+  toggleCursorAvatar: () => void;
+  /** Set the 3D cursor avatar active state directly. */
+  setCursorAvatarActive: (active: boolean) => void;
 }
 
 // ─── Initial State ───────────────────────────────────────────────────
@@ -57,6 +61,7 @@ export const useWorldStore = create<AppState & AppActions>((set) => ({
   environment: DEFAULT_ENVIRONMENT,
   activeZoneId: null,
   isReady: false,
+  cursorAvatarActive: false,
 
   // Actions
   setPlayerPosition: (position) =>
@@ -74,4 +79,9 @@ export const useWorldStore = create<AppState & AppActions>((set) => ({
   updateEnvironment: (config) => set({ environment: config }),
 
   setReady: (ready) => set({ isReady: ready }),
+
+  toggleCursorAvatar: () =>
+    set((state) => ({ cursorAvatarActive: !state.cursorAvatarActive })),
+
+  setCursorAvatarActive: (active) => set({ cursorAvatarActive: active }),
 }));

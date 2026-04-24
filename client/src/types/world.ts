@@ -104,4 +104,12 @@ export interface AppState {
   activeZoneId: string | null;
   /** Whether the experience has finished loading. */
   isReady: boolean;
+  /**
+   * Whether the 3D cursor avatar is active.
+   *
+   * False by default. Becomes true once the user has reached the "revealed"
+   * state of the experience — currently a temporary `C` keyboard toggle in
+   * `App.tsx` until the sword-reveal sequence (Phase 4) lands on develop.
+   */
+  cursorAvatarActive: boolean;
 }

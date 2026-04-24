@@ -16,6 +16,10 @@ vi.mock('@/components/scene/SkyBackground', () => ({
   ),
 }));
 
+vi.mock('@/components/scene/CursorAvatar', () => ({
+  CursorAvatar: () => <div data-testid="cursor-avatar" />,
+}));
+
 // OrbitControls from drei uses R3F hooks under the hood — stub it out.
 vi.mock('@react-three/drei', () => ({
   OrbitControls: () => null,
