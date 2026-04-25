@@ -21,6 +21,11 @@ vi.mock('@/components/scene/reveal', () => ({
   RevealOrchestrator: () => <div data-testid="reveal-orchestrator" />,
 }));
 
+// Phase 5 cursor avatar.
+vi.mock('@/components/scene/CursorAvatar', () => ({
+  CursorAvatar: () => <div data-testid="cursor-avatar" />,
+}));
+
 // OrbitControls from drei uses R3F hooks under the hood — stub it out.
 vi.mock('@react-three/drei', () => ({
   OrbitControls: () => null,

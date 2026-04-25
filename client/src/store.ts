@@ -54,6 +54,10 @@ interface AppActions {
    * dev-only "replay" affordance.
    */
   resetReveal: () => void;
+  /** Toggle the Phase 5 cursor-avatar on/off. */
+  toggleCursorAvatar: () => void;
+  /** Set the Phase 5 cursor-avatar state directly. */
+  setCursorAvatarActive: (active: boolean) => void;
 }
 
 // ─── Initial State ───────────────────────────────────────────────────
@@ -65,6 +69,11 @@ const createInitialPlayer = (): Player => ({
   name: 'Guest',
   cursorColor: '#00ff88',
 });
+
+interface RevealSlice {
+  /** Current step of the Phase 4 reveal beat. */
+  revealState: RevealState;
+}
 
 // ─── Store ───────────────────────────────────────────────────────────
 
@@ -78,11 +87,6 @@ const createInitialPlayer = (): Player => ({
  * const position = useWorldStore((s) => s.player.position);
  * ```
  */
-interface RevealSlice {
-  /** Current step of the Phase 4 reveal beat. */
-  revealState: RevealState;
-}
-
 export const useWorldStore = create<AppState & AppActions & RevealSlice>((set) => ({
   // State
   player: createInitialPlayer(),
@@ -90,6 +94,7 @@ export const useWorldStore = create<AppState & AppActions & RevealSlice>((set) =
   activeZoneId: null,
   isReady: false,
   revealState: 'idle',
+  cursorAvatarActive: false,
 
   // Actions
   setPlayerPosition: (position) =>
@@ -111,14 +116,16 @@ export const useWorldStore = create<AppState & AppActions & RevealSlice>((set) =
   advanceReveal: () =>
     set((state) => {
       const idx = REVEAL_ORDER.indexOf(state.revealState);
-      // Already terminal, or somehow off-list — bail without mutating.
-      if (idx < 0 || idx >= REVEAL_ORDER.length - 1) {return state;}
+      if (idx < 0 || idx >= REVEAL_ORDER.length - 1) return state;
       const next = REVEAL_ORDER[idx + 1];
-      // noUncheckedIndexedAccess: tsc can't prove `next` is defined from
-      // the bounds check above, so guard explicitly.
-      if (!next) {return state;}
+      if (!next) return state;
       return { revealState: next };
     }),
 
   resetReveal: () => set({ revealState: 'idle' }),
+
+  toggleCursorAvatar: () =>
+    set((state) => ({ cursorAvatarActive: !state.cursorAvatarActive })),
+
+  setCursorAvatarActive: (active) => set({ cursorAvatarActive: active }),
 }));

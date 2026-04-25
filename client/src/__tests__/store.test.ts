@@ -13,14 +13,22 @@ describe('useWorldStore', () => {
   // Reset the store to its initial state before each test.
   // Zustand stores are singletons, so we need to manually reset.
   beforeEach(() => {
-    const { setPlayerPosition, setPlayerRotation, setActiveZone, setReady } =
-      useWorldStore.getState();
+    const {
+      setPlayerPosition,
+      setPlayerRotation,
+      setActiveZone,
+      setReady,
+      setCursorAvatarActive,
+      resetReveal,
+    } = useWorldStore.getState();
 
     // Reset to defaults
     setPlayerPosition([0, 0, 5]);
     setPlayerRotation([0, 0, 0]);
     setActiveZone(null);
     setReady(false);
+    setCursorAvatarActive(false);
+    resetReveal();
   });
 
   // ── Player state ─────────────────────────────────────────────
@@ -127,10 +135,6 @@ describe('useWorldStore', () => {
   // ── Phase 4 reveal slice ─────────────────────────────────────
 
   describe('reveal', () => {
-    beforeEach(() => {
-      useWorldStore.getState().resetReveal();
-    });
-
     it('should start in idle', () => {
       expect(useWorldStore.getState().revealState).toBe('idle');
     });
@@ -146,8 +150,6 @@ describe('useWorldStore', () => {
         useWorldStore.getState().advanceReveal();
         order.push(useWorldStore.getState().revealState);
       }
-      // 4 advances move idle → armed → swinging → impact → revealed,
-      // then any further calls clamp at 'revealed'.
       expect(order).toEqual([
         'idle',
         'armed',
@@ -161,7 +163,7 @@ describe('useWorldStore', () => {
 
     it('should not advance past revealed', () => {
       const { advanceReveal } = useWorldStore.getState();
-      for (let i = 0; i < 10; i++) {advanceReveal();}
+      for (let i = 0; i < 10; i++) advanceReveal();
       expect(useWorldStore.getState().revealState).toBe('revealed');
     });
 
@@ -173,6 +175,30 @@ describe('useWorldStore', () => {
       expect(useWorldStore.getState().revealState).toBe('impact');
       resetReveal();
       expect(useWorldStore.getState().revealState).toBe('idle');
+    });
+  });
+
+  // ── Cursor avatar (Phase 5) ──────────────────────────────────
+
+  describe('cursorAvatar', () => {
+    it('should default to inactive', () => {
+      expect(useWorldStore.getState().cursorAvatarActive).toBe(false);
+    });
+
+    it('toggleCursorAvatar should flip the flag on each call', () => {
+      const { toggleCursorAvatar } = useWorldStore.getState();
+      toggleCursorAvatar();
+      expect(useWorldStore.getState().cursorAvatarActive).toBe(true);
+      toggleCursorAvatar();
+      expect(useWorldStore.getState().cursorAvatarActive).toBe(false);
+    });
+
+    it('setCursorAvatarActive should set the flag directly', () => {
+      const { setCursorAvatarActive } = useWorldStore.getState();
+      setCursorAvatarActive(true);
+      expect(useWorldStore.getState().cursorAvatarActive).toBe(true);
+      setCursorAvatarActive(false);
+      expect(useWorldStore.getState().cursorAvatarActive).toBe(false);
     });
   });
 });
