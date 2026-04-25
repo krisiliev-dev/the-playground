@@ -16,6 +16,11 @@ vi.mock('@/components/scene/SkyBackground', () => ({
   ),
 }));
 
+// Phase 4 reveal pieces — stub them out so World renders in isolation.
+vi.mock('@/components/scene/reveal', () => ({
+  RevealOrchestrator: () => <div data-testid="reveal-orchestrator" />,
+}));
+
 // OrbitControls from drei uses R3F hooks under the hood — stub it out.
 vi.mock('@react-three/drei', () => ({
   OrbitControls: () => null,

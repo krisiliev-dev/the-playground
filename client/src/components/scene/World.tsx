@@ -6,6 +6,7 @@
 import { useWorldStore } from '@/store';
 import { BoxEnvironment } from './BoxEnvironment';
 import { SkyBackground } from './SkyBackground';
+import { RevealOrchestrator } from './reveal';
 import { OrbitControls } from '@react-three/drei';
 
 export function World(): JSX.Element {
@@ -16,7 +17,8 @@ export function World(): JSX.Element {
       <ambientLight color={environment.ambientColor} intensity={environment.ambientIntensity} />
       <SkyBackground dimensions={environment.dimensions} />
       <BoxEnvironment dimensions={environment.dimensions} />
-      <OrbitControls enableZoom={false} enablePan={false} target={[0,0,-0.01]} />
+      <RevealOrchestrator />
+      <OrbitControls enableZoom={false} enablePan={false} target={[0, 0, -0.01]} />
     </>
   );
 }

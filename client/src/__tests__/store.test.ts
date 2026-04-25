@@ -123,4 +123,56 @@ describe('useWorldStore', () => {
       expect(useWorldStore.getState().isReady).toBe(true);
     });
   });
+
+  // ── Phase 4 reveal slice ─────────────────────────────────────
+
+  describe('reveal', () => {
+    beforeEach(() => {
+      useWorldStore.getState().resetReveal();
+    });
+
+    it('should start in idle', () => {
+      expect(useWorldStore.getState().revealState).toBe('idle');
+    });
+
+    it('should advance idle → armed', () => {
+      useWorldStore.getState().advanceReveal();
+      expect(useWorldStore.getState().revealState).toBe('armed');
+    });
+
+    it('should advance through every step in order', () => {
+      const order: string[] = [useWorldStore.getState().revealState];
+      for (let i = 0; i < 6; i++) {
+        useWorldStore.getState().advanceReveal();
+        order.push(useWorldStore.getState().revealState);
+      }
+      // 4 advances move idle → armed → swinging → impact → revealed,
+      // then any further calls clamp at 'revealed'.
+      expect(order).toEqual([
+        'idle',
+        'armed',
+        'swinging',
+        'impact',
+        'revealed',
+        'revealed',
+        'revealed',
+      ]);
+    });
+
+    it('should not advance past revealed', () => {
+      const { advanceReveal } = useWorldStore.getState();
+      for (let i = 0; i < 10; i++) {advanceReveal();}
+      expect(useWorldStore.getState().revealState).toBe('revealed');
+    });
+
+    it('should reset to idle from any state', () => {
+      const { advanceReveal, resetReveal } = useWorldStore.getState();
+      advanceReveal();
+      advanceReveal();
+      advanceReveal();
+      expect(useWorldStore.getState().revealState).toBe('impact');
+      resetReveal();
+      expect(useWorldStore.getState().revealState).toBe('idle');
+    });
+  });
 });
