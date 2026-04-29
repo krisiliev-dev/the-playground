@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { BackSide, DataTexture, Raycaster, Vector3 } from 'three';
 import type { IUniform, Mesh, ShaderMaterial, Vector3Tuple } from 'three';
@@ -92,9 +92,6 @@ export function BoxEnvironment({ dimensions }: BoxEnvironmentProps): JSX.Element
     }
     prevReveal.current = revealState;
   }, [revealState]);
-
-  // We mutate the texture buffer directly each frame. Wrap once for type help.
-  const tmpVec = useMemo(() => new Vector3(), []);
 
   useFrame((state) => {
     if (!matRef.current || !meshRef.current) return;
@@ -244,7 +241,6 @@ export function BoxEnvironment({ dimensions }: BoxEnvironmentProps): JSX.Element
     // u_mouse must be in BOX-LOCAL space because the shader's grid math
     // is in box-local. The wall mesh's worldToLocal does that conversion.
     uniforms.u_mouse.value.copy(localHit);
-    void tmpVec;
   });
 
   return (

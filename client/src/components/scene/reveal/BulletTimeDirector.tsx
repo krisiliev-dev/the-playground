@@ -1,21 +1,23 @@
 /**
  * BulletTimeDirector — cinematic camera choreography during the reveal.
  *
- * Four phases, all driven from a single useFrame at priority 1 so the
- * director's writes happen *after* the default-priority useFrames
- * (CursorAvatar). Outside the reveal sequence the director early-returns
- * and CursorAvatar's writes stand.
+ * Runs at useFrame priority 1, ordered between default-priority frames (0)
+ * and CursorAvatar (2). The director writes camera.position +
+ * camera.quaternion each frame; CursorAvatar (priority 2) reads them right
+ * after to keep the cursor projected through the up-to-date camera pose.
+ * Outside the reveal sequence the director early-returns and lets
+ * CursorAvatar / OrbitControls own the camera.
  *
  *   Armed (800ms) — camera holds position, lookAt lerps from formation
  *                   centre to the spawn point. Pan toward where the
  *                   swords are about to come from.
- *   Pre  (2.0s)   — camera lerps from initial position to "side A"
- *                   profile (90° around formation centre); lookAt
- *                   tracks the swords as they fly from spawn to mid.
- *   Mid  (1.2s)   — 180° orbit around formation centre. Camera goes
- *                   side A → through front → side B.
+ *   Pre  (3.5s)   — camera ramps to a chase point ahead of the herd,
+ *                   then directly tracks the herd's flight; late-pre
+ *                   blends toward sideA so mid starts cleanly.
+ *   Mid  (1.2s)   — subtle right-to-left lateral drift through sideA →
+ *                   sideB, lookAt held on the word centre.
  *   Post (0.8s)   — camera lerps from side B back to initial pose;
- *                   lookAt stays on formation centre.
+ *                   lookAt eases from word centre to formation centre.
  */
 import { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
@@ -115,9 +117,6 @@ export function BulletTimeDirector(): null {
    *  flight direction) + slightly UP, so the camera sees the swords in
    *  profile flying past. */
   const chasePoint = useRef(new Vector3());
-  /** Camera's per-frame intermediate target — blends chasePoint (early
-   *  pre, side-view chase) with sideA (late pre, orbit start). */
-  const intermediateTarget = useRef(new Vector3());
   /** Captured at click time: unit vector perpendicular to the swords'
    *  flight direction (= cross(motionDir, camUp)). The chase offset
    *  uses this so the camera always offsets perpendicular to motion. */
@@ -316,10 +315,6 @@ export function BulletTimeDirector(): null {
           // cleanly from sideA without a snap.
           const sideABlend = Math.pow(phaseT, 8);
           targetPos.current.lerp(sideA.current, sideABlend);
-
-          // intermediateTarget is no longer used in this path but kept
-          // assigned to satisfy the buffer reuse pattern.
-          intermediateTarget.current.copy(chasePoint.current);
 
           // LookAt always at the herd — camera anchors visually on the
           // swords as it chases them.

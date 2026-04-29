@@ -89,9 +89,8 @@ function ActiveCursor(): JSX.Element {
   /** Visual avatar mode — cursor enlarges, camera transitions to 3rd
    *  person. Deferred until the user dismisses the controls hint. */
   const isAvatar = controlsDismissed;
-  /** Pointer lock requested at click so we still have a valid user-gesture
-   *  window. Mouselook accumulates yaw/pitch immediately, but the avatar-
-   *  anchor effect resets these when isAvatar kicks in. */
+  /** True from the first reveal click onward. Gates the mouselook listener
+   *  so it's only mounted while a reveal sequence is in progress. */
   const isPostClick = revealState !== 'idle';
   const dimensions = useWorldStore((s) => s.environment.dimensions);
 
@@ -226,9 +225,10 @@ function ActiveCursor(): JSX.Element {
     };
   }, [isPostClick, gl.domElement, camera]);
 
-  // Anchor avatar position + reset yaw/pitch the moment isAvatar flips on
-  // (state → 'impact'). Discards any mouse delta accumulated during the
-  // pre-impact reveal so the avatar doesn't snap to a weird angle.
+  // Anchor avatar position + reset yaw/pitch the moment the user dismisses
+  // ControlsHint (controlsDismissed → isAvatar). Discards any mouse delta
+  // accumulated during impact/revealed so the avatar starts looking
+  // straight ahead instead of at a weird drifted angle.
   useEffect(() => {
     if (!isAvatar) return;
     avatarPos.current.set(
@@ -283,36 +283,6 @@ function ActiveCursor(): JSX.Element {
       // scale, it reads as "the cursor got in the way for a beat".
       groupRef.current.visible = !inWorldFrozen;
 
-      // Project an NDC pointer to a world-space cursor pose using the
-      // camera's basis vectors (no matrix inversion → no per-frame
-      // floating-point drift). Cursor sits POINTER_DEPTH in front of the
-      // camera, with NDC offsets along the screen-plane right/up axes.
-      const cam = camera as PerspectiveCamera;
-      const fovY = (cam.fov * Math.PI) / 180;
-      const halfH = POINTER_DEPTH * Math.tan(fovY / 2);
-      const halfW = halfH * cam.aspect;
-      tmpCamFwd.current
-        .set(0, 0, -1)
-        .applyQuaternion(camera.quaternion)
-        .normalize();
-      tmpCamRight.current
-        .set(1, 0, 0)
-        .applyQuaternion(camera.quaternion)
-        .normalize();
-      tmpCamUp.current
-        .set(0, 1, 0)
-        .applyQuaternion(camera.quaternion)
-        .normalize();
-      const placeCursor = (px: number, py: number): void => {
-        if (!groupRef.current) return;
-        groupRef.current.position
-          .copy(camera.position)
-          .addScaledVector(tmpCamFwd.current, POINTER_DEPTH)
-          .addScaledVector(tmpCamRight.current, px * halfW)
-          .addScaledVector(tmpCamUp.current, py * halfH);
-        groupRef.current.quaternion.copy(camera.quaternion);
-      };
-
       if (inWorldFrozen) {
         // Capture world pose AND pointer NDC on entry. Capturing the NDC
         // here (rather than waiting for camera-anchored to start) is what
@@ -330,21 +300,56 @@ function ActiveCursor(): JSX.Element {
         }
         groupRef.current.position.copy(frozenCursorPos.current);
         groupRef.current.quaternion.copy(frozenCursorQuat.current);
-      } else if (inCameraAnchored) {
-        // NDC was captured on entry to world-frozen above. If we somehow
-        // skipped that phase (e.g. entered swinging without armed), grab
-        // it now as a fallback.
-        if (!pointerCaptured.current) {
-          capturedPointer.current.x = pointer.x;
-          capturedPointer.current.y = pointer.y;
-          pointerCaptured.current = true;
-        }
-        placeCursor(capturedPointer.current.x, capturedPointer.current.y);
       } else {
-        // Idle / Revealed — regular live-pointer mode.
-        cursorFrozen.current = false;
-        pointerCaptured.current = false;
-        placeCursor(pointer.x, pointer.y);
+        // Camera-anchored OR live-pointer mode: project an NDC pointer to
+        // a world-space cursor pose using the camera's basis vectors (no
+        // matrix inversion → no per-frame floating-point drift). Cursor
+        // sits POINTER_DEPTH in front of the camera, with NDC offsets
+        // along the screen-plane right/up axes.
+        const cam = camera as PerspectiveCamera;
+        const fovY = (cam.fov * Math.PI) / 180;
+        const halfH = POINTER_DEPTH * Math.tan(fovY / 2);
+        const halfW = halfH * cam.aspect;
+        tmpCamFwd.current
+          .set(0, 0, -1)
+          .applyQuaternion(camera.quaternion)
+          .normalize();
+        tmpCamRight.current
+          .set(1, 0, 0)
+          .applyQuaternion(camera.quaternion)
+          .normalize();
+        tmpCamUp.current
+          .set(0, 1, 0)
+          .applyQuaternion(camera.quaternion)
+          .normalize();
+
+        let px: number;
+        let py: number;
+        if (inCameraAnchored) {
+          // NDC was captured on entry to world-frozen above. If we somehow
+          // skipped that phase (e.g. entered swinging without armed), grab
+          // it now as a fallback.
+          if (!pointerCaptured.current) {
+            capturedPointer.current.x = pointer.x;
+            capturedPointer.current.y = pointer.y;
+            pointerCaptured.current = true;
+          }
+          px = capturedPointer.current.x;
+          py = capturedPointer.current.y;
+        } else {
+          // Idle / impact / revealed — live-pointer mode.
+          cursorFrozen.current = false;
+          pointerCaptured.current = false;
+          px = pointer.x;
+          py = pointer.y;
+        }
+
+        groupRef.current.position
+          .copy(camera.position)
+          .addScaledVector(tmpCamFwd.current, POINTER_DEPTH)
+          .addScaledVector(tmpCamRight.current, px * halfW)
+          .addScaledVector(tmpCamUp.current, py * halfH);
+        groupRef.current.quaternion.copy(camera.quaternion);
       }
 
       renderedScale.current += (POINTER_SCALE - renderedScale.current) * k;
