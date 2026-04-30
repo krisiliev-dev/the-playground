@@ -29,6 +29,10 @@ jobs:
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           envs: ADMIN_TOKEN,VIDEOS_PUBLIC_PREFIX
+          # Cold Rust compile on the EC2 box exceeds the default 10m
+          # window; warm subsequent builds finish in seconds because the
+          # Dockerfile pre-fetches deps via a stub main.rs.
+          command_timeout: 30m
           script: |
             cd ~/the-playground
             git pull origin main
