@@ -44,12 +44,33 @@ const mockWebGLContext = {
   deleteShader: () => undefined,
 };
 
-// Override getContext to return our mock for WebGL requests
-const originalGetContext = HTMLCanvasElement.prototype.getContext.bind(HTMLCanvasElement.prototype);
-// @ts-expect-error — intentionally overriding with a simplified mock
+/**
+ * Mock 2D canvas context. jsdom doesn't ship one without the optional
+ * `canvas` npm package; Sword.tsx generates a star texture via
+ * `canvas.getContext('2d')` + `createImageData` / `putImageData`, so we
+ * stub just enough of the API for that path.
+ */
+const mock2DContext = {
+  createImageData: (w: number, h: number) => ({
+    data: new Uint8ClampedArray(w * h * 4),
+    width: w,
+    height: h,
+  }),
+  putImageData: () => undefined,
+  fillRect: () => undefined,
+  clearRect: () => undefined,
+  drawImage: () => undefined,
+};
+
+// Override getContext to return our WebGL or 2D mocks. Avoid binding the
+// original to the prototype — that captures `this` permanently and breaks
+// any later real-canvas calls.
 HTMLCanvasElement.prototype.getContext = function (contextId: string) {
   if (contextId === 'webgl' || contextId === 'webgl2') {
     return mockWebGLContext;
   }
-  return originalGetContext.call(this, contextId);
-};
+  if (contextId === '2d') {
+    return mock2DContext;
+  }
+  return null;
+} as typeof HTMLCanvasElement.prototype.getContext;

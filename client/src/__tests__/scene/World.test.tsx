@@ -35,6 +35,17 @@ vi.mock('@react-three/drei', () => ({
   OrbitControls: () => null,
 }));
 
+// World itself uses useFrame for the float bob — mock fiber so the hook
+// exists without a real Canvas context.
+vi.mock('@react-three/fiber', () => ({
+  useFrame: vi.fn(),
+}));
+
+// Haze3D uses useFrame too (camera-following billboard); stub it out.
+vi.mock('@/components/scene/Haze3D', () => ({
+  Haze3D: () => null,
+}));
+
 describe('World', () => {
   it('renders without crashing', () => {
     const { container } = render(<World />);

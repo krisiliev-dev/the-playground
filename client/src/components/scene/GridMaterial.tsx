@@ -318,6 +318,10 @@ export const GridMaterial = forwardRef<ShaderMaterial, GridMaterialProps>(functi
               caughtTexture?: DataTexture;
             };
           };
+          // Three.js gives every Object3D/Material a userData object by
+          // default; in jsdom test mocks the ref can be a bare element so
+          // we initialise defensively.
+          m.userData = m.userData ?? {};
           m.userData.caughtData = data;
           m.userData.caughtTexture = texture;
         }

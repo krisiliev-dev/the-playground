@@ -19,15 +19,24 @@ vi.mock('@react-three/fiber', () => ({
   ),
 }));
 
-// Mock the World component so we can test App in isolation.
+// Mock the World component (plus ShakeGroup + CursorAvatar) so we can
+// test App in isolation. ShakeGroup must be a passthrough wrapper because
+// App.tsx wraps World in it.
 vi.mock('@/components/scene', () => ({
   World: () => <div data-testid="world" />,
+  ShakeGroup: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
+  CursorAvatar: () => <div data-testid="cursor-avatar" />,
+  PostFx: () => null,
+  DevTools: () => null,
 }));
 
-// CursorText reads window APIs on mount; stub it so the App test stays
-// focused on the keyboard listener wiring.
+// CursorText/Crosshair/ControlsHint read window APIs on mount; stub them
+// so the App test stays focused on the keyboard listener wiring.
 vi.mock('@/components/overlay', () => ({
   CursorText: () => <div data-testid="cursor-text" />,
+  Crosshair: () => <div data-testid="crosshair" />,
+  ControlsHint: () => <div data-testid="controls-hint" />,
+  HazeOverlay: () => null,
 }));
 
 describe('App', () => {

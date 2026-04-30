@@ -2,15 +2,21 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render } from '@testing-library/react';
 
 // Mock R3F hooks — they require a Canvas context that jsdom can't provide.
+// gl.domElement appears in CursorAvatar's mouselook useEffect dep array, so
+// it must be defined even when the effect early-returns.
 vi.mock('@react-three/fiber', () => ({
   useFrame: vi.fn(),
   useThree: () => ({
     pointer: { x: 0, y: 0 },
     camera: {
       position: { x: 0, y: 0, z: 0 },
+      quaternion: { x: 0, y: 0, z: 0, w: 1 },
       matrixWorld: { elements: [] },
       projectionMatrixInverse: { elements: [] },
+      fov: 60,
+      aspect: 1,
     },
+    gl: { domElement: document.createElement('canvas') },
   }),
 }));
 

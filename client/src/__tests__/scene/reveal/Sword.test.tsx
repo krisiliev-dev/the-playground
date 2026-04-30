@@ -10,12 +10,14 @@ vi.mock('@react-three/fiber', () => {
   };
 });
 
-// Stub useGLTF — return an empty group so traversal doesn't blow up.
+// Stub useGLTF + Trail — Sword imports both; jsdom can't render Trail's
+// internal geometry so we render a passthrough.
 vi.mock('@react-three/drei', () => {
   const fakeScene = new Group();
   const useGLTF = vi.fn(() => ({ scene: fakeScene }));
   (useGLTF as unknown as { preload: () => void }).preload = vi.fn();
-  return { useGLTF };
+  const Trail = ({ children }: { children?: React.ReactNode }): React.ReactNode => <>{children}</>;
+  return { useGLTF, Trail };
 });
 
 import { Sword } from '@/components/scene/reveal/Sword';
