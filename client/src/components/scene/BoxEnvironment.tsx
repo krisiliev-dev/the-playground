@@ -53,8 +53,12 @@ interface CaughtSegment {
  * ~1 visible oscillation per release window.
  */
 function easeOutSpring(t: number): number {
-  if (t <= 0) return 0;
-  if (t >= 1) return 1;
+  if (t <= 0) {
+    return 0;
+  }
+  if (t >= 1) {
+    return 1;
+  }
   return 1 - Math.exp(-2 * t) * Math.cos(t * 8);
 }
 
@@ -62,8 +66,12 @@ function inPlaneAxes(normal: Vector3): { u: Vector3; v: Vector3 } {
   const ax = Math.abs(normal.x);
   const ay = Math.abs(normal.y);
   const az = Math.abs(normal.z);
-  if (ax > ay && ax > az) return { u: new Vector3(0, 1, 0), v: new Vector3(0, 0, 1) };
-  if (ay > ax && ay > az) return { u: new Vector3(1, 0, 0), v: new Vector3(0, 0, 1) };
+  if (ax > ay && ax > az) {
+    return { u: new Vector3(0, 1, 0), v: new Vector3(0, 0, 1) };
+  }
+  if (ay > ax && ay > az) {
+    return { u: new Vector3(1, 0, 0), v: new Vector3(0, 0, 1) };
+  }
   return { u: new Vector3(1, 0, 0), v: new Vector3(0, 1, 0) };
 }
 
@@ -94,7 +102,9 @@ export function BoxEnvironment({ dimensions }: BoxEnvironmentProps): JSX.Element
   }, [revealState]);
 
   useFrame((state) => {
-    if (!matRef.current || !meshRef.current) return;
+    if (!matRef.current || !meshRef.current) {
+      return;
+    }
     const uniforms = matRef.current.uniforms as unknown as GridUniforms;
     uniforms.u_time.value = state.clock.elapsedTime;
 
@@ -143,7 +153,9 @@ export function BoxEnvironment({ dimensions }: BoxEnvironmentProps): JSX.Element
     raycaster.current.setFromCamera(pointer, camera);
     const hits = raycaster.current.intersectObject(meshRef.current);
     const hit = hits[0];
-    if (!hit || !hit.face) return;
+    if (!hit || !hit.face) {
+      return;
+    }
 
     // Convert the world-space hit to BOX-LOCAL space so the grid math
     // stays glued to the cube even while the cube bobs up and down.
@@ -216,7 +228,9 @@ export function BoxEnvironment({ dimensions }: BoxEnvironmentProps): JSX.Element
       const list = caught.current;
       for (let i = 0; i < list.length; i++) {
         const seg = list[i];
-        if (!seg) continue;
+        if (!seg) {
+          continue;
+        }
         const o = i * 12; // 3 pixels × 4 floats
         // Pixel 0: axis.xyz, coord
         buffer[o + 0] = seg.axis.x;
@@ -261,13 +275,17 @@ export function BoxEnvironment({ dimensions }: BoxEnvironmentProps): JSX.Element
 function pushCaught(list: CaughtSegment[], seg: CaughtSegment): void {
   for (let i = 0; i < list.length; i++) {
     const s = list[i];
-    if (!s) continue;
+    if (!s) {
+      continue;
+    }
     const sameLine =
       s.coord === seg.coord &&
       s.axis.equals(seg.axis) &&
       s.along.equals(seg.along) &&
       s.wallNormal.equals(seg.wallNormal);
-    if (!sameLine) continue;
+    if (!sameLine) {
+      continue;
+    }
 
     s.segMin = Math.min(s.segMin, seg.segMin);
     s.segMax = Math.max(s.segMax, seg.segMax);

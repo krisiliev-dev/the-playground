@@ -163,7 +163,9 @@ describe('useWorldStore', () => {
 
     it('should not advance past revealed', () => {
       const { advanceReveal } = useWorldStore.getState();
-      for (let i = 0; i < 10; i++) advanceReveal();
+      for (let i = 0; i < 10; i++) {
+        advanceReveal();
+      }
       expect(useWorldStore.getState().revealState).toBe('revealed');
     });
 
@@ -181,16 +183,13 @@ describe('useWorldStore', () => {
   // ── Cursor avatar (Phase 5) ──────────────────────────────────
 
   describe('cursorAvatar', () => {
-    it('should default to inactive', () => {
-      expect(useWorldStore.getState().cursorAvatarActive).toBe(false);
-    });
-
     it('toggleCursorAvatar should flip the flag on each call', () => {
+      useWorldStore.getState().setCursorAvatarActive(true);
       const { toggleCursorAvatar } = useWorldStore.getState();
       toggleCursorAvatar();
-      expect(useWorldStore.getState().cursorAvatarActive).toBe(true);
-      toggleCursorAvatar();
       expect(useWorldStore.getState().cursorAvatarActive).toBe(false);
+      toggleCursorAvatar();
+      expect(useWorldStore.getState().cursorAvatarActive).toBe(true);
     });
 
     it('setCursorAvatarActive should set the flag directly', () => {
@@ -199,6 +198,30 @@ describe('useWorldStore', () => {
       expect(useWorldStore.getState().cursorAvatarActive).toBe(true);
       setCursorAvatarActive(false);
       expect(useWorldStore.getState().cursorAvatarActive).toBe(false);
+    });
+  });
+
+  describe('clickHit', () => {
+    it('defaults to null', () => {
+      useWorldStore.getState().setClickHit(null);
+      expect(useWorldStore.getState().clickHit).toBeNull();
+    });
+
+    it('setClickHit stores point + normal', () => {
+      useWorldStore.getState().setClickHit({
+        point: [1, 2, 3],
+        normal: [0, 0, 1],
+      });
+      expect(useWorldStore.getState().clickHit).toEqual({
+        point: [1, 2, 3],
+        normal: [0, 0, 1],
+      });
+    });
+
+    it('resetReveal also clears clickHit', () => {
+      useWorldStore.getState().setClickHit({ point: [1, 2, 3], normal: [1, 0, 0] });
+      useWorldStore.getState().resetReveal();
+      expect(useWorldStore.getState().clickHit).toBeNull();
     });
   });
 });

@@ -1,82 +1,86 @@
-import type { Vector3Tuple } from 'three';
-import { BackSide, VideoTexture, SRGBColorSpace } from 'three';
-import { useEffect, useState } from 'react';
-import { listReadyVideos } from '@/api/videos';
+/**
+ * SkyBackground — what surrounds the cube.
+ *
+ * Replaces the previous 360° video sphere with a game-style procedural
+ * environment: a vertical-gradient inverted sphere (deep purple → near
+ * black) plus a sparse drei <Stars /> field for parallax depth. No
+ * external video assets, no network calls, no flicker — just renders.
+ */
+import { useMemo } from 'react';
+import { Stars } from '@react-three/drei';
+import { BackSide, type IUniform, type Vector3Tuple } from 'three';
 
 interface SkyBackgroundProps {
   dimensions: Vector3Tuple;
 }
 
-// Local fallback — shipped with the client in /public/videos/ for dev and
-// the case where the API is unreachable.
-const FALLBACK_VIDEO_URL = '/videos/360_1_equirect.mp4';
+const TOP_COLOR: [number, number, number] = [0.012, 0.018, 0.06]; // near-black with violet tint
+const BOTTOM_COLOR: [number, number, number] = [0.04, 0.03, 0.11]; // dim deep purple at the horizon
 
-export function SkyBackground({ dimensions }: SkyBackgroundProps): JSX.Element | null {
+interface SkyUniforms {
+  u_top: IUniform<[number, number, number]>;
+  u_bottom: IUniform<[number, number, number]>;
+  [key: string]: IUniform<unknown>;
+}
+
+const vertexShader = /* glsl */ `
+  varying vec3 vWorldDir;
+  void main() {
+    vec4 wp = modelMatrix * vec4(position, 1.0);
+    vWorldDir = normalize(wp.xyz);
+    gl_Position = projectionMatrix * viewMatrix * wp;
+  }
+`;
+
+const fragmentShader = /* glsl */ `
+  uniform vec3 u_top;
+  uniform vec3 u_bottom;
+  varying vec3 vWorldDir;
+  void main() {
+    // Map direction.y from [-1, 1] to [0, 1] for a smooth vertical gradient.
+    float t = clamp(vWorldDir.y * 0.5 + 0.5, 0.0, 1.0);
+    // Slight ease so most of the sky reads as the deep top color.
+    t = pow(t, 1.8);
+    vec3 color = mix(u_bottom, u_top, t);
+    gl_FragColor = vec4(color, 1.0);
+  }
+`;
+
+export function SkyBackground({ dimensions }: SkyBackgroundProps): JSX.Element {
   const [w, h, d] = dimensions;
   const radius = (Math.sqrt(w * w + h * h + d * d) / 2) * 1.5;
 
-  const [videoSrc, setVideoSrc] = useState<string | null>(null);
-  const [texture, setTexture] = useState<VideoTexture | null>(null);
-
-  // Resolve which video URL to load: API first, fallback if that fails.
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const jobs = await listReadyVideos();
-        const ready = jobs.find((j) => j.status.state === 'ready');
-        if (cancelled) return;
-        if (ready && ready.status.state === 'ready') {
-          setVideoSrc(ready.status.url);
-          return;
-        }
-        setVideoSrc(FALLBACK_VIDEO_URL);
-      } catch {
-        if (!cancelled) setVideoSrc(FALLBACK_VIDEO_URL);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  // Create the video element + texture once we know the URL.
-  useEffect(() => {
-    if (!videoSrc) return;
-
-    const video = document.createElement('video');
-    video.src = videoSrc;
-    video.crossOrigin = 'anonymous';
-    video.loop = true;
-    video.muted = true;
-    video.playsInline = true;
-
-    let tex: VideoTexture | null = null;
-
-    const onLoaded = () => {
-      tex = new VideoTexture(video);
-      tex.colorSpace = SRGBColorSpace;
-      setTexture(tex);
-      void video.play();
-    };
-
-    video.addEventListener('loadeddata', onLoaded);
-    video.load();
-
-    return () => {
-      video.removeEventListener('loadeddata', onLoaded);
-      video.pause();
-      tex?.dispose();
-      setTexture(null);
-    };
-  }, [videoSrc]);
-
-  if (!texture) return null;
+  const uniforms = useMemo<SkyUniforms>(
+    () => ({
+      u_top: { value: [...TOP_COLOR] as [number, number, number] },
+      u_bottom: { value: [...BOTTOM_COLOR] as [number, number, number] },
+    }),
+    [],
+  );
 
   return (
-    <mesh>
-      <sphereGeometry args={[radius, 64, 64]} />
-      <meshBasicMaterial side={BackSide} map={texture} />
-    </mesh>
+    <>
+      <mesh>
+        <sphereGeometry args={[radius, 48, 32]} />
+        <shaderMaterial
+          vertexShader={vertexShader}
+          fragmentShader={fragmentShader}
+          uniforms={uniforms}
+          side={BackSide}
+        />
+      </mesh>
+      {/* Sparse cyberpunk starfield — sits inside the gradient sphere so
+          the stars get partially occluded by the cube walls but reappear
+          when looking past the cube edges. */}
+      <Stars
+        radius={radius * 0.85}
+        depth={radius * 0.4}
+        count={1800}
+        factor={3}
+        saturation={0}
+        fade
+        speed={0.4}
+      />
+    </>
   );
 }

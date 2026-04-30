@@ -1,7 +1,7 @@
 import { Suspense, lazy, useEffect } from 'react';
 import { Canvas } from '@react-three/fiber';
-import { World } from '@/components/scene';
-import { CursorText } from '@/components/overlay';
+import { World, PostFx, DevTools, ShakeGroup, CursorAvatar } from '@/components/scene';
+import { CursorText, Crosshair, ControlsHint } from '@/components/overlay';
 import { useWorldStore } from '@/store';
 
 const AdminPanel = lazy(() =>
@@ -9,32 +9,18 @@ const AdminPanel = lazy(() =>
 );
 
 function isAdminRoute(): boolean {
-  if (typeof window === 'undefined') return false;
+  if (typeof window === 'undefined') {
+    return false;
+  }
   const params = new URLSearchParams(window.location.search);
   return params.get('admin') === '1';
 }
 
 /**
- * Activate the Phase 5 cursor avatar once the Phase 4 reveal completes.
- * Reset to inactive if reveal is rolled back to idle (e.g. dev replay).
- */
-function useAvatarFollowsReveal(): void {
-  const revealState = useWorldStore((s) => s.revealState);
-  const setCursorAvatarActive = useWorldStore((s) => s.setCursorAvatarActive);
-
-  useEffect(() => {
-    if (revealState === 'revealed') {
-      setCursorAvatarActive(true);
-    } else if (revealState === 'idle') {
-      setCursorAvatarActive(false);
-    }
-  }, [revealState, setCursorAvatarActive]);
-}
-
-/**
- * Dev shortcut: press `C` to toggle the avatar regardless of reveal state.
- * Useful for previewing the avatar without playing the whole sequence.
- * Ignores events from text inputs so admin typing doesn't fire it.
+ * Dev shortcut: press `C` to toggle the cursor avatar visibility.
+ * Useful for stepping into the small/large states without playing the
+ * whole reveal sequence. Ignores events from text inputs so admin typing
+ * doesn't fire it.
  */
 function useAvatarDevHotkey(): void {
   const toggleCursorAvatar = useWorldStore((s) => s.toggleCursorAvatar);
@@ -44,7 +30,9 @@ function useAvatarDevHotkey(): void {
       const target = e.target as HTMLElement | null;
       if (target) {
         const tag = target.tagName;
-        if (tag === 'INPUT' || tag === 'TEXTAREA' || target.isContentEditable) return;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || target.isContentEditable) {
+          return;
+        }
       }
       if (e.key === 'c' || e.key === 'C') {
         toggleCursorAvatar();
@@ -56,7 +44,6 @@ function useAvatarDevHotkey(): void {
 }
 
 export function App(): JSX.Element {
-  useAvatarFollowsReveal();
   useAvatarDevHotkey();
 
   if (isAdminRoute()) {
@@ -70,16 +57,25 @@ export function App(): JSX.Element {
   return (
     <div style={styles.root}>
       <Canvas
-        camera={{ fov: 60, near: 0.1, far: 500, position: [0, 0, 0] }}
+        camera={{ fov: 60, near: 0.1, far: 1500, position: [0, 0, -360] }}
         dpr={[1, 2]}
         gl={{ antialias: true, alpha: false, powerPreference: 'high-performance' }}
         style={styles.canvas}
       >
         <color attach="background" args={['#0a0a12']} />
         <Suspense fallback={null}>
-          <World />
+          <ShakeGroup>
+            <World />
+          </ShakeGroup>
         </Suspense>
+        {/* Cursor lives outside ShakeGroup so it doesn't jitter with the
+            camera-shake on sword impacts. */}
+        <CursorAvatar />
+        <PostFx />
+        <DevTools />
       </Canvas>
+      <Crosshair />
+      <ControlsHint />
       <CursorText />
     </div>
   );

@@ -4,9 +4,7 @@ import { convertVideo, listAllJobs, type VideoJob } from '@/api/videos';
 const TOKEN_KEY = 'playground_admin_token';
 
 export function AdminPanel(): JSX.Element {
-  const [token, setToken] = useState<string>(
-    () => localStorage.getItem(TOKEN_KEY) ?? '',
-  );
+  const [token, setToken] = useState<string>(() => localStorage.getItem(TOKEN_KEY) ?? '');
   const [url, setUrl] = useState('');
   const [name, setName] = useState('');
   const [jobs, setJobs] = useState<VideoJob[]>([]);
@@ -19,7 +17,9 @@ export function AdminPanel(): JSX.Element {
   }, []);
 
   const refresh = useCallback(async () => {
-    if (!token) return;
+    if (!token) {
+      return;
+    }
     try {
       setJobs(await listAllJobs(token));
       setError(null);
@@ -34,7 +34,7 @@ export function AdminPanel(): JSX.Element {
     return () => clearInterval(interval);
   }, [refresh]);
 
-  const onSubmit = async (e: React.FormEvent) => {
+  const onSubmit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault();
     if (!token) {
       setError('Paste your admin token first');
@@ -69,7 +69,7 @@ export function AdminPanel(): JSX.Element {
         />
       </label>
 
-      <form onSubmit={onSubmit} style={styles.form}>
+      <form onSubmit={(e) => void onSubmit(e)} style={styles.form}>
         <label style={styles.label}>
           YouTube URL
           <input
@@ -184,7 +184,13 @@ const styles = {
     overflow: 'auto',
   } satisfies React.CSSProperties,
   muted: { color: '#8888a0', fontSize: 12 },
-  list: { listStyle: 'none', padding: 0, display: 'flex', flexDirection: 'column', gap: 12 } satisfies React.CSSProperties,
+  list: {
+    listStyle: 'none',
+    padding: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 12,
+  } satisfies React.CSSProperties,
   listItem: {
     backgroundColor: '#12121a',
     border: '1px solid #2a2a3a',
@@ -202,13 +208,8 @@ const styles = {
     padding: '2px 8px',
     borderRadius: 999,
     backgroundColor:
-      state === 'ready'
-        ? '#00ffcc22'
-        : state === 'failed'
-        ? '#ff6b6b22'
-        : '#ffcc0022',
-    color:
-      state === 'ready' ? '#00ffcc' : state === 'failed' ? '#ff6b6b' : '#ffcc00',
+      state === 'ready' ? '#00ffcc22' : state === 'failed' ? '#ff6b6b22' : '#ffcc0022',
+    color: state === 'ready' ? '#00ffcc' : state === 'failed' ? '#ff6b6b' : '#ffcc00',
     border: `1px solid ${
       state === 'ready' ? '#00ffcc' : state === 'failed' ? '#ff6b6b' : '#ffcc00'
     }33`,

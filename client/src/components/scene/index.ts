@@ -3,17 +3,16 @@ export { BoxEnvironment } from './BoxEnvironment';
 export { GridMaterial } from './GridMaterial';
 export { SkyBackground } from './SkyBackground';
 export { CursorAvatar } from './CursorAvatar';
+export { PostFx } from './PostFx';
+export { DevTools } from './DevTools';
+export { ShakeGroup } from './ShakeGroup';
 export {
   Portal,
   Sword,
-  Fracture,
-  VibeText,
   RevealOrchestrator,
   useRevealAudio,
   PORTAL_CONSTANTS,
   SWORD_CONSTANTS,
-  FRACTURE_CONSTANTS,
-  VIBE_CONSTANTS,
   REVEAL_TIMINGS,
   REVEAL_AUDIO_SOURCES,
 } from './reveal';

@@ -15,7 +15,16 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { useGLTF } from '@react-three/drei';
-import { Color, Euler, Group, Mesh, MeshStandardMaterial, PerspectiveCamera, Quaternion, Vector3 } from 'three';
+import {
+  Color,
+  Euler,
+  Group,
+  Mesh,
+  MeshStandardMaterial,
+  PerspectiveCamera,
+  Quaternion,
+  Vector3,
+} from 'three';
 import { useWorldStore } from '@/store';
 
 const MODEL_URL = '/models/3d_icon_cursor.glb';
@@ -68,7 +77,9 @@ export function CursorAvatar(): JSX.Element | null {
   const active = useWorldStore((s) => s.cursorAvatarActive);
 
   useEffect(() => {
-    if (!active) return;
+    if (!active) {
+      return;
+    }
     const previous = document.body.style.cursor;
     document.body.style.cursor = 'none';
     return () => {
@@ -76,7 +87,9 @@ export function CursorAvatar(): JSX.Element | null {
     };
   }, [active]);
 
-  if (!active) return null;
+  if (!active) {
+    return null;
+  }
   return <ActiveCursor />;
 }
 
@@ -147,7 +160,9 @@ function ActiveCursor(): JSX.Element {
   useEffect(() => {
     gltf.scene.traverse((obj) => {
       const mesh = obj as Mesh;
-      if (!mesh.isMesh) return;
+      if (!mesh.isMesh) {
+        return;
+      }
       mesh.material = new MeshStandardMaterial({
         color: new Color('#0a1a18'),
         emissive: new Color(EMISSIVE_HEX),
@@ -166,17 +181,27 @@ function ActiveCursor(): JSX.Element {
   useEffect(() => {
     const onDown = (e: KeyboardEvent): void => {
       const k = e.key.toLowerCase();
-      if (k === 'w') keys.current.w = true;
-      else if (k === 'a') keys.current.a = true;
-      else if (k === 's') keys.current.s = true;
-      else if (k === 'd') keys.current.d = true;
+      if (k === 'w') {
+        keys.current.w = true;
+      } else if (k === 'a') {
+        keys.current.a = true;
+      } else if (k === 's') {
+        keys.current.s = true;
+      } else if (k === 'd') {
+        keys.current.d = true;
+      }
     };
     const onUp = (e: KeyboardEvent): void => {
       const k = e.key.toLowerCase();
-      if (k === 'w') keys.current.w = false;
-      else if (k === 'a') keys.current.a = false;
-      else if (k === 's') keys.current.s = false;
-      else if (k === 'd') keys.current.d = false;
+      if (k === 'w') {
+        keys.current.w = false;
+      } else if (k === 'a') {
+        keys.current.a = false;
+      } else if (k === 's') {
+        keys.current.s = false;
+      } else if (k === 'd') {
+        keys.current.d = false;
+      }
     };
     window.addEventListener('keydown', onDown);
     window.addEventListener('keyup', onUp);
@@ -192,17 +217,23 @@ function ActiveCursor(): JSX.Element {
   // React effects run after commit, past the activation token's lifetime.
   // The canvas click listener here re-engages lock if Esc dropped it.
   useEffect(() => {
-    if (!isPostClick) return;
+    if (!isPostClick) {
+      return;
+    }
     const canvas = gl.domElement;
 
     const onMove = (e: MouseEvent): void => {
-      if (document.pointerLockElement !== canvas) return;
+      if (document.pointerLockElement !== canvas) {
+        return;
+      }
       // Lock yaw/pitch while the BulletTimeDirector owns the camera. Once
       // the reveal sequence has handed control back ('impact' onward —
       // camera is settled at its final pose and the swords have hit the
       // wall), let mouselook resume so the cursor wakes up sooner.
       const rs = useWorldStore.getState().revealState;
-      if (rs !== 'impact' && rs !== 'revealed') return;
+      if (rs !== 'impact' && rs !== 'revealed') {
+        return;
+      }
       avatarYaw.current -= e.movementX * MOUSE_SENSITIVITY;
       const next = avatarPitch.current - e.movementY * MOUSE_SENSITIVITY;
       avatarPitch.current = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, next));
@@ -210,7 +241,7 @@ function ActiveCursor(): JSX.Element {
     const onClick = (): void => {
       if (document.pointerLockElement !== canvas) {
         // Synchronous in click handler — user gesture is valid here.
-        canvas.requestPointerLock?.();
+        void canvas.requestPointerLock?.();
       }
     };
 
@@ -230,7 +261,9 @@ function ActiveCursor(): JSX.Element {
   // accumulated during impact/revealed so the avatar starts looking
   // straight ahead instead of at a weird drifted angle.
   useEffect(() => {
-    if (!isAvatar) return;
+    if (!isAvatar) {
+      return;
+    }
     avatarPos.current.set(
       camera.position.x,
       camera.position.y - FOLLOW_OFFSET.y,
@@ -241,7 +274,9 @@ function ActiveCursor(): JSX.Element {
   }, [isAvatar, camera]);
 
   useFrame((state, delta) => {
-    if (!groupRef.current) return;
+    if (!groupRef.current) {
+      return;
+    }
     const k = 1 - Math.exp(-SCALE_LERP_RATE * delta);
 
     if (!isAvatar) {
@@ -272,10 +307,8 @@ function ActiveCursor(): JSX.Element {
       //                       captured pointer NDC; reads as still on
       //                       screen even while camera pans.
       const inWorldFrozen =
-        revealState === 'armed' ||
-        (revealState === 'swinging' && swingTime < SWING_PRE);
-      const inCameraAnchored =
-        revealState === 'swinging' && swingTime >= SWING_PRE;
+        revealState === 'armed' || (revealState === 'swinging' && swingTime < SWING_PRE);
+      const inCameraAnchored = revealState === 'swinging' && swingTime >= SWING_PRE;
 
       // Hide the cursor entirely during the chase/world-frozen phase. The
       // camera's lookAt rotation would otherwise sweep the cursor through
@@ -310,18 +343,9 @@ function ActiveCursor(): JSX.Element {
         const fovY = (cam.fov * Math.PI) / 180;
         const halfH = POINTER_DEPTH * Math.tan(fovY / 2);
         const halfW = halfH * cam.aspect;
-        tmpCamFwd.current
-          .set(0, 0, -1)
-          .applyQuaternion(camera.quaternion)
-          .normalize();
-        tmpCamRight.current
-          .set(1, 0, 0)
-          .applyQuaternion(camera.quaternion)
-          .normalize();
-        tmpCamUp.current
-          .set(0, 1, 0)
-          .applyQuaternion(camera.quaternion)
-          .normalize();
+        tmpCamFwd.current.set(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
+        tmpCamRight.current.set(1, 0, 0).applyQuaternion(camera.quaternion).normalize();
+        tmpCamUp.current.set(0, 1, 0).applyQuaternion(camera.quaternion).normalize();
 
         let px: number;
         let py: number;
@@ -416,12 +440,21 @@ function ActiveCursor(): JSX.Element {
     const aMaxX = dimensions[0] * 0.5 - AVATAR_WALL_MARGIN;
     const aMaxY = dimensions[1] * 0.5 - AVATAR_WALL_MARGIN;
     const aMaxZ = dimensions[2] * 0.5 - AVATAR_WALL_MARGIN;
-    if (avatarPos.current.x < -aMaxX) avatarPos.current.x = -aMaxX;
-    else if (avatarPos.current.x > aMaxX) avatarPos.current.x = aMaxX;
-    if (avatarPos.current.y < -aMaxY) avatarPos.current.y = -aMaxY;
-    else if (avatarPos.current.y > aMaxY) avatarPos.current.y = aMaxY;
-    if (avatarPos.current.z < -aMaxZ) avatarPos.current.z = -aMaxZ;
-    else if (avatarPos.current.z > aMaxZ) avatarPos.current.z = aMaxZ;
+    if (avatarPos.current.x < -aMaxX) {
+      avatarPos.current.x = -aMaxX;
+    } else if (avatarPos.current.x > aMaxX) {
+      avatarPos.current.x = aMaxX;
+    }
+    if (avatarPos.current.y < -aMaxY) {
+      avatarPos.current.y = -aMaxY;
+    } else if (avatarPos.current.y > aMaxY) {
+      avatarPos.current.y = aMaxY;
+    }
+    if (avatarPos.current.z < -aMaxZ) {
+      avatarPos.current.z = -aMaxZ;
+    } else if (avatarPos.current.z > aMaxZ) {
+      avatarPos.current.z = aMaxZ;
+    }
 
     // Avatar's target rotation as a quaternion (Y-axis yaw rotation).
     // Y-axis quaternion: (0, sin(θ/2), 0, cos(θ/2)).
@@ -446,22 +479,26 @@ function ActiveCursor(): JSX.Element {
     const dz = tmpVec.current.z / offsetLen;
     if (Math.abs(dx) > 1e-6) {
       const t = ((dx > 0 ? cMaxX : -cMaxX) - avatarPos.current.x) / dx;
-      if (t > 0 && t < maxT) maxT = t;
+      if (t > 0 && t < maxT) {
+        maxT = t;
+      }
     }
     if (Math.abs(dy) > 1e-6) {
       const t = ((dy > 0 ? cMaxY : -cMaxY) - avatarPos.current.y) / dy;
-      if (t > 0 && t < maxT) maxT = t;
+      if (t > 0 && t < maxT) {
+        maxT = t;
+      }
     }
     if (Math.abs(dz) > 1e-6) {
       const t = ((dz > 0 ? cMaxZ : -cMaxZ) - avatarPos.current.z) / dz;
-      if (t > 0 && t < maxT) maxT = t;
+      if (t > 0 && t < maxT) {
+        maxT = t;
+      }
     }
 
     // Target camera position with the (possibly shortened) offset.
     const ratio = Math.max(0, maxT) / offsetLen;
-    tmpCamTarget.current
-      .copy(avatarPos.current)
-      .addScaledVector(tmpVec.current, ratio);
+    tmpCamTarget.current.copy(avatarPos.current).addScaledVector(tmpVec.current, ratio);
 
     // Compute target camera rotation via a temp Object3D so we can
     // slerp toward it during the initial pan (snapping with .lookAt
@@ -484,18 +521,13 @@ function ActiveCursor(): JSX.Element {
       const eased = tNorm * tNorm * (3 - 2 * tNorm);
       camera.position.lerpVectors(initialCamPos.current, tmpCamTarget.current, eased);
       camera.quaternion.slerpQuaternions(initialCamQuat.current, targetCamQuat, eased);
-      groupRef.current.position.lerpVectors(
-        initialCursorPos.current,
-        avatarPos.current,
-        eased,
-      );
+      groupRef.current.position.lerpVectors(initialCursorPos.current, avatarPos.current, eased);
       groupRef.current.quaternion.slerpQuaternions(
         initialCursorQuat.current,
         avatarTargetQuat,
         eased,
       );
-      renderedScale.current =
-        initialScale.current + (AVATAR_SCALE - initialScale.current) * eased;
+      renderedScale.current = initialScale.current + (AVATAR_SCALE - initialScale.current) * eased;
     } else {
       // Steady-state: per-frame lerp. Pull-in on wall approach, smooth
       // restore on retreat. Same rate either way for a coherent feel.

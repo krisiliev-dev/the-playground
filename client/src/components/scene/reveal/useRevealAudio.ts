@@ -1,18 +1,25 @@
 /**
  * useRevealAudio — Phase 4
  *
- * Plain `<HTMLAudioElement>` wrappers, one per beat. The hook exposes
- * a small play() API and watches the `revealState` to fire the right
- * cue automatically when the state advances.
+ * Plain `<HTMLAudioElement>` wrappers, one per beat. The hook fires
+ * cues when the reveal state advances.
  *
- * No Howler / Web Audio API — just `new Audio(...)`. We init lazily on
- * the first user gesture (the click that triggers `armed`) so browsers
- * don't reject autoplay.
+ * NOTE (2026-04-25): The Mixkit files committed under client/public/audio/
+ * were picked by the bootstrapping agent based on category URLs and
+ * turned out to contain wrong content (water pour, crowd chatter). Audio
+ * is currently silenced here — every cue's volume is forced to 0 — so the
+ * reveal plays without sound. To re-enable, swap the MP3s under
+ * client/public/audio/ for ones that actually match each beat (sword
+ * swoosh, glass crack, low impact thud, etc.) and remove the AUDIO_MUTED
+ * gate below.
  */
 import { useEffect, useRef } from 'react';
 import { useWorldStore, type RevealState } from '@/store';
 
 const AUDIO_BASE = '/audio';
+
+/** Set to true to silence all reveal SFX (e.g. when iterating). */
+const AUDIO_MUTED = false;
 
 const SOURCES = {
   portalHum: `${AUDIO_BASE}/portal-hum.mp3`,
@@ -50,7 +57,7 @@ function createElements(): Record<SoundId, HTMLAudioElement> {
     const audio = new Audio(SOURCES[id]);
     audio.preload = 'auto';
     audio.loop = CONFIG[id].loop ?? false;
-    audio.volume = CONFIG[id].volume ?? 1;
+    audio.volume = AUDIO_MUTED ? 0 : (CONFIG[id].volume ?? 1);
     out[id] = audio;
   });
   return out;
@@ -75,8 +82,10 @@ export function useRevealAudio(): void {
     }
     return () => {
       const els = elementsRef.current;
-      if (!els) {return;}
-      (Object.values(els)).forEach((el) => {
+      if (!els) {
+        return;
+      }
+      Object.values(els).forEach((el) => {
         el.pause();
         el.src = '';
       });
@@ -86,12 +95,16 @@ export function useRevealAudio(): void {
 
   useEffect(() => {
     const els = elementsRef.current;
-    if (!els) {return;}
+    if (!els) {
+      return;
+    }
     const prev = previousState.current;
     previousState.current = revealState;
 
     // We only fire on a true transition, not on initial mount.
-    if (prev === revealState) {return;}
+    if (prev === revealState) {
+      return;
+    }
 
     const play = (id: SoundId): void => {
       const el = els[id];

@@ -20,7 +20,9 @@ describe('Portal', () => {
   });
 
   it('exports portal constants matching the spec', () => {
-    expect(PORTAL_CONSTANTS.Z).toBeLessThan(0); // it's on the back wall
+    // Portal sits on the +Z wall (behind the camera) so the user doesn't
+    // see it in their default forward view.
+    expect(PORTAL_CONSTANTS.Z).toBeGreaterThan(0);
     expect(PORTAL_CONSTANTS.COLOR).toBe('#00ffcc');
   });
 });

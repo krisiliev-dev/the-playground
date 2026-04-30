@@ -73,12 +73,7 @@ function smoothstep(t: number): number {
 export function BulletTimeDirector(): null {
   const dimensions = useWorldStore((s) => s.environment.dimensions);
   const cubeHalf = useMemo(
-    () =>
-      new Vector3(
-        dimensions[0] / 2,
-        dimensions[1] / 2,
-        dimensions[2] / 2,
-      ),
+    () => new Vector3(dimensions[0] / 2, dimensions[1] / 2, dimensions[2] / 2),
     [dimensions],
   );
 
@@ -126,234 +121,211 @@ export function BulletTimeDirector(): null {
    *  AHEAD of the herd so the full row of swords is visible. */
   const motionDir = useRef(new Vector3());
 
-  useFrame(
-    (state) => {
-      const revealState = useWorldStore.getState().revealState;
-      const now = state.clock.elapsedTime;
+  useFrame((state) => {
+    const revealState = useWorldStore.getState().revealState;
+    const now = state.clock.elapsedTime;
 
-      // Track state transitions for per-state timing.
-      if (previousState.current !== revealState) {
-        stateEnteredAt.current = now;
-        previousState.current = revealState;
+    // Track state transitions for per-state timing.
+    if (previousState.current !== revealState) {
+      stateEnteredAt.current = now;
+      previousState.current = revealState;
+    }
+
+    if (revealState === 'idle') {
+      captured.current = false;
+      return;
+    }
+
+    // Capture click-cam reference frame on first entry to armed/swinging.
+    if (!captured.current) {
+      const camQuat = state.camera.quaternion;
+      initialCamPos.current.copy(state.camera.position);
+      camFwd.current.set(0, 0, -1).applyQuaternion(camQuat);
+      camRight.current.set(1, 0, 0).applyQuaternion(camQuat);
+      camUp.current.set(0, 1, 0).applyQuaternion(camQuat);
+      formationCenter.current
+        .copy(initialCamPos.current)
+        .addScaledVector(camFwd.current, MID_FORWARD);
+      // Word centre = formation centre + the rightward fudge that
+      // shifts the letter formation in vibeFormation.ts. Camera's
+      // lookAt aims here so the visual word is centred in view.
+      wordCenter.current
+        .copy(formationCenter.current)
+        .addScaledVector(camRight.current, WORD_CENTERING_FUDGE);
+      // Spawn lateral: ray-cast camRight from initialCamPos to the
+      // nearest cube wall, minus a small inset. Same math as Sword.tsx
+      // so the director's lookAt target tracks where swords actually are.
+      const cR = camRight.current;
+      let tWall = Infinity;
+      if (Math.abs(cR.x) > 1e-6) {
+        const t1 = (cubeHalf.x - initialCamPos.current.x) / cR.x;
+        const t2 = (-cubeHalf.x - initialCamPos.current.x) / cR.x;
+        if (t1 > 0 && t1 < tWall) {
+          tWall = t1;
+        }
+        if (t2 > 0 && t2 < tWall) {
+          tWall = t2;
+        }
       }
-
-      if (revealState === 'idle') {
-        captured.current = false;
-        return;
+      if (Math.abs(cR.y) > 1e-6) {
+        const t1 = (cubeHalf.y - initialCamPos.current.y) / cR.y;
+        const t2 = (-cubeHalf.y - initialCamPos.current.y) / cR.y;
+        if (t1 > 0 && t1 < tWall) {
+          tWall = t1;
+        }
+        if (t2 > 0 && t2 < tWall) {
+          tWall = t2;
+        }
       }
-
-      // Capture click-cam reference frame on first entry to armed/swinging.
-      if (!captured.current) {
-        const camQuat = state.camera.quaternion;
-        initialCamPos.current.copy(state.camera.position);
-        camFwd.current.set(0, 0, -1).applyQuaternion(camQuat);
-        camRight.current.set(1, 0, 0).applyQuaternion(camQuat);
-        camUp.current.set(0, 1, 0).applyQuaternion(camQuat);
-        formationCenter.current
-          .copy(initialCamPos.current)
-          .addScaledVector(camFwd.current, MID_FORWARD);
-        // Word centre = formation centre + the rightward fudge that
-        // shifts the letter formation in vibeFormation.ts. Camera's
-        // lookAt aims here so the visual word is centred in view.
-        wordCenter.current
-          .copy(formationCenter.current)
-          .addScaledVector(camRight.current, WORD_CENTERING_FUDGE);
-        // Spawn lateral: ray-cast camRight from initialCamPos to the
-        // nearest cube wall, minus a small inset. Same math as Sword.tsx
-        // so the director's lookAt target tracks where swords actually are.
-        const cR = camRight.current;
-        let tWall = Infinity;
-        if (Math.abs(cR.x) > 1e-6) {
-          const t1 = (cubeHalf.x - initialCamPos.current.x) / cR.x;
-          const t2 = (-cubeHalf.x - initialCamPos.current.x) / cR.x;
-          if (t1 > 0 && t1 < tWall) tWall = t1;
-          if (t2 > 0 && t2 < tWall) tWall = t2;
+      if (Math.abs(cR.z) > 1e-6) {
+        const t1 = (cubeHalf.z - initialCamPos.current.z) / cR.z;
+        const t2 = (-cubeHalf.z - initialCamPos.current.z) / cR.z;
+        if (t1 > 0 && t1 < tWall) {
+          tWall = t1;
         }
-        if (Math.abs(cR.y) > 1e-6) {
-          const t1 = (cubeHalf.y - initialCamPos.current.y) / cR.y;
-          const t2 = (-cubeHalf.y - initialCamPos.current.y) / cR.y;
-          if (t1 > 0 && t1 < tWall) tWall = t1;
-          if (t2 > 0 && t2 < tWall) tWall = t2;
+        if (t2 > 0 && t2 < tWall) {
+          tWall = t2;
         }
-        if (Math.abs(cR.z) > 1e-6) {
-          const t1 = (cubeHalf.z - initialCamPos.current.z) / cR.z;
-          const t2 = (-cubeHalf.z - initialCamPos.current.z) / cR.z;
-          if (t1 > 0 && t1 < tWall) tWall = t1;
-          if (t2 > 0 && t2 < tWall) tWall = t2;
-        }
-        const lateralDist = Math.max(0, tWall - SPAWN_WALL_INSET);
-        spawnPoint.current
-          .copy(initialCamPos.current)
-          .addScaledVector(camRight.current, lateralDist)
-          .addScaledVector(camFwd.current, SPAWN_FIXED_FWD)
-          .addScaledVector(camUp.current, SPAWN_FIXED_UP);
-        // Clamp to cube interior — same as Sword.tsx so the director's
-        // lookAt target matches the actual sword spawn position.
-        {
-          const limX = cubeHalf.x - SPAWN_WALL_INSET;
-          const limY = cubeHalf.y - SPAWN_WALL_INSET;
-          const limZ = cubeHalf.z - SPAWN_WALL_INSET;
-          spawnPoint.current.x = Math.max(
-            -limX,
-            Math.min(limX, spawnPoint.current.x),
-          );
-          spawnPoint.current.y = Math.max(
-            -limY,
-            Math.min(limY, spawnPoint.current.y),
-          );
-          spawnPoint.current.z = Math.max(
-            -limZ,
-            Math.min(limZ, spawnPoint.current.z),
-          );
-        }
-        // sideA and sideB are positions slightly to the right / left of
-        // the camera's INITIAL pose (not at the formation). Mid phase
-        // pans the camera between them — a subtle right-to-left drift
-        // close to where the user was originally looking from.
-        sideA.current
-          .copy(initialCamPos.current)
-          .addScaledVector(camRight.current, MID_LATERAL_DRIFT);
-        sideB.current
-          .copy(initialCamPos.current)
-          .addScaledVector(camRight.current, -MID_LATERAL_DRIFT);
-        // Lateral dolly sign: dolly OPPOSITE the click side. Right-click
-        // → -camRight (cursor pushed further right via parallax → off
-        // the right edge). Left-click → +camRight. clickPx near 0 → no
-        // dolly (cursor at centre, pan can't help anyway).
-        const clickPx = state.pointer.x;
-        armedLateralSign.current = Math.abs(clickPx) < 0.05 ? 0 : -Math.sign(clickPx);
-        // Pre starts where armed ended — forward dolly + lateral drift.
-        preStartPos.current
-          .copy(initialCamPos.current)
-          .addScaledVector(camFwd.current, ARMED_DOLLY_FWD)
-          .addScaledVector(
-            camRight.current,
-            ARMED_LATERAL_DRIFT * armedLateralSign.current,
-          );
-        // Capture motion direction (spawn → word centre, normalised).
-        motionDir.current
-          .copy(wordCenter.current)
-          .sub(spawnPoint.current)
-          .normalize();
-        // Side perpendicular to flight direction. Negated so the camera
-        // ends up on the audience-side of the trajectory.
-        sidePerp.current
-          .copy(motionDir.current)
-          .cross(camUp.current)
-          .normalize()
-          .negate();
-        captured.current = true;
       }
+      const lateralDist = Math.max(0, tWall - SPAWN_WALL_INSET);
+      spawnPoint.current
+        .copy(initialCamPos.current)
+        .addScaledVector(camRight.current, lateralDist)
+        .addScaledVector(camFwd.current, SPAWN_FIXED_FWD)
+        .addScaledVector(camUp.current, SPAWN_FIXED_UP);
+      // Clamp to cube interior — same as Sword.tsx so the director's
+      // lookAt target matches the actual sword spawn position.
+      {
+        const limX = cubeHalf.x - SPAWN_WALL_INSET;
+        const limY = cubeHalf.y - SPAWN_WALL_INSET;
+        const limZ = cubeHalf.z - SPAWN_WALL_INSET;
+        spawnPoint.current.x = Math.max(-limX, Math.min(limX, spawnPoint.current.x));
+        spawnPoint.current.y = Math.max(-limY, Math.min(limY, spawnPoint.current.y));
+        spawnPoint.current.z = Math.max(-limZ, Math.min(limZ, spawnPoint.current.z));
+      }
+      // sideA and sideB are positions slightly to the right / left of
+      // the camera's INITIAL pose (not at the formation). Mid phase
+      // pans the camera between them — a subtle right-to-left drift
+      // close to where the user was originally looking from.
+      sideA.current
+        .copy(initialCamPos.current)
+        .addScaledVector(camRight.current, MID_LATERAL_DRIFT);
+      sideB.current
+        .copy(initialCamPos.current)
+        .addScaledVector(camRight.current, -MID_LATERAL_DRIFT);
+      // Lateral dolly sign: dolly OPPOSITE the click side. Right-click
+      // → -camRight (cursor pushed further right via parallax → off
+      // the right edge). Left-click → +camRight. clickPx near 0 → no
+      // dolly (cursor at centre, pan can't help anyway).
+      const clickPx = state.pointer.x;
+      armedLateralSign.current = Math.abs(clickPx) < 0.05 ? 0 : -Math.sign(clickPx);
+      // Pre starts where armed ended — forward dolly + lateral drift.
+      preStartPos.current
+        .copy(initialCamPos.current)
+        .addScaledVector(camFwd.current, ARMED_DOLLY_FWD)
+        .addScaledVector(camRight.current, ARMED_LATERAL_DRIFT * armedLateralSign.current);
+      // Capture motion direction (spawn → word centre, normalised).
+      motionDir.current.copy(wordCenter.current).sub(spawnPoint.current).normalize();
+      // Side perpendicular to flight direction. Negated so the camera
+      // ends up on the audience-side of the trajectory.
+      sidePerp.current.copy(motionDir.current).cross(camUp.current).normalize().negate();
+      captured.current = true;
+    }
 
-      // After swing ends (impact / revealed), release the camera so
-      // CursorAvatar can resume control.
-      if (revealState !== 'armed' && revealState !== 'swinging') return;
+    // After swing ends (impact / revealed), release the camera so
+    // CursorAvatar can resume control.
+    if (revealState !== 'armed' && revealState !== 'swinging') {
+      return;
+    }
 
-      const sinceEnter = now - stateEnteredAt.current;
+    const sinceEnter = now - stateEnteredAt.current;
 
-      if (revealState === 'armed') {
-        // Pan toward spawn + slight forward dolly + lateral drift away
-        // from the click side. The lateral component eases in faster than
-        // the lookAt rotation (sqrt vs smoothstep), so the cursor
-        // parallax-pulls off its starting edge BEFORE the rotation can
-        // sweep it through frame centre.
-        const phaseT = Math.min(1, sinceEnter / ARMED_DURATION);
+    if (revealState === 'armed') {
+      // Pan toward spawn + slight forward dolly + lateral drift away
+      // from the click side. The lateral component eases in faster than
+      // the lookAt rotation (sqrt vs smoothstep), so the cursor
+      // parallax-pulls off its starting edge BEFORE the rotation can
+      // sweep it through frame centre.
+      const phaseT = Math.min(1, sinceEnter / ARMED_DURATION);
+      const eased = smoothstep(phaseT);
+      const lateralEase = Math.sqrt(phaseT);
+      targetPos.current
+        .copy(initialCamPos.current)
+        .addScaledVector(camFwd.current, ARMED_DOLLY_FWD * eased)
+        .addScaledVector(
+          camRight.current,
+          ARMED_LATERAL_DRIFT * armedLateralSign.current * lateralEase,
+        );
+      targetLook.current.copy(wordCenter.current).lerp(spawnPoint.current, eased);
+    } else {
+      // revealState === 'swinging'
+      const t = sinceEnter;
+
+      if (t < SWING_PRE) {
+        // Pre: TRUE chase camera. Camera lerps toward where the swords
+        // ACTUALLY are right now — far right early on (tracking the
+        // spawn), shifting to formation centre by end of pre. The
+        // intermediate target itself blends from "current herd" to
+        // sideA via an ease-in (so by end of pre, target = sideA and
+        // we're set up for the orbit).
+        const phaseT = t / SWING_PRE;
+
+        // Where are the swords' herd centre right now? Lerp from spawn
+        // toward the WORD centre (not formation centre) so the camera's
+        // tracking aligns with the swords' actual mean position.
+        const herdProgress = smoothstep(phaseT);
+        herdPos.current.copy(spawnPoint.current).lerp(wordCenter.current, herdProgress);
+
+        // Chase point: herd offset PERPENDICULAR to flight direction
+        // (sidePerp) + slightly UP + AHEAD in flight direction. The
+        // ahead component places the camera in front of the herd
+        // looking back — the full row of swords is visible behind
+        // the leading sword instead of just the tail.
+        chasePoint.current
+          .copy(herdPos.current)
+          .addScaledVector(sidePerp.current, CHASE_SIDE_DISTANCE)
+          .addScaledVector(camUp.current, CHASE_UP_DISTANCE)
+          .addScaledVector(motionDir.current, CHASE_AHEAD_DISTANCE);
+
+        // Camera position: ramp from preStartPos to chasePoint over
+        // CHASE_RAMP_DURATION at the start of pre, then track
+        // chasePoint *directly* (no ease-out lag — keeps camera firmly
+        // ahead of the row instead of slowly catching up).
+        const ramp = Math.min(1, t / CHASE_RAMP_DURATION);
+        targetPos.current.copy(preStartPos.current).lerp(chasePoint.current, smoothstep(ramp));
+
+        // Late-pre blend toward sideA (last ~10%) so mid starts
+        // cleanly from sideA without a snap.
+        const sideABlend = Math.pow(phaseT, 8);
+        targetPos.current.lerp(sideA.current, sideABlend);
+
+        // LookAt always at the herd — camera anchors visually on the
+        // swords as it chases them.
+        targetLook.current.copy(herdPos.current);
+      } else if (t < SWING_PRE + SWING_MID) {
+        // Mid: subtle right-to-left drift across the initial viewing
+        // position. Camera lerps from sideA (slightly right of initial)
+        // to sideB (slightly left of initial) over the formation hold.
+        const phaseT = (t - SWING_PRE) / SWING_MID;
         const eased = smoothstep(phaseT);
-        const lateralEase = Math.sqrt(phaseT);
-        targetPos.current
-          .copy(initialCamPos.current)
-          .addScaledVector(camFwd.current, ARMED_DOLLY_FWD * eased)
-          .addScaledVector(
-            camRight.current,
-            ARMED_LATERAL_DRIFT * armedLateralSign.current * lateralEase,
-          );
-        targetLook.current
-          .copy(wordCenter.current)
-          .lerp(spawnPoint.current, eased);
+        targetPos.current.copy(sideA.current).lerp(sideB.current, eased);
+        targetLook.current.copy(wordCenter.current);
       } else {
-        // revealState === 'swinging'
-        const t = sinceEnter;
-
-        if (t < SWING_PRE) {
-          // Pre: TRUE chase camera. Camera lerps toward where the swords
-          // ACTUALLY are right now — far right early on (tracking the
-          // spawn), shifting to formation centre by end of pre. The
-          // intermediate target itself blends from "current herd" to
-          // sideA via an ease-in (so by end of pre, target = sideA and
-          // we're set up for the orbit).
-          const phaseT = t / SWING_PRE;
-
-          // Where are the swords' herd centre right now? Lerp from spawn
-          // toward the WORD centre (not formation centre) so the camera's
-          // tracking aligns with the swords' actual mean position.
-          const herdProgress = smoothstep(phaseT);
-          herdPos.current
-            .copy(spawnPoint.current)
-            .lerp(wordCenter.current, herdProgress);
-
-          // Chase point: herd offset PERPENDICULAR to flight direction
-          // (sidePerp) + slightly UP + AHEAD in flight direction. The
-          // ahead component places the camera in front of the herd
-          // looking back — the full row of swords is visible behind
-          // the leading sword instead of just the tail.
-          chasePoint.current
-            .copy(herdPos.current)
-            .addScaledVector(sidePerp.current, CHASE_SIDE_DISTANCE)
-            .addScaledVector(camUp.current, CHASE_UP_DISTANCE)
-            .addScaledVector(motionDir.current, CHASE_AHEAD_DISTANCE);
-
-          // Camera position: ramp from preStartPos to chasePoint over
-          // CHASE_RAMP_DURATION at the start of pre, then track
-          // chasePoint *directly* (no ease-out lag — keeps camera firmly
-          // ahead of the row instead of slowly catching up).
-          const ramp = Math.min(1, t / CHASE_RAMP_DURATION);
-          targetPos.current
-            .copy(preStartPos.current)
-            .lerp(chasePoint.current, smoothstep(ramp));
-
-          // Late-pre blend toward sideA (last ~10%) so mid starts
-          // cleanly from sideA without a snap.
-          const sideABlend = Math.pow(phaseT, 8);
-          targetPos.current.lerp(sideA.current, sideABlend);
-
-          // LookAt always at the herd — camera anchors visually on the
-          // swords as it chases them.
-          targetLook.current.copy(herdPos.current);
-        } else if (t < SWING_PRE + SWING_MID) {
-          // Mid: subtle right-to-left drift across the initial viewing
-          // position. Camera lerps from sideA (slightly right of initial)
-          // to sideB (slightly left of initial) over the formation hold.
-          const phaseT = (t - SWING_PRE) / SWING_MID;
-          const eased = smoothstep(phaseT);
-          targetPos.current
-            .copy(sideA.current)
-            .lerp(sideB.current, eased);
-          targetLook.current.copy(wordCenter.current);
-        } else {
-          // Post: lerp position from sideB back to initial. LookAt also
-          // lerps from wordCenter (mid's offset target) back to
-          // formationCenter (perpendicular forward), so the camera ends
-          // at its original perpendicular orientation when CursorAvatar
-          // takes back over.
-          const phaseT = Math.min(
-            1,
-            (t - SWING_PRE - SWING_MID) / SWING_POST,
-          );
-          const eased = smoothstep(phaseT);
-          targetPos.current
-            .copy(sideB.current)
-            .lerp(initialCamPos.current, eased);
-          targetLook.current
-            .copy(wordCenter.current)
-            .lerp(formationCenter.current, eased);
-        }
+        // Post: lerp position from sideB back to initial. LookAt also
+        // lerps from wordCenter (mid's offset target) back to
+        // formationCenter (perpendicular forward), so the camera ends
+        // at its original perpendicular orientation when CursorAvatar
+        // takes back over.
+        const phaseT = Math.min(1, (t - SWING_PRE - SWING_MID) / SWING_POST);
+        const eased = smoothstep(phaseT);
+        targetPos.current.copy(sideB.current).lerp(initialCamPos.current, eased);
+        targetLook.current.copy(wordCenter.current).lerp(formationCenter.current, eased);
       }
+    }
 
-      state.camera.position.copy(targetPos.current);
-      state.camera.lookAt(targetLook.current);
-    },
-    1,
-  );
+    state.camera.position.copy(targetPos.current);
+    state.camera.lookAt(targetLook.current);
+  }, 1);
 
   return null;
 }

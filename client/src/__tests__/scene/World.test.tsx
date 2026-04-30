@@ -3,15 +3,19 @@ import { render } from '@testing-library/react';
 import { World } from '@/components/scene';
 import { useWorldStore } from '@/store';
 
+interface DimensionsProps {
+  dimensions: [number, number, number];
+}
+
 // Mock child components so we test World in isolation.
 vi.mock('@/components/scene/BoxEnvironment', () => ({
-  BoxEnvironment: (props: any) => (
+  BoxEnvironment: (props: DimensionsProps) => (
     <div data-testid="box-environment" data-dimensions={JSON.stringify(props.dimensions)} />
   ),
 }));
 
 vi.mock('@/components/scene/SkyBackground', () => ({
-  SkyBackground: (props: any) => (
+  SkyBackground: (props: DimensionsProps) => (
     <div data-testid="sky-background" data-dimensions={JSON.stringify(props.dimensions)} />
   ),
 }));

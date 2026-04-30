@@ -8,7 +8,9 @@ const OFFSET_Y = 16;
 type MotionMode = 'default' | 'silent';
 
 function readMotionMode(): MotionMode {
-  if (typeof window === 'undefined') return 'default';
+  if (typeof window === 'undefined') {
+    return 'default';
+  }
   return new URLSearchParams(window.location.search).get('motion') === 'silent'
     ? 'silent'
     : 'default';
@@ -50,7 +52,7 @@ export function CursorText(): JSX.Element {
 
   // Pointer tracking — desktop + mobile browsers that expose pointermove.
   useEffect(() => {
-    const onMove = (e: PointerEvent) => {
+    const onMove = (e: PointerEvent): void => {
       target.current.x = e.clientX;
       target.current.y = e.clientY;
     };
@@ -60,9 +62,13 @@ export function CursorText(): JSX.Element {
 
   // Gyroscope tracking for mobile.
   useEffect(() => {
-    if (!motionGranted) return;
-    const onOrient = (e: DeviceOrientationEvent) => {
-      if (e.gamma === null || e.beta === null) return;
+    if (!motionGranted) {
+      return;
+    }
+    const onOrient = (e: DeviceOrientationEvent): void => {
+      if (e.gamma === null || e.beta === null) {
+        return;
+      }
       // gamma: -90 (left) → 90 (right); normalise to 0..1 over ±45°
       const nx = Math.max(-1, Math.min(1, e.gamma / 45));
       // beta: 0 (flat face-up) → 90 (vertical); center on ~45°
@@ -76,7 +82,7 @@ export function CursorText(): JSX.Element {
 
   // Fade out on first click; leaves room for Phase 4 sword animation to take over.
   useEffect(() => {
-    const onClick = () => setHidden(true);
+    const onClick = (): void => setHidden(true);
     window.addEventListener('click', onClick, { once: true });
     return () => window.removeEventListener('click', onClick);
   }, []);
@@ -84,7 +90,7 @@ export function CursorText(): JSX.Element {
   // rAF-driven lerp. Mutates DOM directly — no React re-renders per frame.
   useEffect(() => {
     let rafId = 0;
-    const tick = () => {
+    const tick = (): void => {
       rendered.current.x += (target.current.x - rendered.current.x) * LERP;
       rendered.current.y += (target.current.y - rendered.current.y) * LERP;
       if (ref.current) {
@@ -98,13 +104,17 @@ export function CursorText(): JSX.Element {
     return () => cancelAnimationFrame(rafId);
   }, []);
 
-  const requestMotion = async () => {
+  const requestMotion = async (): Promise<void> => {
     try {
-      const req = (DeviceOrientationEvent as unknown as {
-        requestPermission: () => Promise<string>;
-      }).requestPermission;
+      const req = (
+        DeviceOrientationEvent as unknown as {
+          requestPermission: () => Promise<string>;
+        }
+      ).requestPermission;
       const result = await req();
-      if (result === 'granted') setMotionGranted(true);
+      if (result === 'granted') {
+        setMotionGranted(true);
+      }
     } catch {
       // Ignore — user denied or API missing. Fallback: text sits centered.
     }
@@ -118,7 +128,7 @@ export function CursorText(): JSX.Element {
       {iosGated && !motionGranted ? (
         <button
           type="button"
-          onClick={requestMotion}
+          onClick={() => void requestMotion()}
           style={{ ...buttonStyle, opacity: hidden ? 0 : 1 }}
         >
           Tap to enable motion
@@ -132,15 +142,18 @@ const textStyle: React.CSSProperties = {
   position: 'fixed',
   top: 0,
   left: 0,
-  color: '#00ffcc',
-  fontSize: 13,
+  color: '#e6fffb',
+  fontSize: 14,
+  fontWeight: 500,
   fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
   pointerEvents: 'none',
   zIndex: 10,
   transform: 'translate3d(0, 0, 0)',
   transition: 'opacity 0.6s ease-out',
-  letterSpacing: '0.02em',
-  textShadow: '0 0 8px rgba(0, 255, 204, 0.4)',
+  letterSpacing: '0.04em',
+  // Heavy dark outline so the text reads against the cyan grid wall.
+  textShadow:
+    '0 0 6px rgba(0, 0, 0, 0.95), 0 0 14px rgba(0, 0, 0, 0.85), 0 0 22px rgba(0, 255, 204, 0.5)',
   willChange: 'transform',
 };
 

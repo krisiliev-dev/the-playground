@@ -10,7 +10,7 @@ describe('CursorText', () => {
 
   it('hides after a click', () => {
     const { getByText } = render(<CursorText />);
-    const text = getByText('Your cursor got caught on my...') as HTMLElement;
+    const text = getByText('Your cursor got caught on my...');
     expect(text.style.opacity).not.toBe('0');
     fireEvent.click(window);
     expect(text.style.opacity).toBe('0');
@@ -18,10 +18,7 @@ describe('CursorText', () => {
 
   it('updates the pointer target on pointermove without throwing', () => {
     const { getByText } = render(<CursorText />);
-    fireEvent(
-      window,
-      new PointerEvent('pointermove', { clientX: 200, clientY: 300 }),
-    );
+    fireEvent(window, new PointerEvent('pointermove', { clientX: 200, clientY: 300 }));
     // The rAF loop mutates transform directly, which jsdom doesn't run.
     // This test only verifies the listener is wired and doesn't throw.
     expect(getByText('Your cursor got caught on my...')).toBeTruthy();

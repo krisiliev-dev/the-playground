@@ -16,51 +16,42 @@ import { DEFAULT_ENVIRONMENT } from '@/utils/defaults';
 
 // ─── Phase 4 — Sword + VIBE Reveal ───────────────────────────────────
 
-/**
- * Linear five-step state machine that drives the Phase 4 reveal beat.
- *
- * - `idle`: portal pulses subtly on the back wall, nothing else has happened.
- * - `armed`: user clicked; sword is materialising / starting its swing.
- * - `swinging`: blade is mid-arc, sound is whooshing.
- * - `impact`: blade has struck; cracks begin propagating; VIBE starts to glow.
- * - `revealed`: VIBE is fully lit, low reverb hum loops, sword is buried.
- *
- * Transitions are forward-only — once revealed, we stay there.
- */
 export type RevealState = 'idle' | 'armed' | 'swinging' | 'impact' | 'revealed';
 
 const REVEAL_ORDER: readonly RevealState[] = ['idle', 'armed', 'swinging', 'impact', 'revealed'];
 
+/**
+ * Where the user clicked, projected onto a cube wall. Stored as plain
+ * tuples so the store stays JSON-serialisable for future multiplayer sync.
+ */
+export interface ClickHit {
+  point: [number, number, number];
+  /** Inward-facing wall normal at the hit (points toward camera). */
+  normal: [number, number, number];
+}
+
 // ─── Store Actions ───────────────────────────────────────────────────
 
 interface AppActions {
-  /** Update the local player's position. */
   setPlayerPosition: (position: [number, number, number]) => void;
-  /** Update the local player's rotation. */
   setPlayerRotation: (rotation: [number, number, number]) => void;
-  /** Navigate to a specific zone (or null to free-roam). */
   setActiveZone: (zoneId: string | null) => void;
-  /** Replace the entire environment config (for live editing). */
   updateEnvironment: (config: EnvironmentConfig) => void;
-  /** Mark the experience as ready after loading completes. */
   setReady: (ready: boolean) => void;
-  /**
-   * Advance the Phase 4 reveal one step forward. No-op if we're already
-   * in the terminal `revealed` state.
-   */
+  /** Move the reveal one step forward; clamps at `revealed`. */
   advanceReveal: () => void;
-  /**
-   * Reset the reveal back to `idle` — used by tests and (eventually) a
-   * dev-only "replay" affordance.
-   */
+  /** Reset reveal back to `idle`. */
   resetReveal: () => void;
-  /** Toggle the Phase 5 cursor-avatar on/off. */
+  /** Persist where the user clicked so the sword/cracks/VIBE land there. */
+  setClickHit: (hit: ClickHit | null) => void;
+  /** Toggle the Phase 5 cursor-avatar visibility on/off. */
   toggleCursorAvatar: () => void;
-  /** Set the Phase 5 cursor-avatar state directly. */
+  /** Set the Phase 5 cursor-avatar visibility directly. */
   setCursorAvatarActive: (active: boolean) => void;
+  /** Mark the post-impact controls hint as dismissed. Triggers the
+   *  camera transition into 3rd-person avatar mode. */
+  setControlsDismissed: (dismissed: boolean) => void;
 }
-
-// ─── Initial State ───────────────────────────────────────────────────
 
 const createInitialPlayer = (): Player => ({
   id: generateId(),
@@ -71,22 +62,14 @@ const createInitialPlayer = (): Player => ({
 });
 
 interface RevealSlice {
-  /** Current step of the Phase 4 reveal beat. */
   revealState: RevealState;
+  /** Where the click landed, or null if no click yet. */
+  clickHit: ClickHit | null;
+  /** Whether the user has dismissed the post-impact controls hint.
+   *  CursorAvatar gates its 3rd-person camera transition on this. */
+  controlsDismissed: boolean;
 }
 
-// ─── Store ───────────────────────────────────────────────────────────
-
-/**
- * The main Zustand store. Components subscribe to slices of this state
- * using selectors to avoid unnecessary re-renders.
- *
- * @example
- * ```tsx
- * // In a component — only re-renders when position changes
- * const position = useWorldStore((s) => s.player.position);
- * ```
- */
 export const useWorldStore = create<AppState & AppActions & RevealSlice>((set) => ({
   // State
   player: createInitialPlayer(),
@@ -94,7 +77,11 @@ export const useWorldStore = create<AppState & AppActions & RevealSlice>((set) =
   activeZoneId: null,
   isReady: false,
   revealState: 'idle',
-  cursorAvatarActive: false,
+  clickHit: null,
+  controlsDismissed: false,
+  // Avatar lives from page load — small at first (cursor-sized), then grows
+  // once the reveal completes. See CursorAvatar.tsx for the scale logic.
+  cursorAvatarActive: true,
 
   // Actions
   setPlayerPosition: (position) =>
@@ -116,16 +103,23 @@ export const useWorldStore = create<AppState & AppActions & RevealSlice>((set) =
   advanceReveal: () =>
     set((state) => {
       const idx = REVEAL_ORDER.indexOf(state.revealState);
-      if (idx < 0 || idx >= REVEAL_ORDER.length - 1) return state;
+      if (idx < 0 || idx >= REVEAL_ORDER.length - 1) {
+        return state;
+      }
       const next = REVEAL_ORDER[idx + 1];
-      if (!next) return state;
+      if (!next) {
+        return state;
+      }
       return { revealState: next };
     }),
 
-  resetReveal: () => set({ revealState: 'idle' }),
+  resetReveal: () => set({ revealState: 'idle', clickHit: null, controlsDismissed: false }),
 
-  toggleCursorAvatar: () =>
-    set((state) => ({ cursorAvatarActive: !state.cursorAvatarActive })),
+  setClickHit: (hit) => set({ clickHit: hit }),
+
+  toggleCursorAvatar: () => set((state) => ({ cursorAvatarActive: !state.cursorAvatarActive })),
 
   setCursorAvatarActive: (active) => set({ cursorAvatarActive: active }),
+
+  setControlsDismissed: (dismissed) => set({ controlsDismissed: dismissed }),
 }));

@@ -10,8 +10,8 @@
 import type { EnvironmentConfig } from '@/types';
 
 export const DEFAULT_ENVIRONMENT: EnvironmentConfig = {
-  /** World box dimensions: 80×80×80 cube — the user sits inside. */
-  dimensions: [80, 80, 80],
+  /** World box dimensions: 800×800×800 cube — the user sits inside. */
+  dimensions: [800, 800, 800],
 
   ambientColor: '#12121a',
   ambientIntensity: 0.3,

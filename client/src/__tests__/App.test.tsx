@@ -5,8 +5,14 @@ import { useWorldStore } from '@/store';
 
 // Mock the R3F Canvas — jsdom can't run WebGL, so we verify
 // that App renders a Canvas and passes children into it.
+interface MockCanvasProps {
+  children?: React.ReactNode;
+  onCreated?: unknown;
+  [key: string]: unknown;
+}
+
 vi.mock('@react-three/fiber', () => ({
-  Canvas: ({ children, onCreated, ...props }: any) => (
+  Canvas: ({ children, onCreated: _onCreated, ...props }: MockCanvasProps) => (
     <div data-testid="r3f-canvas" {...props}>
       {children}
     </div>

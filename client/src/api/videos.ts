@@ -22,35 +22,38 @@ export interface VideoJob {
   updated_at: string;
 }
 
-const API_BASE = import.meta.env.VITE_API_URL ?? 'https://krisiliev.dev';
+const API_BASE: string =
+  (import.meta.env.VITE_API_URL as string | undefined) ?? 'https://krisiliev.dev';
 
 export async function listReadyVideos(): Promise<VideoJob[]> {
   const res = await fetch(`${API_BASE}/api/video/list`);
-  if (!res.ok) throw new Error(`Failed to list videos: ${res.status}`);
-  return res.json();
+  if (!res.ok) {
+    throw new Error(`Failed to list videos: ${res.status}`);
+  }
+  return (await res.json()) as VideoJob[];
 }
 
 export async function listAllJobs(token: string): Promise<VideoJob[]> {
   const res = await fetch(`${API_BASE}/api/video/jobs`, {
     headers: { Authorization: `Bearer ${token}` },
   });
-  if (!res.ok) throw new Error(`Failed to list jobs: ${res.status}`);
-  return res.json();
+  if (!res.ok) {
+    throw new Error(`Failed to list jobs: ${res.status}`);
+  }
+  return (await res.json()) as VideoJob[];
 }
 
 export async function getJob(id: string, token: string): Promise<VideoJob> {
   const res = await fetch(`${API_BASE}/api/video/jobs/${id}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
-  if (!res.ok) throw new Error(`Failed to fetch job: ${res.status}`);
-  return res.json();
+  if (!res.ok) {
+    throw new Error(`Failed to fetch job: ${res.status}`);
+  }
+  return (await res.json()) as VideoJob;
 }
 
-export async function convertVideo(
-  token: string,
-  url: string,
-  name: string,
-): Promise<VideoJob> {
+export async function convertVideo(token: string, url: string, name: string): Promise<VideoJob> {
   const res = await fetch(`${API_BASE}/api/video/convert`, {
     method: 'POST',
     headers: {
@@ -63,5 +66,5 @@ export async function convertVideo(
     const text = await res.text();
     throw new Error(`Convert failed (${res.status}): ${text}`);
   }
-  return res.json();
+  return (await res.json()) as VideoJob;
 }
