@@ -2,7 +2,14 @@
 #
 # Deployment targets:
 # - Client: Vercel (automatic, no config needed here)
-# - Server: SSH into EC2, pull, rebuild Docker, restart
+# - Server: build the Docker image on the GitHub-hosted runner, ship it
+#   to EC2 over SSH as a tarball, `docker load` and run it there.
+#
+# Why we don't build on EC2: the small EC2 instance can't compile this
+# Rust dep set inside the SSH command_timeout — 30+ minutes wasn't
+# enough on the cold path. The hosted runner (16 GB / 4 cores) plus
+# Buildx layer cache (cache-from/cache-to: type=gha) gets cold builds
+# under 5 min and warm builds under 1 min.
 
 name: Deploy
 
@@ -16,10 +23,36 @@ concurrency:
 
 jobs:
   deploy-server:
-    name: "Deploy Server"
+    name: "Build & Deploy Server"
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy to EC2 via SSH
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build server image with GHA layer cache
+        uses: docker/build-push-action@v5
+        with:
+          context: ./server
+          load: true
+          tags: playground-server:latest
+          cache-from: type=gha,scope=server
+          cache-to: type=gha,mode=max,scope=server
+
+      - name: Export image to tarball
+        run: docker save playground-server:latest -o playground-server.tar
+
+      - name: Copy image tarball to EC2
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: playground-server.tar
+          target: /tmp/
+
+      - name: Load image and (re)start container on EC2
         uses: appleboy/ssh-action@v1
         env:
           ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
@@ -29,15 +62,10 @@ jobs:
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           envs: ADMIN_TOKEN,VIDEOS_PUBLIC_PREFIX
-          # Cold Rust compile on the EC2 box exceeds the default 10m
-          # window; warm subsequent builds finish in seconds because the
-          # Dockerfile pre-fetches deps via a stub main.rs.
-          command_timeout: 30m
+          command_timeout: 5m
           script: |
-            cd ~/the-playground
-            git pull origin main
-            cd server
-            docker build -t playground-server .
+            docker load -i /tmp/playground-server.tar
+            rm /tmp/playground-server.tar
             docker stop playground-server || true
             docker rm playground-server || true
             mkdir -p /home/ubuntu/videos
@@ -48,5 +76,5 @@ jobs:
               -v /home/ubuntu/videos:/home/appuser/videos \
               -e ADMIN_TOKEN="$ADMIN_TOKEN" \
               -e VIDEOS_PUBLIC_PREFIX="$VIDEOS_PUBLIC_PREFIX" \
-              playground-server
+              playground-server:latest
             docker image prune -f
