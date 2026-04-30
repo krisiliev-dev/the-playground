@@ -32,9 +32,8 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    let videos_dir = PathBuf::from(
-        std::env::var("VIDEOS_DIR").unwrap_or_else(|_| "/home/ubuntu/videos".into()),
-    );
+    let videos_dir =
+        PathBuf::from(std::env::var("VIDEOS_DIR").unwrap_or_else(|_| "/home/ubuntu/videos".into()));
     let videos_public_prefix = std::env::var("VIDEOS_PUBLIC_PREFIX")
         .unwrap_or_else(|_| "https://krisiliev.dev/videos".into());
     let admin_token = std::env::var("ADMIN_TOKEN").unwrap_or_default();

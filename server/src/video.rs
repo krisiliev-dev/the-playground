@@ -256,10 +256,7 @@ pub async fn process_video(
     store.update_status(&job_id, JobStatus::Converting).await;
 
     let ff_result = Command::new("ffmpeg")
-        .args([
-            "-y",
-            "-i",
-        ])
+        .args(["-y", "-i"])
         .arg(&raw_path)
         .args([
             "-vf",
