@@ -1,18 +1,29 @@
 # Audio Sources — Phase 4 Sword Reveal
 
-All audio in this directory is sourced from **Mixkit** under the
-[Mixkit Sound Effects Free License](https://mixkit.co/license/#sfxFree),
-which permits commercial use with **no attribution required**.
+All audio in this directory is **synthesised on the dev machine with FFmpeg** —
+basic oscillators + filtered noise + envelopes. They're placeholders chosen for
+the right *character* (drone, swoosh, thud, crack, sustain), not production
+polish. Replace with proper licensed SFX when you find ones you like.
 
-| File | Beat | Source URL | License |
-| ---- | ---- | ---------- | ------- |
-| `portal-hum.mp3` | Quiet ambient hum from the portal before the click. Loops. | https://assets.mixkit.co/active_storage/sfx/2399/2399-preview.mp3 (catalogue: https://mixkit.co/free-sound-effects/ambience/) | Mixkit Free License (no attribution) |
-| `sword-summon.mp3` | Metallic shing as the sword materialises on click. | https://assets.mixkit.co/active_storage/sfx/1485/1485-preview.mp3 (catalogue: https://mixkit.co/free-sound-effects/sword/) | Mixkit Free License (no attribution) |
-| `sword-swoosh.mp3` | Swoosh as the sword arcs toward the wall. | https://assets.mixkit.co/active_storage/sfx/2160/2160-preview.mp3 (catalogue: https://mixkit.co/free-sound-effects/sword/) | Mixkit Free License (no attribution) |
-| `impact.mp3` | Heavy thud at the moment the blade strikes the wall. | https://assets.mixkit.co/active_storage/sfx/1143/1143-preview.mp3 (catalogue: https://mixkit.co/free-sound-effects/impact/) | Mixkit Free License (no attribution) |
-| `crack.mp3` | Glass crack propagation as fractures spread. | https://assets.mixkit.co/active_storage/sfx/2826/2826-preview.mp3 (catalogue: https://mixkit.co/free-sound-effects/glass/) | Mixkit Free License (no attribution) |
-| `vibe-hum.mp3` | Low reverb hum as VIBE glows through the cracks. | https://assets.mixkit.co/active_storage/sfx/368/368-preview.mp3 (catalogue: https://mixkit.co/free-sound-effects/ambience/) | Mixkit Free License (no attribution) |
+| File | Beat | Synthesis recipe |
+| ---- | ---- | ---------------- |
+| `portal-hum.mp3` | Ambient hum from the portal. Loops. | 55 Hz sine + 0.4 Hz vibrato @ 0.6 ratio + 0.45 vol + soft fades |
+| `sword-summon.mp3` | Metallic shing as the sword materialises on click. | 440 Hz sine pitched up 1.5× + bandpass @ 2 kHz + 50 ms attack |
+| `sword-swoosh.mp3` | Swoosh as the sword arcs toward the wall. | Brown noise + 400–4000 Hz bandpass + 40 ms attack + 250 ms decay |
+| `impact.mp3` | Heavy thud at the moment the blade strikes the wall. | 70 Hz sine + 2.2× volume + 40 ms attack + 450 ms decay |
+| `crack.mp3` | Glass crack propagation as fractures spread. | White noise + 2.5–8 kHz bandpass + 10 ms attack + slow tail |
+| `vibe-hum.mp3` | Low reverb hum as VIBE glows through the cracks. Loops. | 100 Hz sine + 0.3 Hz tremolo + 0.35 vol + soft fades |
 
-All files are under ~500 KB. They are committed to the repo under
-`client/public/audio/` so they ship with the static client and don't
-require a runtime fetch from a third party.
+## Regeneration
+
+The FFmpeg one-liners are in the commit that introduced this file. Quickest re-bake of the impact thud:
+
+```bash
+cd client/public/audio
+ffmpeg -y -f lavfi -i "sine=frequency=70:duration=0.5" \
+  -af "volume=2.2,afade=t=out:st=0.04:d=0.45" -ac 2 impact.mp3
+```
+
+## Licensing
+
+Synthesised audio has no copyright restriction — it's first-principles oscillator output. Free to redistribute and ship with the site.
