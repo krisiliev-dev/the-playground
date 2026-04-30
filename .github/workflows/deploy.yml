@@ -51,6 +51,10 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           source: playground-server.tar
           target: /tmp/
+          # scp-action wraps in tar+gzip before send; on the EC2 disk
+          # both the upload + remote untar of a ~230 MB image take ~9
+          # min combined. 20m gives a safety buffer.
+          command_timeout: 20m
 
       - name: Load image and (re)start container on EC2
         uses: appleboy/ssh-action@v1
@@ -62,7 +66,10 @@ jobs:
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           envs: ADMIN_TOKEN,VIDEOS_PUBLIC_PREFIX
-          command_timeout: 5m
+          # `docker load` of a 230 MB tarball on the EC2 box can exceed
+          # 5 min on slow EBS — bump to 15m. Subsequent deploys without
+          # layer changes finish in seconds (docker dedups by hash).
+          command_timeout: 15m
           script: |
             docker load -i /tmp/playground-server.tar
             rm /tmp/playground-server.tar
