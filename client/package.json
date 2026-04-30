@@ -22,12 +22,17 @@
     "@react-three/fiber": "^8.17.0",
     "@react-three/postprocessing": "^2.16.0",
     "hls.js": "^1.6.15",
+    "postprocessing": "^6.39.1",
+    "r3f-perf": "^7.2.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "three": "^0.169.0",
     "zustand": "^5.0.0"
   },
   "devDependencies": {
+    "@gltf-transform/cli": "^4.3.0",
+    "@gltf-transform/core": "^4.3.0",
+    "@gltf-transform/functions": "^4.3.0",
     "@testing-library/jest-dom": "^6.6.0",
     "@testing-library/react": "^16.0.0",
     "@types/node": "^25.5.2",
