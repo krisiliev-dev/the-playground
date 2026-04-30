@@ -40,3 +40,11 @@ pnpm-debug.log*
 
 # ── Vercel ──────────────────────────────────────────────────────────
 .vercel
+
+# ── Media (large binaries, served via the admin pipeline) ──────────
+client/public/videos/*.mp4
+client/public/videos/*.webm
+client/public/videos/*.jpg
+client/public/videos/*.png
+client/src/assets/*.mp4
+client/src/assets/*.webm

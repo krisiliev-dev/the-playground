@@ -21,10 +21,14 @@ jobs:
     steps:
       - name: Deploy to EC2 via SSH
         uses: appleboy/ssh-action@v1
+        env:
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+          VIDEOS_PUBLIC_PREFIX: ${{ secrets.VIDEOS_PUBLIC_PREFIX }}
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
+          envs: ADMIN_TOKEN,VIDEOS_PUBLIC_PREFIX
           script: |
             cd ~/the-playground
             git pull origin main
@@ -32,5 +36,13 @@ jobs:
             docker build -t playground-server .
             docker stop playground-server || true
             docker rm playground-server || true
-            docker run -d --name playground-server -p 8080:8080 --restart unless-stopped playground-server
+            mkdir -p /home/ubuntu/videos
+            docker run -d \
+              --name playground-server \
+              -p 8080:8080 \
+              --restart unless-stopped \
+              -v /home/ubuntu/videos:/home/appuser/videos \
+              -e ADMIN_TOKEN="$ADMIN_TOKEN" \
+              -e VIDEOS_PUBLIC_PREFIX="$VIDEOS_PUBLIC_PREFIX" \
+              playground-server
             docker image prune -f

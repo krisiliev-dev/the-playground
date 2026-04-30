@@ -21,16 +21,16 @@ portfolio-world/
 
 ### Tech Stack
 
-| Layer       | Technology                        | Purpose                            |
-|-------------|-----------------------------------|------------------------------------|
-| 3D Engine   | Three.js + React Three Fiber      | Declarative 3D scene in React      |
-| UI          | React 18 + TypeScript             | Type-safe, component-based UI      |
-| Styling     | CSS Modules / Tailwind            | Scoped, utility-first styles       |
-| Post-FX     | @react-three/postprocessing       | Bloom, AO, DOF for visual polish   |
-| 3D Models   | glTF/GLB format                   | Industry-standard web 3D format    |
-| Server      | Rust (Axum + tokio-tungstenite)   | WebSocket relay, env state         |
-| CI/CD       | GitHub Actions                    | Lint, test, build, deploy          |
-| Hosting     | Vercel (client) + Fly.io (server) | Edge CDN + lightweight server      |
+| Layer     | Technology                        | Purpose                          |
+| --------- | --------------------------------- | -------------------------------- |
+| 3D Engine | Three.js + React Three Fiber      | Declarative 3D scene in React    |
+| UI        | React 18 + TypeScript             | Type-safe, component-based UI    |
+| Styling   | CSS Modules / Tailwind            | Scoped, utility-first styles     |
+| Post-FX   | @react-three/postprocessing       | Bloom, AO, DOF for visual polish |
+| 3D Models | glTF/GLB format                   | Industry-standard web 3D format  |
+| Server    | Rust (Axum + tokio-tungstenite)   | WebSocket relay, env state       |
+| CI/CD     | GitHub Actions                    | Lint, test, build, deploy        |
+| Hosting   | Vercel (client) + Fly.io (server) | Edge CDN + lightweight server    |
 
 ## Getting Started
 
@@ -71,13 +71,13 @@ cargo clippy       # Lint
 
 ## Environments
 
-| Environment | URL                     | Deploys From | Purpose              |
-|-------------|-------------------------|--------------|----------------------|
-| Production  | krisiliev.dev           | `main`       | Live portfolio       |
-| Demo        | demo.krisiliev.dev      | `develop`    | Staging / preview    |
-| Preview     | PR-specific URL         | PR branches  | Per-PR preview       |
-| API (prod)  | api.krisiliev.dev       | `main`       | WebSocket server     |
-| API (demo)  | api-demo.krisiliev.dev  | `develop`    | Demo WS server       |
+| Environment | URL                    | Deploys From | Purpose           |
+| ----------- | ---------------------- | ------------ | ----------------- |
+| Production  | krisiliev.dev          | `main`       | Live portfolio    |
+| Demo        | demo.krisiliev.dev     | `develop`    | Staging / preview |
+| Preview     | PR-specific URL        | PR branches  | Per-PR preview    |
+| API (prod)  | api.krisiliev.dev      | `main`       | WebSocket server  |
+| API (demo)  | api-demo.krisiliev.dev | `develop`    | Demo WS server    |
 
 ## License
 

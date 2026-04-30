@@ -6,9 +6,12 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::{broadcast, RwLock};
+use tokio::sync::{broadcast, RwLock, Semaphore};
 use uuid::Uuid;
+
+use crate::video::JobStore;
 
 /// Maximum concurrent WebSocket connections.
 /// Protects against connection-flooding attacks.
@@ -67,18 +70,48 @@ pub struct AppState {
     /// Broadcast channel — sends messages to all connected WebSocket clients.
     /// Capacity of 256 messages buffered; slow readers will miss old messages.
     pub broadcast_tx: broadcast::Sender<BroadcastMessage>,
+
+    /// Video conversion job store (persisted to disk).
+    pub video_jobs: JobStore,
+
+    /// Serializes heavy video pipelines — permits = 1 to protect RAM.
+    pub video_semaphore: Arc<Semaphore>,
+
+    /// Directory where converted MP4s are saved (served by nginx).
+    pub videos_dir: PathBuf,
+
+    /// Public URL prefix where the videos directory is exposed
+    /// (e.g. "https://krisiliev.dev/videos").
+    pub videos_public_prefix: String,
+
+    /// Bearer token required for admin endpoints.
+    pub admin_token: String,
 }
 
 impl AppState {
     /// Create a new instance with default values.
-    pub fn new() -> Self {
+    pub async fn new(
+        videos_dir: PathBuf,
+        videos_public_prefix: String,
+        admin_token: String,
+    ) -> Self {
         let (broadcast_tx, _) = broadcast::channel(256);
+
+        // Create videos dir if missing and load/persist the jobs file there.
+        let _ = tokio::fs::create_dir_all(&videos_dir).await;
+        let jobs_path = videos_dir.join("jobs.json");
+        let video_jobs = JobStore::load(jobs_path).await;
 
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             connections_per_ip: Arc::new(RwLock::new(HashMap::new())),
             environment: Arc::new(RwLock::new(Self::default_environment())),
             broadcast_tx,
+            video_jobs,
+            video_semaphore: Arc::new(Semaphore::new(1)),
+            videos_dir,
+            videos_public_prefix,
+            admin_token,
         }
     }
 

@@ -1,0 +1,11 @@
+Model Information:
+* title:	Finn's swords Adventure Time
+* source:	https://sketchfab.com/3d-models/finns-swords-adventure-time-de341e84b44f4132ba9f4afdd2e27899
+* author:	jcwiki (https://sketchfab.com/jcwiki)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Finn's swords Adventure Time" (https://sketchfab.com/3d-models/finns-swords-adventure-time-de341e84b44f4132ba9f4afdd2e27899) by jcwiki (https://sketchfab.com/jcwiki) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

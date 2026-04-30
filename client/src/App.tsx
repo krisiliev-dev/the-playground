@@ -1,63 +1,82 @@
-/**
- * App — the root component of Portfolio World.
- *
- * Renders an R3F Canvas (the 3D scene) with a DOM overlay (the HUD).
- * The Canvas uses Suspense to show a loading screen while assets load.
- *
- * Architecture:
- * ┌──────────────────────────────────┐
- * │  App                             │
- * │  ├── Canvas (WebGL)              │
- * │  │   └── Suspense                │
- * │  │       └── World (3D scene)    │
- * │  └── HUD (DOM overlay)           │
- * └──────────────────────────────────┘
- */
-
-import { Suspense, useState, useCallback } from 'react';
+import { Suspense, lazy, useEffect } from 'react';
 import { Canvas } from '@react-three/fiber';
-import { Preload } from '@react-three/drei';
-import { World } from '@/components/scene';
-import { HUD, LoadingScreen } from '@/components/ui';
+import { World, PostFx, DevTools, ShakeGroup, CursorAvatar } from '@/components/scene';
+import { CursorText, Crosshair, ControlsHint } from '@/components/overlay';
+import { useWorldStore } from '@/store';
+
+const AdminPanel = lazy(() =>
+  import('@/components/admin/AdminPanel').then((m) => ({ default: m.AdminPanel })),
+);
+
+function isAdminRoute(): boolean {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+  const params = new URLSearchParams(window.location.search);
+  return params.get('admin') === '1';
+}
+
+/**
+ * Dev shortcut: press `C` to toggle the cursor avatar visibility.
+ * Useful for stepping into the small/large states without playing the
+ * whole reveal sequence. Ignores events from text inputs so admin typing
+ * doesn't fire it.
+ */
+function useAvatarDevHotkey(): void {
+  const toggleCursorAvatar = useWorldStore((s) => s.toggleCursorAvatar);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent): void => {
+      const target = e.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || target.isContentEditable) {
+          return;
+        }
+      }
+      if (e.key === 'c' || e.key === 'C') {
+        toggleCursorAvatar();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [toggleCursorAvatar]);
+}
 
 export function App(): JSX.Element {
-  const [isLoaded, setIsLoaded] = useState(false);
+  useAvatarDevHotkey();
 
-  const handleCreated = useCallback(() => {
-    // Canvas is ready and WebGL context is initialized
-    setIsLoaded(true);
-  }, []);
+  if (isAdminRoute()) {
+    return (
+      <Suspense fallback={null}>
+        <AdminPanel />
+      </Suspense>
+    );
+  }
 
   return (
     <div style={styles.root}>
-      {/* Loading screen — visible until the Canvas fires onCreated */}
-      {!isLoaded && <LoadingScreen progress={0} />}
-
-      {/* The 3D scene */}
       <Canvas
-        camera={{
-          fov: 60,
-          near: 0.1,
-          far: 100,
-          position: [0, 0, 5],
-        }}
-        dpr={[1, 2]} // Retina support, capped at 2x for performance
-        gl={{
-          antialias: true,
-          alpha: false,
-          powerPreference: 'high-performance',
-        }}
-        onCreated={handleCreated}
+        camera={{ fov: 60, near: 0.1, far: 1500, position: [0, 0, -360] }}
+        dpr={[1, 2]}
+        gl={{ antialias: true, alpha: false, powerPreference: 'high-performance' }}
         style={styles.canvas}
       >
+        <color attach="background" args={['#0a0a12']} />
         <Suspense fallback={null}>
-          <World />
-          <Preload all />
+          <ShakeGroup>
+            <World />
+          </ShakeGroup>
         </Suspense>
+        {/* Cursor lives outside ShakeGroup so it doesn't jitter with the
+            camera-shake on sword impacts. */}
+        <CursorAvatar />
+        <PostFx />
+        <DevTools />
       </Canvas>
-
-      {/* 2D UI overlay on top of the 3D scene */}
-      {isLoaded && <HUD />}
+      <Crosshair />
+      <ControlsHint />
+      <CursorText />
     </div>
   );
 }
@@ -67,7 +86,7 @@ const styles: Record<string, React.CSSProperties> = {
     position: 'fixed',
     inset: 0,
     overflow: 'hidden',
-    backgroundColor: '#0a0a1a',
+    backgroundColor: '#0a0a12',
   },
   canvas: {
     width: '100%',

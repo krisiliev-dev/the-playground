@@ -65,12 +65,12 @@ React Three Fiber integrates into the existing React/TypeScript ecosystem. The 3
 
 ## Alternatives Considered
 
-| Approach | Rejected Because |
-|---|---|
-| Unreal + Pixel Streaming | Cost, latency, complexity, overkill for scene |
-| Unity + WebGL export | Larger runtime bundle, worse React integration |
-| Babylon.js | Smaller ecosystem than Three.js, less React tooling |
-| A-Frame | Higher-level abstraction limits fine control |
+| Approach                 | Rejected Because                                    |
+| ------------------------ | --------------------------------------------------- |
+| Unreal + Pixel Streaming | Cost, latency, complexity, overkill for scene       |
+| Unity + WebGL export     | Larger runtime bundle, worse React integration      |
+| Babylon.js               | Smaller ecosystem than Three.js, less React tooling |
+| A-Frame                  | Higher-level abstraction limits fine control        |
 
 ## References
 

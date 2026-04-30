@@ -3,6 +3,11 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 
 export default defineConfig({
+  /** node_modules is symlinked to ~/code/playground-deps/client/node_modules
+   *  (see project_dev_setup.md). Pin cacheDir there directly so dep
+   *  optimization writes land in the stash filesystem rather than crossing
+   *  the symlink. */
+  cacheDir: '/Users/kristiyaniliev/code/playground-deps/client/.vite',
   plugins: [react()],
   resolve: {
     alias: {
@@ -36,6 +41,17 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    fs: {
+      /** Source lives in ~/code/playground/client; node_modules is a symlink
+       *  resolving to ~/code/playground-deps/client/node_modules. Vite's
+       *  default fs.allow is the project root only — the resolved
+       *  node_modules path lies outside it, so without this Vite would
+       *  refuse to serve the optimized dep bundles. */
+      allow: [
+        '/Users/kristiyaniliev/code/playground/client',
+        '/Users/kristiyaniliev/code/playground-deps/client',
+      ],
+    },
     /** Proxy WebSocket connections to the Rust server during development */
     proxy: {
       '/ws': {

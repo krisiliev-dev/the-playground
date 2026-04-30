@@ -27,10 +27,21 @@ RUN touch src/main.rs && cargo build --release
 
 FROM debian:bookworm-slim AS runtime
 
-# Install minimal runtime dependencies
+# Install runtime dependencies:
+#   ca-certificates  — HTTPS requests
+#   curl             — used by HEALTHCHECK and yt-dlp updater
+#   ffmpeg           — EAC → equirectangular conversion
+#   python3 + pip    — yt-dlp is a Python tool
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
+    curl \
+    ffmpeg \
+    python3 \
+    python3-pip \
     && rm -rf /var/lib/apt/lists/*
+
+# Install yt-dlp (newer than the apt package; breaks often if stale)
+RUN pip3 install --no-cache-dir --break-system-packages yt-dlp
 
 # Create a non-root user for security
 RUN useradd --create-home --shell /bin/bash appuser
@@ -38,10 +49,14 @@ USER appuser
 
 WORKDIR /home/appuser
 
+# Videos directory — bind-mounted from the host in production
+RUN mkdir -p /home/appuser/videos
+
 # Copy the compiled binary from the builder
 COPY --from=builder /app/target/release/portfolio-world-server ./server
 
 # Default environment variables
+ENV VIDEOS_DIR=/home/appuser/videos
 ENV PORT=8080
 ENV RUST_LOG=info
 

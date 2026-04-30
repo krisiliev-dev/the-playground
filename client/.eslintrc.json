@@ -73,7 +73,16 @@
           "opacity",
           "object",
           "scale",
-          "dispose"
+          "dispose",
+          "vertexShader",
+          "fragmentShader",
+          "uniforms",
+          "depthWrite",
+          "depthTest",
+          "renderOrder",
+          "blending",
+          "map",
+          "attach"
         ]
       }
     ]

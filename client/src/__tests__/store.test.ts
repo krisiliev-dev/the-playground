@@ -13,14 +13,22 @@ describe('useWorldStore', () => {
   // Reset the store to its initial state before each test.
   // Zustand stores are singletons, so we need to manually reset.
   beforeEach(() => {
-    const { setPlayerPosition, setPlayerRotation, setActiveZone, setReady } =
-      useWorldStore.getState();
+    const {
+      setPlayerPosition,
+      setPlayerRotation,
+      setActiveZone,
+      setReady,
+      setCursorAvatarActive,
+      resetReveal,
+    } = useWorldStore.getState();
 
     // Reset to defaults
     setPlayerPosition([0, 0, 5]);
     setPlayerRotation([0, 0, 0]);
     setActiveZone(null);
     setReady(false);
+    setCursorAvatarActive(false);
+    resetReveal();
   });
 
   // ── Player state ─────────────────────────────────────────────
@@ -121,6 +129,99 @@ describe('useWorldStore', () => {
     it('should mark as ready', () => {
       useWorldStore.getState().setReady(true);
       expect(useWorldStore.getState().isReady).toBe(true);
+    });
+  });
+
+  // ── Phase 4 reveal slice ─────────────────────────────────────
+
+  describe('reveal', () => {
+    it('should start in idle', () => {
+      expect(useWorldStore.getState().revealState).toBe('idle');
+    });
+
+    it('should advance idle → armed', () => {
+      useWorldStore.getState().advanceReveal();
+      expect(useWorldStore.getState().revealState).toBe('armed');
+    });
+
+    it('should advance through every step in order', () => {
+      const order: string[] = [useWorldStore.getState().revealState];
+      for (let i = 0; i < 6; i++) {
+        useWorldStore.getState().advanceReveal();
+        order.push(useWorldStore.getState().revealState);
+      }
+      expect(order).toEqual([
+        'idle',
+        'armed',
+        'swinging',
+        'impact',
+        'revealed',
+        'revealed',
+        'revealed',
+      ]);
+    });
+
+    it('should not advance past revealed', () => {
+      const { advanceReveal } = useWorldStore.getState();
+      for (let i = 0; i < 10; i++) {
+        advanceReveal();
+      }
+      expect(useWorldStore.getState().revealState).toBe('revealed');
+    });
+
+    it('should reset to idle from any state', () => {
+      const { advanceReveal, resetReveal } = useWorldStore.getState();
+      advanceReveal();
+      advanceReveal();
+      advanceReveal();
+      expect(useWorldStore.getState().revealState).toBe('impact');
+      resetReveal();
+      expect(useWorldStore.getState().revealState).toBe('idle');
+    });
+  });
+
+  // ── Cursor avatar (Phase 5) ──────────────────────────────────
+
+  describe('cursorAvatar', () => {
+    it('toggleCursorAvatar should flip the flag on each call', () => {
+      useWorldStore.getState().setCursorAvatarActive(true);
+      const { toggleCursorAvatar } = useWorldStore.getState();
+      toggleCursorAvatar();
+      expect(useWorldStore.getState().cursorAvatarActive).toBe(false);
+      toggleCursorAvatar();
+      expect(useWorldStore.getState().cursorAvatarActive).toBe(true);
+    });
+
+    it('setCursorAvatarActive should set the flag directly', () => {
+      const { setCursorAvatarActive } = useWorldStore.getState();
+      setCursorAvatarActive(true);
+      expect(useWorldStore.getState().cursorAvatarActive).toBe(true);
+      setCursorAvatarActive(false);
+      expect(useWorldStore.getState().cursorAvatarActive).toBe(false);
+    });
+  });
+
+  describe('clickHit', () => {
+    it('defaults to null', () => {
+      useWorldStore.getState().setClickHit(null);
+      expect(useWorldStore.getState().clickHit).toBeNull();
+    });
+
+    it('setClickHit stores point + normal', () => {
+      useWorldStore.getState().setClickHit({
+        point: [1, 2, 3],
+        normal: [0, 0, 1],
+      });
+      expect(useWorldStore.getState().clickHit).toEqual({
+        point: [1, 2, 3],
+        normal: [0, 0, 1],
+      });
+    });
+
+    it('resetReveal also clears clickHit', () => {
+      useWorldStore.getState().setClickHit({ point: [1, 2, 3], normal: [1, 0, 0] });
+      useWorldStore.getState().resetReveal();
+      expect(useWorldStore.getState().clickHit).toBeNull();
     });
   });
 });
