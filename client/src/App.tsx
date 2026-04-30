@@ -59,13 +59,22 @@ export function App(): JSX.Element {
       <Canvas
         camera={{ fov: 60, near: 0.1, far: 1500, position: [0, 0, -360] }}
         dpr={[1, 2]}
-        // No `powerPreference: 'high-performance'` — Safari treats it as
-        // a hard demand to switch to the discrete GPU and refuses the
-        // WebGL context if it can't, so the whole scene fails to mount
-        // (`getShaderPrecisionFormat()` returns null at init). Letting
-        // the browser pick the GPU keeps Safari + iOS working; Chrome
-        // and Firefox don't notice the difference for a scene this size.
-        gl={{ antialias: true, alpha: false, failIfMajorPerformanceCaveat: false }}
+        // Explicitly set `powerPreference: 'default'` — R3F's default
+        // `WebGLRenderer` constructor passes 'high-performance' itself
+        // unless we override here, and Safari treats that as a hard
+        // demand to switch to the discrete GPU. If it can't honor the
+        // request, the WebGL context is created and immediately lost,
+        // so `getShaderPrecisionFormat()` returns null and Three.js
+        // bails before any scene mounts (blank page).
+        // `failIfMajorPerformanceCaveat: false` lets the browser fall
+        // back to a software/low-power renderer rather than refusing
+        // the context outright.
+        gl={{
+          antialias: true,
+          alpha: false,
+          powerPreference: 'default',
+          failIfMajorPerformanceCaveat: false,
+        }}
         style={styles.canvas}
       >
         <color attach="background" args={['#0a0a12']} />
