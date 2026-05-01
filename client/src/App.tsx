@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useState } from 'react';
 import { Canvas, useFrame, useThree, type RootState } from '@react-three/fiber';
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { World, PostFx, DevTools, ShakeGroup, CursorAvatar } from '@/components/scene';
@@ -155,66 +155,59 @@ function useAudioMute(): void {
 }
 
 /**
- * Restore `state.clock.elapsedTime` across `frameloop` transitions.
+ * Pause/resume the R3F render loop without triggering `setFrameloop`.
  *
- * R3F's `setFrameloop` *resets* `clock.elapsedTime` to 0 every time
- * the prop changes (https://github.com/pmndrs/react-three-fiber —
- * see `setFrameloop` in createStore). That breaks any animation
- * that timestamps with `state.clock.elapsedTime`:
+ * R3F's `setFrameloop` zeroes `state.clock.elapsedTime` on every
+ * prop transition (see `setFrameloop` in @react-three/fiber's
+ * createStore). Toggling `frameloop` between "always" and "never"
+ * therefore wipes the time-axis that AvatarCursor's intro pan,
+ * Haze3D's fade-out, and other ref timestamps depend on — the user
+ * symptom was the entire intro pan replaying on every doc → 3D
+ * return, with the cursor collapsing to POINTER_SCALE for ~1.5s
+ * while it lerped back up.
  *
- *   - AvatarCursor's `initialPanStart` was set to (e.g.) 14.5 when
- *     the user first dismissed the controls hint. After the reset,
- *     `clock.elapsedTime === 0`, so `elapsed = 0 - 14.5 = -14.5`,
- *     `panProgress` clamps to 0, the camera snaps to `initialCamPos`,
- *     `renderedScale` collapses to POINTER_SCALE — and the user sees
- *     the entire intro pan replay over 1.5s as if entering avatar
- *     mode for the first time. The exact symptom of the bug.
- *   - Haze3D's `fadeStart` and a few other ref timestamps suffer
- *     the same way.
+ * The fix avoids `setFrameloop` entirely:
+ *   - The Canvas is mounted with a constant `frameloop="demand"`.
+ *     R3F never calls setFrameloop after the initial mount because
+ *     the prop never changes; the clock therefore never gets reset.
+ *   - In 3D mode, we keep the loop alive by calling `invalidate()`
+ *     once per useFrame tick. R3F renders, our useFrame schedules
+ *     the next, and so on.
+ *   - In document mode, useFrame stops calling `invalidate()`. The
+ *     loop runs out its current frame and naturally stops (R3F
+ *     cancels its rAF when `repeat === 0`).
+ *   - On the doc → 3D transition, a useEffect kicks `invalidate()`
+ *     to restart the loop.
  *
- * Fix: continuously snapshot `clock.elapsedTime` while in 3D mode,
- * and write the snapshot back into the clock the moment we transition
- * out of document mode (after R3F's setFrameloop has zeroed it). All
- * timestamp-based animations then see the same time-axis they had
- * before the pause and stay at their settled state.
+ * When the loop pauses, the Three.js clock pauses with it (no
+ * getDelta calls). When it resumes, getDelta computes the full
+ * pause duration as a single delta, so `clock.elapsedTime` jumps
+ * forward by however long the user spent in document mode. That's
+ * exactly what we want: every timestamp ref is now well past its
+ * animation duration, so panProgress=1 and the steady-state holds.
  */
-function ClockPreserver(): null {
+function FrameLoopController(): null {
   const documentMode = useWorldStore((s) => s.documentMode);
-  const elapsedRef = useRef(0);
-  const wasDocumentModeRef = useRef(documentMode);
-  const { clock } = useThree();
-
-  useEffect(() => {
-    // eslint-disable-next-line no-console
-    console.log('[diag] ClockPreserver MOUNT, initial elapsedTime:', clock.elapsedTime);
-    return () => {
-      // eslint-disable-next-line no-console
-      console.log('[diag] ClockPreserver UNMOUNT');
-    };
-  }, [clock]);
+  const invalidate = useThree((state) => state.invalidate);
 
   useFrame(() => {
+    // Demand-mode loop kicker: every tick, request the next tick
+    // unless we've moved into document mode. Reading from
+    // `useWorldStore.getState()` (rather than the closure) ensures
+    // we see the latest value even on the boundary frame.
     if (!useWorldStore.getState().documentMode) {
-      elapsedRef.current = clock.elapsedTime;
+      invalidate();
     }
   });
 
   useEffect(() => {
-    const wasPaused = wasDocumentModeRef.current;
-    wasDocumentModeRef.current = documentMode;
-    // eslint-disable-next-line no-console
-    console.log('[diag] ClockPreserver effect', {
-      documentMode,
-      wasPaused,
-      'clock.elapsedTime now': clock.elapsedTime,
-      'elapsedRef.current': elapsedRef.current,
-    });
-    if (wasPaused && !documentMode && elapsedRef.current > 0) {
-      clock.elapsedTime = elapsedRef.current;
-      // eslint-disable-next-line no-console
-      console.log('[diag] ClockPreserver RESTORED clock.elapsedTime →', elapsedRef.current);
+    // Restart the loop on entry to 3D — useFrame can't self-restart
+    // once the loop has stopped, so we kick it from a React effect
+    // when documentMode flips false.
+    if (!documentMode) {
+      invalidate();
     }
-  }, [documentMode, clock]);
+  }, [documentMode, invalidate]);
 
   return null;
 }
@@ -393,16 +386,17 @@ export function App(): JSX.Element {
             camera={CANVAS_CAMERA}
             dpr={CANVAS_DPR}
             gl={CANVAS_GL}
-            // `frameloop="never"` halts the render loop entirely while
-            // in document mode — no useFrame ticks, no GPU draw calls,
-            // CPU and GPU drop to idle. Animations resume from exactly
-            // their pre-pause state when we flip back to 'always'.
-            frameloop={documentMode ? 'never' : 'always'}
+            // Constant "demand" — toggling between "always"/"never"
+            // would call setFrameloop on every transition, which
+            // wipes state.clock.elapsedTime and makes every
+            // timestamp-based animation replay. FrameLoopController
+            // gates the loop via invalidate() instead.
+            frameloop="demand"
             style={styles.canvas}
             onCreated={handleCreated}
           >
             <SceneRootTracker />
-            <ClockPreserver />
+            <FrameLoopController />
             <color attach="background" args={['#0a0a12']} />
             <Suspense fallback={null}>
               <ShakeGroup>

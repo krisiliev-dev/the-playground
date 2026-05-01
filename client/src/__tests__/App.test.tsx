@@ -39,12 +39,16 @@ vi.mock('@react-three/fiber', () => ({
       </div>
     );
   },
-  // ClockPreserver inside Canvas calls these. Tests don't render the
-  // real R3F runtime, so we stub them out as inert no-ops — useFrame
-  // never fires (no render loop), and useThree returns a fake clock
-  // whose elapsedTime is just a writable number.
+  // FrameLoopController inside Canvas calls these. Tests don't render
+  // the real R3F runtime, so we stub them out as inert no-ops —
+  // useFrame never fires (no render loop), and useThree returns a
+  // fake state shape that satisfies the selector forms used in App
+  // (`useThree(s => s.invalidate)` and the bare `useThree()` call).
   useFrame: () => undefined,
-  useThree: () => ({ clock: { elapsedTime: 0 } }),
+  useThree: (selector?: (s: { invalidate: () => void }) => unknown) => {
+    const state = { invalidate: () => undefined };
+    return selector ? selector(state) : state;
+  },
 }));
 
 // Mock the World component (plus ShakeGroup + CursorAvatar) so we can
