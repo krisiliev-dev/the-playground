@@ -242,6 +242,23 @@ describe('useWorldStore', () => {
     });
   });
 
+  describe('muted', () => {
+    beforeEach(() => {
+      useWorldStore.getState().setMuted(false);
+    });
+
+    it('defaults to false', () => {
+      expect(useWorldStore.getState().muted).toBe(false);
+    });
+
+    it('setMuted toggles the flag', () => {
+      useWorldStore.getState().setMuted(true);
+      expect(useWorldStore.getState().muted).toBe(true);
+      useWorldStore.getState().setMuted(false);
+      expect(useWorldStore.getState().muted).toBe(false);
+    });
+  });
+
   describe('documentMode', () => {
     beforeEach(() => {
       // Each test starts from documentMode === false with a clean

@@ -65,6 +65,9 @@ interface AppActions {
    *  the lock on the next render. App clears it back to false
    *  after consuming. */
   setPendingPointerLock: (pending: boolean) => void;
+  /** Toggle the explicit user mute. Combined with documentMode by
+   *  App's audio-mute effect to set the live master volume. */
+  setMuted: (muted: boolean) => void;
   /** Set which interactable the crosshair is currently aimed at, or
    *  null if nothing is in range. The InteractionController updates
    *  this each frame; individual `useInteractable` consumers read it
@@ -114,6 +117,12 @@ interface RevealSlice {
    *  so the user resumes mouselook without a second confirming
    *  click. */
   pendingPointerLock: boolean;
+  /** Explicit user mute toggled from PauseMenu's audio control. The
+   *  effective master volume is `documentMode || muted ? 0 : 1`,
+   *  so document mode silences audio independently of the user's
+   *  preference (looped sounds keep playing past `frameloop="never"`
+   *  otherwise) but restores it on the way back. */
+  muted: boolean;
 }
 
 /**
@@ -195,6 +204,7 @@ export const useWorldStore = create<AppState & AppActions & RevealSlice & Intera
     menuOpen: false,
     documentMode: readPersistedDocumentMode(),
     pendingPointerLock: false,
+    muted: false,
     // Avatar lives from page load — small at first (cursor-sized), then grows
     // once the reveal completes. See CursorAvatar.tsx for the scale logic.
     cursorAvatarActive: true,
@@ -236,6 +246,8 @@ export const useWorldStore = create<AppState & AppActions & RevealSlice & Intera
     resetReveal: () => set({ revealState: 'idle', clickHit: null, controlsDismissed: false }),
 
     setPendingPointerLock: (pending) => set({ pendingPointerLock: pending }),
+
+    setMuted: (muted) => set({ muted }),
 
     setClickHit: (hit) => set({ clickHit: hit }),
 

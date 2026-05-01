@@ -3,6 +3,7 @@ import { useEffect, useRef } from 'react';
 import { act, render, screen } from '@testing-library/react';
 import { App } from '@/App';
 import { useWorldStore } from '@/store';
+import { sfx } from '@/components/audio/SfxManager';
 
 // Mock the R3F Canvas. jsdom has no WebGL, so we replace it with a
 // `<div>` wrapper for testid-based queries — but we ALSO mount a real
@@ -244,6 +245,61 @@ describe('App', () => {
 
         expect(requestPointerLockSpy).not.toHaveBeenCalled();
       });
+    });
+  });
+
+  // ── Audio mute coordination ────────────────────────────────────
+  describe('audio mute', () => {
+    let setMasterVolumeSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      setMasterVolumeSpy = vi.spyOn(sfx, 'setMasterVolume').mockImplementation(() => undefined);
+      useWorldStore.setState({ muted: false, documentMode: false });
+    });
+
+    afterEach(() => {
+      setMasterVolumeSpy.mockRestore();
+      useWorldStore.setState({ muted: false });
+    });
+
+    it('starts at full volume on initial 3D mount', () => {
+      render(<App />);
+      expect(setMasterVolumeSpy).toHaveBeenLastCalledWith(1);
+    });
+
+    it('mutes when entering document mode and restores on exit', () => {
+      render(<App />);
+      act(() => {
+        useWorldStore.setState({ documentMode: true });
+      });
+      expect(setMasterVolumeSpy).toHaveBeenLastCalledWith(0);
+      act(() => {
+        useWorldStore.setState({ documentMode: false });
+      });
+      expect(setMasterVolumeSpy).toHaveBeenLastCalledWith(1);
+    });
+
+    it('mutes when the user toggles muted from PauseMenu', () => {
+      render(<App />);
+      act(() => {
+        useWorldStore.setState({ muted: true });
+      });
+      expect(setMasterVolumeSpy).toHaveBeenLastCalledWith(0);
+    });
+
+    it('respects the user mute when leaving document mode', () => {
+      // User mutes, then enters doc mode, then leaves. Master volume
+      // should stay at 0 — leaving doc mode shouldn't override the
+      // explicit user preference.
+      useWorldStore.setState({ muted: true });
+      render(<App />);
+      act(() => {
+        useWorldStore.setState({ documentMode: true });
+      });
+      act(() => {
+        useWorldStore.setState({ documentMode: false });
+      });
+      expect(setMasterVolumeSpy).toHaveBeenLastCalledWith(0);
     });
   });
 

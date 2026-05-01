@@ -8,7 +8,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { PauseMenu } from '@/components/overlay/PauseMenu';
-import { sfx } from '@/components/audio/SfxManager';
 import { useWorldStore } from '@/store';
 
 function setMatchMedia(matches: boolean): void {
@@ -213,18 +212,21 @@ describe('PauseMenu', () => {
   });
 
   describe('Audio toggle', () => {
-    it('calls sfx.setMasterVolume(0) on first click and (1) on second', () => {
-      const spy = vi.spyOn(sfx, 'setMasterVolume');
+    beforeEach(() => {
+      useWorldStore.setState({ muted: false });
+    });
+
+    it('flips the store muted flag on click', () => {
       renderMenu();
       act(() => {
         window.dispatchEvent(mEvent());
       });
       const audioBtn = screen.getByText(/Audio:/);
+      expect(useWorldStore.getState().muted).toBe(false);
       fireEvent.click(audioBtn);
-      expect(spy).toHaveBeenLastCalledWith(0);
+      expect(useWorldStore.getState().muted).toBe(true);
       fireEvent.click(audioBtn);
-      expect(spy).toHaveBeenLastCalledWith(1);
-      spy.mockRestore();
+      expect(useWorldStore.getState().muted).toBe(false);
     });
 
     it('button label reflects mute state', () => {

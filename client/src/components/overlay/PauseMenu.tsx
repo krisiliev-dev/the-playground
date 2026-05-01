@@ -18,7 +18,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { sfx } from '@/components/audio/SfxManager';
 import { useWorldStore } from '@/store';
 import { acquirePointerLock, useIsTouchPrimary } from '@/utils';
 
@@ -46,7 +45,12 @@ const KEYMAP_TOUCH: ReadonlyArray<{ key: string; desc: string }> = [
 export function PauseMenu(): JSX.Element | null {
   const [open, setOpen] = useState(false);
   const [contactOpen, setContactOpen] = useState(false);
-  const [muted, setMuted] = useState(false);
+  // The mute preference lives in the store so App's audio-mute
+  // effect can combine it with documentMode (looped sounds keep
+  // playing past `frameloop="never"` otherwise — the AudioContext
+  // is independent of the render loop).
+  const muted = useWorldStore((s) => s.muted);
+  const setMuted = useWorldStore((s) => s.setMuted);
   const navigate = useNavigate();
   const location = useLocation();
   const isTouch = useIsTouchPrimary();
@@ -130,12 +134,9 @@ export function PauseMenu(): JSX.Element | null {
     void navigate(-1);
   };
 
-  const toggleMute = (): void => {
-    const next = !muted;
-    setMuted(next);
-    // sfx.setMasterVolume clamps internally; 0 = silence, 1 = full.
-    sfx.setMasterVolume(next ? 0 : 1);
-  };
+  // Just flip the store flag — App's effect on (documentMode, muted)
+  // is the single source of truth for the live master volume.
+  const toggleMute = (): void => setMuted(!muted);
 
   const isHome = location.pathname === '/';
   const keymap = isTouch ? KEYMAP_TOUCH : KEYMAP_DESKTOP;

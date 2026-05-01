@@ -22,6 +22,31 @@ const AdminPanel = lazy(() =>
   import('@/components/admin/AdminPanel').then((m) => ({ default: m.AdminPanel })),
 );
 
+// Module-level Canvas configuration. R3F applies the `camera` /
+// `gl` / `dpr` props to its internal state when their references
+// change — so passing fresh object literals from JSX would cause
+// `camera.position` to be re-applied (reset to spawn) on every
+// re-render, including the doc → 3D toggle. Stable references mean
+// these are applied exactly once on mount.
+const CANVAS_CAMERA = {
+  fov: 60,
+  near: 0.1,
+  far: 1500,
+  position: [0, 0, -360] as [number, number, number],
+};
+const CANVAS_DPR = [1, 2] as [number, number];
+// `powerPreference: 'default'` keeps Safari from forcing a discrete
+// GPU switch (which would create-then-immediately-lose the context
+// on machines that can't honor it). `failIfMajorPerformanceCaveat:
+// false` lets the browser fall back to a software/low-power
+// renderer rather than refusing to create the context outright.
+const CANVAS_GL = {
+  antialias: true,
+  alpha: false,
+  powerPreference: 'default',
+  failIfMajorPerformanceCaveat: false,
+} as const;
+
 function isAdminRoute(): boolean {
   if (typeof window === 'undefined') {
     return false;
@@ -111,9 +136,28 @@ function useAvatarDevHotkey(): void {
   }, [toggleCursorAvatar]);
 }
 
+/**
+ * Audio mute coordination. `frameloop="never"` halts rendering but
+ * the AudioContext is independent — a wallAmbient loop that was
+ * playing when the user flipped into Simple Experience would keep
+ * playing over the document. We therefore drive the live master
+ * volume from `(documentMode || muted)`, with documentMode acting
+ * as a transient mute layered on top of PauseMenu's explicit user
+ * preference. Returning to 3D restores audio to the user's chosen
+ * level.
+ */
+function useAudioMute(): void {
+  const documentMode = useWorldStore((s) => s.documentMode);
+  const muted = useWorldStore((s) => s.muted);
+  useEffect(() => {
+    sfx.setMasterVolume(documentMode || muted ? 0 : 1);
+  }, [documentMode, muted]);
+}
+
 export function App(): JSX.Element {
   useGlobalMouseFeedback();
   useAvatarDevHotkey();
+  useAudioMute();
   // Simple Experience document mode. When true, the 3D scene
   // (Canvas + cursor + animations) is *paused and hidden* rather
   // than torn down: `frameloop="never"` stops the GPU work, and a
@@ -255,29 +299,14 @@ export function App(): JSX.Element {
         aria-hidden={documentMode ? true : undefined}
       >
         <Canvas
-          camera={{ fov: 60, near: 0.1, far: 1500, position: [0, 0, -360] }}
-          dpr={[1, 2]}
+          camera={CANVAS_CAMERA}
+          dpr={CANVAS_DPR}
+          gl={CANVAS_GL}
           // `frameloop="never"` halts the render loop entirely while
           // in document mode — no useFrame ticks, no GPU draw calls,
           // CPU and GPU drop to idle. Animations resume from exactly
           // their pre-pause state when we flip back to 'always'.
           frameloop={documentMode ? 'never' : 'always'}
-          // Explicitly set `powerPreference: 'default'` — R3F's default
-          // `WebGLRenderer` constructor passes 'high-performance' itself
-          // unless we override here, and Safari treats that as a hard
-          // demand to switch to the discrete GPU. If it can't honor the
-          // request, the WebGL context is created and immediately lost,
-          // so `getShaderPrecisionFormat()` returns null and Three.js
-          // bails before any scene mounts (blank page).
-          // `failIfMajorPerformanceCaveat: false` lets the browser fall
-          // back to a software/low-power renderer rather than refusing
-          // the context outright.
-          gl={{
-            antialias: true,
-            alpha: false,
-            powerPreference: 'default',
-            failIfMajorPerformanceCaveat: false,
-          }}
           style={styles.canvas}
           onCreated={handleCreated}
         >
