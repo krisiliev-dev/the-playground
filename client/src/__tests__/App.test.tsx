@@ -60,6 +60,11 @@ vi.mock('@/components/scene', () => ({
   CursorAvatar: () => <div data-testid="cursor-avatar" />,
   PostFx: () => null,
   DevTools: () => null,
+  PortalTransition: () => null,
+  // Source of truth for the duration constant — keep aligned with
+  // PortalTransition's PORTAL_TRANSIT_DURATION; the App imports it
+  // by name so the test mock has to surface a number.
+  PORTAL_TRANSIT_DURATION: 1.5,
 }));
 
 // CursorText/Crosshair/ControlsHint read window APIs on mount; stub them
@@ -291,6 +296,55 @@ describe('App', () => {
           value: null,
         });
       });
+    });
+  });
+
+  // ── Portal click-through transition overlay ─────────────────────
+  describe('PortalTransitionOverlay', () => {
+    beforeEach(() => {
+      useWorldStore.setState({ portalTransit: null, documentMode: false });
+    });
+
+    it('renders nothing when no transit is in progress', () => {
+      render(<App />);
+      // Overlay element is identified by its aria-hidden attribute
+      // and the portal-transit-fade animation. Without a transit,
+      // it shouldn't be in the DOM at all.
+      const overlays = document.querySelectorAll('[aria-hidden="true"]');
+      const transitOverlay = Array.from(overlays).find((el) =>
+        (el as HTMLElement).style.animation?.includes('portal-transit-fade'),
+      );
+      expect(transitOverlay).toBeUndefined();
+    });
+
+    it('renders the colored overlay while a transit is active', () => {
+      render(<App />);
+      act(() => {
+        useWorldStore.setState({ portalTransit: { path: '/about', color: '#4169e1' } });
+      });
+      const overlays = document.querySelectorAll('[aria-hidden="true"]');
+      const transitOverlay = Array.from(overlays).find((el) =>
+        (el as HTMLElement).style.animation?.includes('portal-transit-fade'),
+      );
+      expect(transitOverlay).toBeDefined();
+      // Background color matches the pie that was clicked.
+      expect((transitOverlay as HTMLElement).style.backgroundColor).toBe('rgb(65, 105, 225)');
+    });
+
+    it('does not render the overlay in document mode even if transit somehow set', () => {
+      // Defensive: SE portal flips documentMode, not portalTransit,
+      // so this shouldn't co-occur in practice — but if it ever did
+      // we'd want to favor the document UI.
+      useWorldStore.setState({
+        portalTransit: { path: '/about', color: '#4169e1' },
+        documentMode: true,
+      });
+      render(<App />);
+      const overlays = document.querySelectorAll('[aria-hidden="true"]');
+      const transitOverlay = Array.from(overlays).find((el) =>
+        (el as HTMLElement).style.animation?.includes('portal-transit-fade'),
+      );
+      expect(transitOverlay).toBeUndefined();
     });
   });
 

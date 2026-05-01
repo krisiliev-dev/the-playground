@@ -276,6 +276,26 @@ describe('useWorldStore', () => {
     });
   });
 
+  describe('portalTransit', () => {
+    beforeEach(() => {
+      useWorldStore.getState().setPortalTransit(null);
+    });
+
+    it('defaults to null (no click-through in progress)', () => {
+      expect(useWorldStore.getState().portalTransit).toBeNull();
+    });
+
+    it('setPortalTransit stores the path + color and clears back to null', () => {
+      useWorldStore.getState().setPortalTransit({ path: '/about', color: '#4169e1' });
+      expect(useWorldStore.getState().portalTransit).toEqual({
+        path: '/about',
+        color: '#4169e1',
+      });
+      useWorldStore.getState().setPortalTransit(null);
+      expect(useWorldStore.getState().portalTransit).toBeNull();
+    });
+  });
+
   describe('documentMode', () => {
     beforeEach(() => {
       // Each test starts from documentMode === false with a clean

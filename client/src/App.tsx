@@ -1,7 +1,15 @@
 import { Suspense, lazy, useCallback, useEffect, useState } from 'react';
 import { Canvas, useFrame, useThree, type RootState } from '@react-three/fiber';
 import { BrowserRouter, Route, Routes, useNavigate } from 'react-router-dom';
-import { World, PostFx, DevTools, ShakeGroup, CursorAvatar } from '@/components/scene';
+import {
+  World,
+  PostFx,
+  DevTools,
+  ShakeGroup,
+  CursorAvatar,
+  PortalTransition,
+  PORTAL_TRANSIT_DURATION,
+} from '@/components/scene';
 import {
   CursorText,
   Crosshair,
@@ -186,6 +194,37 @@ function useAudioMute(): void {
  * exactly what we want: every timestamp ref is now well past its
  * animation duration, so panProgress=1 and the steady-state holds.
  */
+/**
+ * DOM-side counterpart to PortalTransition. Renders a fullscreen
+ * fade overlay in the portal's color while a click-through is in
+ * progress; opacity ramps from 0 → 1 over `PORTAL_TRANSIT_DURATION`
+ * via a CSS animation. Hides itself when `portalTransit === null`,
+ * which PortalTransition sets when its camera dolly completes.
+ */
+function PortalTransitionOverlay(): JSX.Element | null {
+  const portalTransit = useWorldStore((s) => s.portalTransit);
+  if (!portalTransit) {
+    return null;
+  }
+  return (
+    <>
+      <style>{`@keyframes portal-transit-fade { from { opacity: 0; } to { opacity: 1; } }`}</style>
+      <div
+        aria-hidden
+        style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: portalTransit.color,
+          pointerEvents: 'none',
+          zIndex: 50,
+          opacity: 0,
+          animation: `portal-transit-fade ${PORTAL_TRANSIT_DURATION}s ease-in forwards`,
+        }}
+      />
+    </>
+  );
+}
+
 /**
  * Bridges in-world Portal clicks → react-router navigation. Portals
  * live inside the R3F Canvas where react-router's context doesn't
@@ -383,6 +422,7 @@ export function App(): JSX.Element {
             onCreated={handleCreated}
           >
             <FrameLoopController />
+            <PortalTransition />
             <color attach="background" args={['#0a0a12']} />
             <Suspense fallback={null}>
               <ShakeGroup>
@@ -430,6 +470,7 @@ export function App(): JSX.Element {
           body="The 3D renderer lost its GPU context. This is rare; reloading restores the scene."
         />
       )}
+      {!documentMode && <PortalTransitionOverlay />}
     </BrowserRouter>
   );
 }

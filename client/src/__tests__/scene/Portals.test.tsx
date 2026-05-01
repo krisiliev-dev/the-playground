@@ -49,6 +49,7 @@ describe('Portals', () => {
       revealState: 'idle',
       clickHit: null,
       pendingNavigation: null,
+      portalTransit: null,
       documentMode: false,
     });
   });
@@ -58,6 +59,7 @@ describe('Portals', () => {
       revealState: 'idle',
       clickHit: null,
       pendingNavigation: null,
+      portalTransit: null,
       documentMode: false,
     });
   });
@@ -125,31 +127,39 @@ describe('Portals', () => {
       useWorldStore.setState({ revealState: 'revealed', clickHit: SAMPLE_HIT });
     });
 
-    it('section portal "About" sets pendingNavigation to /about', () => {
+    it('section portal "About" starts a portalTransit to /about with the pie color', () => {
       render(<Portals />);
       const handler = capturedHandlers.get('portal-about');
       expect(handler).toBeDefined();
       act(() => handler?.());
-      expect(useWorldStore.getState().pendingNavigation).toBe('/about');
+      // Phase 2: click no longer routes immediately — it kicks off a
+      // camera dolly. PortalTransition writes pendingNavigation when
+      // the dolly completes.
+      expect(useWorldStore.getState().portalTransit).toEqual({
+        path: '/about',
+        color: '#4169e1',
+      });
+      expect(useWorldStore.getState().pendingNavigation).toBeNull();
     });
 
-    it('section portal "Projects" sets pendingNavigation to /projects', () => {
+    it('section portal "Projects" starts a portalTransit to /projects', () => {
       render(<Portals />);
       act(() => capturedHandlers.get('portal-projects')?.());
-      expect(useWorldStore.getState().pendingNavigation).toBe('/projects');
+      expect(useWorldStore.getState().portalTransit?.path).toBe('/projects');
     });
 
-    it('section portal "Writing" sets pendingNavigation to /writing', () => {
+    it('section portal "Writing" starts a portalTransit to /writing', () => {
       render(<Portals />);
       act(() => capturedHandlers.get('portal-writing')?.());
-      expect(useWorldStore.getState().pendingNavigation).toBe('/writing');
+      expect(useWorldStore.getState().portalTransit?.path).toBe('/writing');
     });
 
-    it('Simple Experience portal flips documentMode (does NOT route)', () => {
+    it('Simple Experience portal flips documentMode (skips the dolly)', () => {
       render(<Portals />);
       act(() => capturedHandlers.get('portal-simple-experience')?.());
       expect(useWorldStore.getState().documentMode).toBe(true);
-      // And critically does NOT set a navigation path.
+      // SE doesn't transition — it's a mode flip, not a route change.
+      expect(useWorldStore.getState().portalTransit).toBeNull();
       expect(useWorldStore.getState().pendingNavigation).toBeNull();
     });
   });
@@ -167,11 +177,11 @@ describe('Portals', () => {
       expect(capturedHandlers.has('portal-simple-experience')).toBe(true);
     });
 
-    it('renders a <points> ring per pie (4 total) for the digital particles', () => {
+    it('renders three particle layers per pie (12 total) for size + speed variety', () => {
       const { container } = render(<Portals />);
-      // Each RimParticles wraps a <points> in a <group>; queryAll
-      // captures all four (one per pie quadrant).
-      expect(container.querySelectorAll('points')).toHaveLength(4);
+      // 4 pies × 3 RimParticleLayers — small/medium/large with
+      // different counts, sizes, and orbit speeds for parallax depth.
+      expect(container.querySelectorAll('points')).toHaveLength(12);
     });
   });
 });

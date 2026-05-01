@@ -878,6 +878,13 @@ function AvatarCursor({ refs }: ModeProps): null {
     if (!group) {
       return;
     }
+    // Yield camera control to PortalTransition while a click-through
+    // dolly is in progress — both writers fighting over camera.position
+    // every frame produces jitter, and PortalTransition's animation is
+    // the user-visible thing during this window.
+    if (useWorldStore.getState().portalTransit) {
+      return;
+    }
     const k = 1 - Math.exp(-SCALE_LERP_RATE * delta);
 
     // Capture pre-pan state on the first frame of avatar mode.

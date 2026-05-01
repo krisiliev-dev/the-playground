@@ -30,6 +30,22 @@ export interface ClickHit {
   normal: [number, number, number];
 }
 
+/**
+ * Active click-through portal transition. While set, the in-Canvas
+ * `PortalTransition` component owns the camera (AvatarCursor's
+ * useFrame yields), dollying it toward the disc hub over a fixed
+ * duration. A sibling DOM overlay fades the portal's color over
+ * the canvas in lockstep. At completion the transition writes
+ * `pendingNavigation` to push the route and clears itself.
+ */
+export interface PortalTransit {
+  /** Route to push once the camera dolly finishes. */
+  path: string;
+  /** Portal color — drives the DOM fade overlay so it matches the
+   *  pie the user clicked. */
+  color: string;
+}
+
 // ─── Store Actions ───────────────────────────────────────────────────
 
 interface AppActions {
@@ -69,6 +85,10 @@ interface AppActions {
    *  in-world Portal wants App's NavigationConsumer to navigate to.
    *  Pass `null` to clear after consumption. */
   setPendingNavigation: (path: string | null) => void;
+  /** Begin (or end) a click-through portal transition. Pass a
+   *  PortalTransit to start one; pass null to clear after the
+   *  PortalTransition driver finishes its dolly. */
+  setPortalTransit: (transit: PortalTransit | null) => void;
   /** Toggle the explicit user mute. Combined with documentMode by
    *  App's audio-mute effect to set the live master volume. */
   setMuted: (muted: boolean) => void;
@@ -128,6 +148,13 @@ interface RevealSlice {
    *  `navigate()`. The store mediates because react-router's
    *  context doesn't reliably bridge across R3F's reconciler. */
   pendingNavigation: string | null;
+  /** Active click-through transition. Set when the user clicks a
+   *  section portal; the in-Canvas `PortalTransition` runs a
+   *  ~1.5s camera dolly toward the disc hub while a DOM overlay
+   *  fades the portal's color over the canvas. At completion the
+   *  transition writes `pendingNavigation` and clears itself. Null
+   *  whenever no transition is in progress. */
+  portalTransit: PortalTransit | null;
   /** Explicit user mute toggled from PauseMenu's audio control. The
    *  effective master volume is `documentMode || muted ? 0 : 1`,
    *  so document mode silences audio independently of the user's
@@ -217,6 +244,7 @@ export const useWorldStore = create<AppState & AppActions & RevealSlice & Intera
     documentMode: readPersistedDocumentMode(),
     pendingPointerLock: false,
     pendingNavigation: null,
+    portalTransit: null,
     muted: false,
     // Avatar lives from page load — small at first (cursor-sized), then grows
     // once the reveal completes. See CursorAvatar.tsx for the scale logic.
@@ -261,6 +289,8 @@ export const useWorldStore = create<AppState & AppActions & RevealSlice & Intera
     setPendingPointerLock: (pending) => set({ pendingPointerLock: pending }),
 
     setPendingNavigation: (path) => set({ pendingNavigation: path }),
+
+    setPortalTransit: (transit) => set({ portalTransit: transit }),
 
     setMuted: (muted) => set({ muted }),
 

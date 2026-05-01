@@ -67,20 +67,22 @@ const RIM_Z_OFFSET = 0.04;
 const RIM_IDLE_EMISSIVE = 2.2;
 const RIM_HOVER_EMISSIVE = 3.4;
 const RIM_PRESS_EMISSIVE = 4.6;
-/** Particle count per pie. ~20 reads as digital sparse rather than
- *  dense haze; tune up if it looks too quiet against the rim. */
-const PARTICLES_PER_PIE = 20;
-/** Pixel size for the rim particles. sizeAttenuation:false +
- *  small pixel size keeps them crisp regardless of distance —
- *  reads as digital pixels rather than soft fireflies. */
-const PARTICLE_PIXEL_SIZE = 3;
 /** Radial jitter applied to each particle's distance from center.
  *  Particles sit at PORTAL_RADIUS ± this; small enough that they
  *  cluster on the rim, large enough that they don't all line up. */
-const PARTICLE_RADIAL_JITTER = 0.55;
-/** Particle orbit speed (radians/sec). The whole particle ring
- *  slowly rotates around the disc center. */
-const PARTICLE_ORBIT_SPEED = 0.18;
+const PARTICLE_RADIAL_JITTER = 0.7;
+/** Three particle layers per pie — varying counts, pixel sizes, and
+ *  orbital speeds give a sense of depth + motion without needing a
+ *  custom shader. The smallest layer dominates by count and moves
+ *  the fastest (foreground sparkle); the largest layer is sparse
+ *  and slow (anchor points). All sizes are screen-pixels with
+ *  sizeAttenuation:false so they read as digital dots regardless
+ *  of viewing distance. */
+const PARTICLE_LAYERS: ReadonlyArray<{ count: number; size: number; speed: number }> = [
+  { count: 60, size: 2, speed: 1.4 },
+  { count: 35, size: 4, speed: 0.9 },
+  { count: 15, size: 7, speed: 0.5 },
+];
 
 const HOVER_SCALE = 1.05;
 const PRESS_SCALE = 0.97;
@@ -215,10 +217,14 @@ interface SectionPortalPieProps {
 }
 
 function SectionPortalPie({ id, thetaStart, color, path }: SectionPortalPieProps): JSX.Element {
-  const setPendingNavigation = useWorldStore((s) => s.setPendingNavigation);
+  const setPortalTransit = useWorldStore((s) => s.setPortalTransit);
   const { ref, isHovered, isPressed } = useInteractable({
     id,
-    onInteract: () => setPendingNavigation(path),
+    // Don't navigate immediately — kick off a click-through camera
+    // dolly via the store. PortalTransition (Canvas child) reads
+    // this, runs the animation, then writes pendingNavigation when
+    // the dolly completes so NavigationConsumer can dispatch.
+    onInteract: () => setPortalTransit({ path, color }),
   });
 
   return (
@@ -398,25 +404,53 @@ interface RimParticlesProps {
 }
 
 /**
- * Per-pie ring of "digital" particles hugging the outer rim. Each
- * particle is rendered as a small fixed-pixel point (sizeAttenuation
- * off, ~3px) so it reads as a crisp dot regardless of viewing
- * distance — the digital pixel feel the user described, not soft
- * fireflies.
- *
- * Particles are distributed within the pie's 90° arc with random
- * angular position and a small radial jitter, then the whole point
- * cloud orbits slowly around the disc center. Color matches the
- * pie's rim so each quadrant carries its own particle palette.
+ * Per-pie particle field on the outer rim. Three independent layers
+ * (small/many/fast → large/few/slow) give parallax depth and
+ * digital crispness without a custom shader: each layer is its own
+ * <points> + <group>, the group rotation is driven at the layer's
+ * own speed, and sizes are fixed screen-pixels (sizeAttenuation:false)
+ * so dots stay sharp regardless of viewing distance. Color matches
+ * the pie's rim — each quadrant carries its own particle palette.
  */
 function RimParticles({ thetaStart, color }: RimParticlesProps): JSX.Element {
+  return (
+    <>
+      {PARTICLE_LAYERS.map((layer, i) => (
+        <RimParticleLayer
+          key={i}
+          thetaStart={thetaStart}
+          color={color}
+          count={layer.count}
+          size={layer.size}
+          speed={layer.speed}
+        />
+      ))}
+    </>
+  );
+}
+
+interface RimParticleLayerProps {
+  thetaStart: number;
+  color: string;
+  count: number;
+  size: number;
+  speed: number;
+}
+
+function RimParticleLayer({
+  thetaStart,
+  color,
+  count,
+  size,
+  speed,
+}: RimParticleLayerProps): JSX.Element {
   const groupRef = useRef<Group>(null);
   // Pre-compute particle positions once per mount — they're random
   // within the pie's arc but otherwise stable; per-frame motion
   // happens via group rotation, not by re-randomizing positions.
   const positions = useMemo(() => {
-    const arr = new Float32Array(PARTICLES_PER_PIE * 3);
-    for (let i = 0; i < PARTICLES_PER_PIE; i++) {
+    const arr = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) {
       const theta = thetaStart + Math.random() * QUARTER;
       const r = PORTAL_RADIUS + (Math.random() * 2 - 1) * PARTICLE_RADIAL_JITTER;
       arr[i * 3] = Math.cos(theta) * r;
@@ -424,14 +458,14 @@ function RimParticles({ thetaStart, color }: RimParticlesProps): JSX.Element {
       arr[i * 3 + 2] = RIM_Z_OFFSET;
     }
     return arr;
-  }, [thetaStart]);
+  }, [thetaStart, count]);
 
   useFrame((_state, delta) => {
     const g = groupRef.current;
     if (!g) {
       return;
     }
-    g.rotation.z += PARTICLE_ORBIT_SPEED * delta;
+    g.rotation.z += speed * delta;
   });
 
   return (
@@ -442,7 +476,7 @@ function RimParticles({ thetaStart, color }: RimParticlesProps): JSX.Element {
         </bufferGeometry>
         <pointsMaterial
           color={color}
-          size={PARTICLE_PIXEL_SIZE}
+          size={size}
           // eslint-disable-next-line react/no-unknown-property
           sizeAttenuation={false}
           transparent
