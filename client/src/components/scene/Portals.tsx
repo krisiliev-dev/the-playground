@@ -41,23 +41,32 @@ const PORTAL_RADIUS = 10;
 /** Distance along the wall's inward normal to position the disc.
  *  Just enough to avoid z-fighting against the wall geometry. */
 const PORTAL_NORMAL_OFFSET = 0.1;
-/** Angular gap (radians) between pie slices, so they read as four
- *  distinct portals rather than a single solid disc. */
-const PORTAL_GAP = 0.04;
 /** CircleGeometry radial segments — higher = smoother arc edge. */
 const PORTAL_SEGMENTS = 64;
-/** A full quarter of the disc, less the angular gap on each side. */
+/** A full quarter of the disc. Pies butt up against each other
+ *  (no angular gap); the radial spokes drawn on top form the
+ *  visible boundary between adjacent quadrants. */
 const QUARTER = Math.PI / 2;
+/** Tube thickness for the per-pie outer arc rim. */
+const RIM_TUBE = 0.18;
+/** Tube thickness for the 4 white radial spokes. */
+const SPOKE_TUBE = 0.12;
+/** Slight z-offset for rim + spokes vs. the pie interior, to keep
+ *  them visually on top without z-fighting. */
+const RIM_Z_OFFSET = 0.04;
 
 const HOVER_SCALE = 1.05;
 const PRESS_SCALE = 0.97;
 const SCALE_LERP_RATE = 12;
-const IDLE_EMISSIVE = 0.7;
-const HOVER_EMISSIVE = 1.5;
-const PRESS_EMISSIVE = 2.5;
-const SE_IDLE_EMISSIVE = 0;
-const SE_HOVER_EMISSIVE = 0.3;
-const SE_PRESS_EMISSIVE = 0.6;
+/** Pie interior emissive levels. The darkened body lets a subtle
+ *  section-color glow seep through; hover/press just push that glow
+ *  brighter. The "real" colored visual is the outer arc rim. */
+const IDLE_EMISSIVE = 0.15;
+const HOVER_EMISSIVE = 0.5;
+const PRESS_EMISSIVE = 1.0;
+const SE_IDLE_EMISSIVE = 0.05;
+const SE_HOVER_EMISSIVE = 0.25;
+const SE_PRESS_EMISSIVE = 0.5;
 
 interface PieConfig {
   id: string;
@@ -145,7 +154,26 @@ function PortalsDisc({ clickHit }: PortalsDiscProps): JSX.Element {
         />
       ))}
       <SimpleExperiencePortalPie thetaStart={SE_PIE.thetaStart} color={SE_PIE.color} />
+      {/* Four white spokes between adjacent pies, plus a center hub.
+          Together with each pie's outer RimArc, they form the
+          glowing four-quadrant frame the user described. */}
+      {[0, 1, 2, 3].map((i) => (
+        <RadialSpoke key={`spoke-${i}`} angle={i * QUARTER} />
+      ))}
+      <CenterHub />
     </group>
+  );
+}
+
+/** Small glowing disc at the centre where all four pies meet — caps
+ *  the radial spokes' inner ends so the joint reads as a clean hub
+ *  rather than four overlapping cylinder ends. */
+function CenterHub(): JSX.Element {
+  return (
+    <mesh position={[0, 0, RIM_Z_OFFSET]}>
+      <circleGeometry args={[SPOKE_TUBE * 2, 16]} />
+      <meshStandardMaterial color="#ffffff" emissive="#ffffff" emissiveIntensity={2.5} />
+    </mesh>
   );
 }
 
@@ -258,19 +286,69 @@ function PortalPieMesh({
   });
 
   return (
-    <mesh ref={meshRef}>
-      <circleGeometry
-        args={[PORTAL_RADIUS, PORTAL_SEGMENTS, thetaStart + PORTAL_GAP / 2, QUARTER - PORTAL_GAP]}
-      />
-      <meshStandardMaterial
-        ref={matRef}
-        color={color}
-        emissive={emissive}
-        emissiveIntensity={idleEmissive}
-        metalness={0.4}
-        roughness={0.3}
-        side={2}
-      />
+    <group>
+      {/* Pie interior — darkened so the rim reads as the bright
+          element. The section colour seeps through as a low-intensity
+          emissive glow, suggesting depth/atmosphere "through" the
+          portal rather than a solid coloured panel. */}
+      <mesh ref={meshRef}>
+        <circleGeometry args={[PORTAL_RADIUS, PORTAL_SEGMENTS, thetaStart, QUARTER]} />
+        <meshStandardMaterial
+          ref={matRef}
+          color="#0a0a12"
+          emissive={emissive}
+          emissiveIntensity={idleEmissive}
+          metalness={0.5}
+          roughness={0.5}
+          side={2}
+        />
+      </mesh>
+      {/* Outer arc rim — the per-pie colored glowing edge. Floats
+          slightly forward of the interior so it visually crowns the
+          pie without z-fighting. */}
+      <RimArc thetaStart={thetaStart} color={color} />
+    </group>
+  );
+}
+
+interface RimArcProps {
+  thetaStart: number;
+  color: string;
+}
+
+/** A single quarter-arc tube hugging the outer edge of one pie.
+ *  Default torusGeometry starts its arc at angle 0; we rotate the
+ *  whole mesh by `thetaStart` to align the arc with the pie below. */
+function RimArc({ thetaStart, color }: RimArcProps): JSX.Element {
+  return (
+    <mesh position={[0, 0, RIM_Z_OFFSET]} rotation={[0, 0, thetaStart]}>
+      <torusGeometry args={[PORTAL_RADIUS, RIM_TUBE, 8, 24, QUARTER]} />
+      <meshStandardMaterial color={color} emissive={color} emissiveIntensity={2.2} />
+    </mesh>
+  );
+}
+
+/** A single radial spoke — thin glowing line from disc centre out to
+ *  the rim, sitting on top of the boundary between two adjacent pies.
+ *  Four of these (at 0, 90, 180, 270) plus the four arc rims form a
+ *  complete glowing frame around each pie quadrant. */
+interface RadialSpokeProps {
+  angle: number;
+}
+
+function RadialSpoke({ angle }: RadialSpokeProps): JSX.Element {
+  // Default cylinderGeometry's axis is +Y. We need it pointing
+  // outward at `angle`, so rotate by `angle - π/2` around Z (which
+  // sends +Y → (cos angle, sin angle)) and translate the centre to
+  // the spoke's midpoint.
+  const half = PORTAL_RADIUS / 2;
+  return (
+    <mesh
+      position={[Math.cos(angle) * half, Math.sin(angle) * half, RIM_Z_OFFSET]}
+      rotation={[0, 0, angle - Math.PI / 2]}
+    >
+      <cylinderGeometry args={[SPOKE_TUBE, SPOKE_TUBE, PORTAL_RADIUS, 8]} />
+      <meshStandardMaterial color="#ffffff" emissive="#ffffff" emissiveIntensity={1.8} />
     </mesh>
   );
 }
