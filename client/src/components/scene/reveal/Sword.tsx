@@ -37,15 +37,15 @@ import { triggerImpactShake } from '../cameraShake';
 import { FORMATION_SCALE, type SwordSlot } from './vibeFormation';
 import { sfx, type PositionalLoopHandle } from '../../audio/SfxManager';
 import { useSwordKinematics } from './useSwordKinematics';
-import {
-  MID_FORWARD,
-  SWING_DURATION,
-  SWING_DURATION_MS,
-  SWING_MID,
-  SWING_POST,
-  SWING_PRE,
-} from './constants';
+import { MID_FORWARD, SWING_DURATION, SWING_DURATION_MS } from './constants';
 import { computeSpawnPoint } from './spawnGeometry';
+import {
+  computeOrientationPhase,
+  computeSpinAngle,
+  computeTiltAngle,
+  computeTrajectoryProgress,
+  computeVisualScale,
+} from './swordPhases';
 
 const SWORD_URL = '/models/sword/scene.gltf';
 
@@ -116,12 +116,6 @@ const FLASH_RISE_FRACTION = 0.2;
 const IMPACT_FLASH_DURATION = 0.18;
 const IMPACT_FLASH_INITIAL_SCALE = 0.6;
 const IMPACT_FLASH_MAX_SCALE = 7;
-
-/** Smoothstep — cubic ease in/out. Standard tweener for phase-internal
- *  easing across each phase of the swing. */
-function smoothstep(t: number): number {
-  return t * t * (3 - 2 * t);
-}
 
 const TMP_BLADE_LOCAL = new Vector3(0, 1, 0);
 
@@ -601,96 +595,38 @@ export function Sword({ slot, staggerIndex = 0 }: SwordProps): JSX.Element {
           break;
         }
 
-        // ------- position (curve param p, mapped through the 3 phases) -------
-        // Pre: ease-OUT cubic — sword starts fast (rocket bursting in
-        // from the distance) and decelerates into formation. The decel
-        // IS the "U-turn into position" feel, suave settling.
-        // Mid: tiny linear drift through the formation.
-        // Post: ease-IN cubic — sword launches from formation,
-        // accelerates exponentially into the wall.
-        let p: number;
-        if (t < SWING_PRE) {
-          const phaseT = t / SWING_PRE;
-          const eased = 1 - Math.pow(1 - phaseT, 3);
-          p = 0.5 * eased;
-        } else if (t < SWING_PRE + SWING_MID) {
-          const phaseT = (t - SWING_PRE) / SWING_MID;
-          p = 0.5 + 0.05 * phaseT;
-        } else {
-          const phaseT = Math.min(1, (t - SWING_PRE - SWING_MID) / SWING_POST);
-          const eased = phaseT * phaseT * phaseT;
-          p = 0.55 + 0.45 * eased;
-        }
-        trajectoryCurve.getPoint(p, targetPos);
+        // Position along the curve, plus per-phase orientation, tilt,
+        // spin, and visual scale — all computed by the pure helpers in
+        // ./swordPhases so the phase logic is testable without
+        // instantiating Three.js. Quaternion application stays here
+        // because it needs the per-frame buffers (tmpQ, target, …).
+        trajectoryCurve.getPoint(computeTrajectoryProgress(t), targetPos);
 
-        // ------- orientation (sideways → upright → sideways) -------
-        // Pre flies sideways (tip-along-trajectory + slice roll), pivots
-        // upright in the last 0.5s. Mid holds upright. Post takes the
-        // ENTIRE 1s to rotate back to sideways — slow tilt-back into the
-        // sideways pose, so the formation gracefully unfolds toward the
-        // wall instead of snapping out in 0.5s.
-        if (t < SWING_PRE - ORIENTATION_TURN_TIME) {
+        const orient = computeOrientationPhase(t, ORIENTATION_TURN_TIME);
+        if (orient.phase === 'spawn') {
           targetQuat.copy(spawnQuat);
-        } else if (t < SWING_PRE) {
-          const ot = (t - (SWING_PRE - ORIENTATION_TURN_TIME)) / ORIENTATION_TURN_TIME;
-          targetQuat.copy(spawnQuat).slerp(midQuat, smoothstep(ot));
-        } else if (t < SWING_PRE + SWING_MID) {
+        } else if (orient.phase === 'spawn-to-mid') {
+          targetQuat.copy(spawnQuat).slerp(midQuat, orient.alpha);
+        } else if (orient.phase === 'mid') {
           targetQuat.copy(midQuat);
         } else {
-          // Post: full 1s slerp from midQuat (upright, broadside) to
-          // endQuat (sideways, slice-rolled).
-          const ot = Math.min(1, (t - SWING_PRE - SWING_MID) / SWING_POST);
-          targetQuat.copy(midQuat).slerp(endQuat, smoothstep(ot));
+          targetQuat.copy(midQuat).slerp(endQuat, orient.alpha);
         }
 
-        // ------- italics tilt (mid + fade through post) -------
-        // Mid: +TILT_MAX → -TILT_MAX over 2s. Post: continues from
-        // -TILT_MAX → 0 over 1s, so the formation un-tilts smoothly as
-        // it rotates to sideways instead of cutting off at the boundary.
-        let tiltAngle = 0;
-        if (t >= SWING_PRE && t < SWING_PRE + SWING_MID) {
-          const midPhaseT = (t - SWING_PRE) / SWING_MID;
-          tiltAngle = TILT_MAX * (1 - 2 * midPhaseT);
-        } else if (t >= SWING_PRE + SWING_MID && t < SWING_PRE + SWING_MID + SWING_POST) {
-          const postPhaseT = (t - SWING_PRE - SWING_MID) / SWING_POST;
-          tiltAngle = -TILT_MAX * (1 - postPhaseT);
-        }
+        const tiltAngle = computeTiltAngle(t, TILT_MAX);
         if (tiltAngle !== 0) {
           tmpQ.setFromAxisAngle(camFwd, tiltAngle);
           targetQuat.premultiply(tmpQ);
         }
 
-        // ------- tumble (end-over-end spin in world frame) -------
-        // Spin angle eases out (fast → slow) within each phase so each
-        // ends at exactly N×2π — that's identity, so the sword lands
-        // cleanly without residual rotation. Spin is zero through mid
-        // so the formation reads as a held pose, not a frozen tumble.
-        let spinAngle = 0;
-        if (t < SWING_PRE) {
-          const phaseT = t / SWING_PRE;
-          const easeOut = 1 - Math.pow(1 - phaseT, 3);
-          spinAngle = PRE_ROTATIONS * 2 * Math.PI * easeOut;
-        } else if (t < SWING_PRE + SWING_MID) {
-          spinAngle = 0;
-        } else {
-          const phaseT = Math.min(1, (t - SWING_PRE - SWING_MID) / SWING_POST);
-          const easeOut = 1 - Math.pow(1 - phaseT, 3);
-          spinAngle = POST_ROTATIONS * 2 * Math.PI * easeOut;
-        }
         // Spin around world-space camera-up axis so the sword swings
         // sideways in the camera's horizontal plane (helicopter-blade
         // rotation rather than vertical end-over-end tumble).
+        const spinAngle = computeSpinAngle(t, PRE_ROTATIONS, POST_ROTATIONS);
         tmpQ.setFromAxisAngle(camUp, spinAngle);
         targetQuat.premultiply(tmpQ);
 
-        // ------- visual scale (small → full over the pre phase) -------
-        if (t < SWING_PRE) {
-          const phaseT = t / SWING_PRE;
-          visualScale = SPAWN_VISUAL_SCALE + (1 - SPAWN_VISUAL_SCALE) * smoothstep(phaseT);
-        } else {
-          visualScale = 1;
-        }
-
+        visualScale = computeVisualScale(t, SPAWN_VISUAL_SCALE);
         opacityTarget = 1;
         break;
       }
