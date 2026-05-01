@@ -98,6 +98,16 @@ class SfxManager {
    *  Buffer is regenerated when `setRoomSize` is called. */
   private cubeReverb: ConvolverNode | null = null;
   private roomSize = DEFAULT_ROOM_SIZE;
+  /** iOS silent-switch workaround. iOS routes Web Audio through the
+   *  same audio category as the ringer/notification stream, which
+   *  the side mute switch silences — even when the AudioContext
+   *  reports `running`. Playing a continuously-looping HTMLAudio
+   *  element shifts the page into the "media playback" category,
+   *  which respects the volume buttons and ignores the silent
+   *  switch. The audio itself is silent (volume 0) so it has no
+   *  effect on what the user hears; the *act* of the element being
+   *  in a playing state is what matters to iOS. */
+  private silenceUnlockAudio: HTMLAudioElement | null = null;
   /** Decoded buffers per cue id. */
   private readonly buffers = new Map<SfxId, AudioBuffer[]>();
   /** Active singleton-loop sources per cue id, so we can stop them. */
@@ -713,6 +723,32 @@ class SfxManager {
     this.ctx = new Ctor();
     // eslint-disable-next-line no-console
     console.log('[sfx-debug] unlock: ctx created, state=', this.ctx.state);
+
+    // iOS silent-switch bypass — see `silenceUnlockAudio` declaration.
+    // Created lazily inside the gesture path so the .play() call is
+    // a permitted user-initiated playback. Wrapped in catch because
+    // some browsers reject .play() if autoplay constraints aren't
+    // met; if it fails, audio still works on platforms where the
+    // silent switch isn't an issue.
+    if (!this.silenceUnlockAudio) {
+      const a = new Audio(
+        // 1-second silent 8 kHz mono WAV, base64-encoded.
+        'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEAQB8AAEAfAAABAAgAAABmYWN0BAAAAAAAAABkYXRhAAAAAA==',
+      );
+      a.loop = true;
+      a.volume = 0;
+      a.play()
+        .then(() => {
+          // eslint-disable-next-line no-console
+          console.log('[sfx-debug] silenceUnlockAudio playing — iOS bypass active');
+        })
+        .catch((e: unknown) => {
+          // eslint-disable-next-line no-console
+          console.warn('[sfx-debug] silenceUnlockAudio play() rejected:', e);
+        });
+      this.silenceUnlockAudio = a;
+    }
+
     this.masterGain = this.ctx.createGain();
     this.masterGain.gain.value = 1;
     this.masterGain.connect(this.ctx.destination);

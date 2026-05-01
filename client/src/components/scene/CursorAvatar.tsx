@@ -115,8 +115,8 @@ const OUTLINE_SCALE = 1.06;
  *  reads with weight toward the lower-right — same character as the
  *  pre-fix asymmetric outline the user liked, but as a deliberate
  *  authored choice instead of a pivot accident. */
-const OUTLINE_SHIFT_X_FRACTION = 0.048;
-const OUTLINE_SHIFT_Y_FRACTION = -0.048;
+const OUTLINE_SHIFT_X_FRACTION = 0.012;
+const OUTLINE_SHIFT_Y_FRACTION = -0.012;
 
 useGLTF.preload(MODEL_URL);
 
@@ -487,6 +487,13 @@ function ActiveCursor(): JSX.Element {
     let touchIsDrag = false;
     let touchSingleActive = false;
 
+    // ---------- single-finger press on interactable ----------
+    /** When the crosshair is on an interactable at touchstart, the
+     *  user's intent is "hold to interact", not "swipe to look". We
+     *  synthesise mousedown immediately and skip drag promotion so
+     *  the cursor leans without the camera trying to rotate. */
+    let pressInteractActive = false;
+
     // ---------- two-finger gesture (pinch → forward/back) ----------
     let pinchActive = false;
     let pinchStartDist = 0;
@@ -513,15 +520,35 @@ function ActiveCursor(): JSX.Element {
         pinchActive = true;
         pinchStartDist = fingerDistance(e);
         touchSingleActive = false;
+        pressInteractActive = false;
         touchIsDrag = false;
         touchWalkVelocity.current = 0;
         return;
       }
       if (e.touches.length === 1) {
         const t = e.touches[0]!;
-        touchStartX = touchLastX = t.clientX;
-        touchStartY = touchLastY = t.clientY;
+        touchStartX = t.clientX;
+        touchStartY = t.clientY;
         touchStartTime = performance.now();
+
+        // If the crosshair is currently on an interactable, treat
+        // this touch as a press-to-interact, not a swipe-to-look.
+        // Synthesise mousedown so the InteractionController starts
+        // the press immediately (cursor leans). Movement during this
+        // touch is ignored; touchend will synthesise mouseup.
+        const hoveredId = useWorldStore.getState().hoveredInteractableId;
+        if (hoveredId) {
+          pressInteractActive = true;
+          touchSingleActive = false;
+          const init = { bubbles: true, clientX: t.clientX, clientY: t.clientY } as const;
+          window.dispatchEvent(new MouseEvent('mousedown', init));
+          return;
+        }
+
+        // No interactable under the crosshair — this is a candidate
+        // swipe-to-look or quick-tap-on-empty.
+        touchLastX = t.clientX;
+        touchLastY = t.clientY;
         touchIsDrag = false;
         touchSingleActive = true;
       }
@@ -536,6 +563,13 @@ function ActiveCursor(): JSX.Element {
         const delta = currentDist - pinchStartDist;
         const v = Math.max(-1, Math.min(1, delta / PINCH_FULL_THROTTLE_DELTA));
         touchWalkVelocity.current = v;
+        e.preventDefault();
+        return;
+      }
+
+      // Press-on-interactable absorbs all movement during the hold —
+      // the user is leaning, not rotating the camera.
+      if (pressInteractActive) {
         e.preventDefault();
         return;
       }
@@ -587,6 +621,19 @@ function ActiveCursor(): JSX.Element {
         pinchActive = false;
         touchWalkVelocity.current = 0;
       }
+
+      // Press-on-interactable: complete the gesture by synthesising
+      // mouseup. This fires whether the user held briefly (works as
+      // a quick tap) or for several seconds (works as a sustained
+      // press); the lean stays visible for at least
+      // MIN_PRESS_HOLD_MS in either case.
+      if (pressInteractActive && e.touches.length === 0) {
+        pressInteractActive = false;
+        const init = { bubbles: true, clientX: touchStartX, clientY: touchStartY } as const;
+        window.dispatchEvent(new MouseEvent('mouseup', init));
+        return;
+      }
+
       if (!touchSingleActive || e.touches.length !== 0) {
         return;
       }
@@ -598,12 +645,11 @@ function ActiveCursor(): JSX.Element {
       if (elapsed > TOUCH_TAP_TIME_THRESHOLD_MS) {
         return;
       }
-      // Tap: synthesise a mousedown + mouseup on window so the
-      // existing InteractionController + global mouseDown/Up cues
-      // fire identically to a desktop click. clientX/Y are the touch's
-      // start point (not strictly needed since the crosshair always
-      // raycasts through screen centre, but keeps the events looking
-      // like a real click).
+      // Tap on empty space: synthesise a mousedown + mouseup so the
+      // global mouseDown/Up cues fire (matches desktop tap feel).
+      // The InteractionController gates its press logic on
+      // hoveredInteractableId, so a tap here is purely audio
+      // feedback — no interaction misfires.
       const init = { bubbles: true, clientX: touchStartX, clientY: touchStartY } as const;
       window.dispatchEvent(new MouseEvent('mousedown', init));
       window.dispatchEvent(new MouseEvent('mouseup', init));
