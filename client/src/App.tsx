@@ -25,6 +25,12 @@ function isAdminRoute(): boolean {
  * first synchronous action on the click event), mouseup fires
  * `mouseUp`. Together they form a two-part click sound played on
  * every press anywhere on the page.
+ *
+ * On touch devices, also unlock on the *real* touchstart event —
+ * iOS Safari's synthetic mouse events from a tap can vary in their
+ * gesture-stack treatment, but a literal touchstart handler runs on
+ * the actual tap, on the same call stack as the user gesture. This
+ * is the most reliable point to call `sfx.unlock()` for mobile.
  */
 function useGlobalMouseFeedback(): void {
   useEffect(() => {
@@ -38,11 +44,20 @@ function useGlobalMouseFeedback(): void {
     const onMouseUp = (): void => {
       void sfx.play('mouseUp');
     };
+    const onTouchStart = (): void => {
+      // First touch on mobile is the canonical user gesture — unlock
+      // the AudioContext synchronously inside this handler so iOS
+      // Safari sees the unlock pattern on the gesture stack. Mouse
+      // cues will fire later via the synthetic mouse events.
+      sfx.unlock();
+    };
     window.addEventListener('mousedown', onMouseDown);
     window.addEventListener('mouseup', onMouseUp);
+    window.addEventListener('touchstart', onTouchStart, { passive: true });
     return () => {
       window.removeEventListener('mousedown', onMouseDown);
       window.removeEventListener('mouseup', onMouseUp);
+      window.removeEventListener('touchstart', onTouchStart);
     };
   }, []);
 }

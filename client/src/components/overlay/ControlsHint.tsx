@@ -11,6 +11,7 @@
 import { useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { useWorldStore } from '@/store';
+import { useIsTouchPrimary } from '@/utils';
 
 const FADE_EASE = 'cubic-bezier(0.2, 0.8, 0.3, 1)';
 
@@ -19,6 +20,7 @@ export function ControlsHint(): JSX.Element | null {
   const controlsDismissed = useWorldStore((s) => s.controlsDismissed);
   const setControlsDismissed = useWorldStore((s) => s.setControlsDismissed);
   const [shown, setShown] = useState(false);
+  const isTouch = useIsTouchPrimary();
   /** Drives the CSS transition target state. False on mount → opacity 0,
    *  scaled-down. Flipped to true via rAF so the browser paints the
    *  "from" state first, then the transition runs. */
@@ -96,12 +98,12 @@ export function ControlsHint(): JSX.Element | null {
           Controls
         </div>
         <div style={staggerRow('0.25s')}>
-          <span style={styles.key}>W A S D</span>
-          <span style={styles.label}>move</span>
+          <span style={styles.key}>{isTouch ? '2 fingers' : 'W A S D'}</span>
+          <span style={styles.label}>{isTouch ? 'pinch to move' : 'move'}</span>
         </div>
         <div style={staggerRow('0.35s')}>
-          <span style={styles.key}>mouse</span>
-          <span style={styles.label}>look around</span>
+          <span style={styles.key}>{isTouch ? '1 finger' : 'mouse'}</span>
+          <span style={styles.label}>{isTouch ? 'swipe to look' : 'look around'}</span>
         </div>
         <div
           style={{
@@ -110,7 +112,7 @@ export function ControlsHint(): JSX.Element | null {
             transition: `opacity 0.5s ${FADE_EASE} 0.5s`,
           }}
         >
-          click anywhere to dismiss
+          {isTouch ? 'tap anywhere to dismiss' : 'click anywhere to dismiss'}
         </div>
       </div>
     </div>

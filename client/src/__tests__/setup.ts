@@ -74,3 +74,23 @@ HTMLCanvasElement.prototype.getContext = function (contextId: string) {
   }
   return null;
 } as typeof HTMLCanvasElement.prototype.getContext;
+
+/**
+ * jsdom doesn't ship `window.matchMedia` — the `useIsTouchPrimary`
+ * hook (used to branch UI between desktop and mobile) calls it on
+ * mount. Default to "no match" so the desktop branch is exercised
+ * by default; tests that want to simulate mobile can override.
+ */
+if (typeof window.matchMedia !== 'function') {
+  window.matchMedia = ((query: string): MediaQueryList =>
+    ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      dispatchEvent: () => false,
+    }) as unknown as MediaQueryList) as typeof window.matchMedia;
+}

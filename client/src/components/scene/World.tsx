@@ -10,6 +10,7 @@ import { useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import type { Group } from 'three';
 import { useWorldStore } from '@/store';
+import { useIsTouchPrimary } from '@/utils';
 import { BoxEnvironment } from './BoxEnvironment';
 import { SkyBackground } from './SkyBackground';
 import { RevealOrchestrator } from './reveal';
@@ -28,6 +29,7 @@ export function World(): JSX.Element {
   const environment = useWorldStore((s) => s.environment);
   const revealState = useWorldStore((s) => s.revealState);
   const floatRef = useRef<Group>(null);
+  const isTouch = useIsTouchPrimary();
 
   useFrame((state) => {
     if (!floatRef.current) {
@@ -56,9 +58,18 @@ export function World(): JSX.Element {
       {/* CursorAvatar moved out of World/ShakeGroup so the cursor doesn't
           inherit the camera-shake offset on each sword's wall impact. */}
       {/* OrbitControls only owns the camera in idle mode — once the user
-          clicks, CursorAvatar takes over with the 3rd-person follow rig. */}
+          clicks, CursorAvatar takes over with the 3rd-person follow rig.
+          Disabled on touch devices: the orbit controls' default
+          single-finger-rotate consumed the pre-reveal swipe gesture and
+          made the camera spin around before the user even started the
+          experience. Desktop drag-to-orbit is preserved. */}
       {revealState === 'idle' && (
-        <OrbitControls enableZoom={false} enablePan={false} target={[0, 0, -360.01]} />
+        <OrbitControls
+          enableZoom={false}
+          enablePan={false}
+          enabled={!isTouch}
+          target={[0, 0, -360.01]}
+        />
       )}
     </>
   );

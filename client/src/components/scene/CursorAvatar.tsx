@@ -29,6 +29,7 @@ import {
   Vector3,
 } from 'three';
 import { useWorldStore } from '@/store';
+import { useIsTouchPrimary } from '@/utils';
 import { sfx } from '../audio/SfxManager';
 
 const MODEL_URL = '/models/3d_icon_cursor.glb';
@@ -106,12 +107,14 @@ const BODY_COLOR_HEX = '#0a1a18';
  *  `depthTest: false` so it stays on top of haze/geometry like the
  *  cursor itself. */
 const OUTLINE_COLOR_HEX = '#ffffff';
-const OUTLINE_SCALE = 1.04;
+const OUTLINE_SCALE = 1.06;
 
 useGLTF.preload(MODEL_URL);
 
 export function CursorAvatar(): JSX.Element | null {
   const active = useWorldStore((s) => s.cursorAvatarActive);
+  const revealState = useWorldStore((s) => s.revealState);
+  const isTouch = useIsTouchPrimary();
 
   useEffect(() => {
     if (!active) {
@@ -125,6 +128,14 @@ export function CursorAvatar(): JSX.Element | null {
   }, [active]);
 
   if (!active) {
+    return null;
+  }
+  // On touch devices, hide the cursor mesh until the swords slam into
+  // the wall — there's no OS pointer to mirror in the early phases,
+  // and a floating arrow at screen centre is more confusing than
+  // helpful. Becomes visible at `impact` so it's there for the
+  // controls hint dismissal + avatar-mode interaction.
+  if (isTouch && revealState !== 'impact' && revealState !== 'revealed') {
     return null;
   }
   return <ActiveCursor />;
@@ -150,6 +161,11 @@ function ActiveCursor(): JSX.Element {
   const avatarYaw = useRef(0);
   const avatarPitch = useRef(0);
   const keys = useRef({ w: false, a: false, s: false, d: false });
+  /** Continuous forward/back throttle from a 2-finger pinch on touch
+   *  devices. -1 = full backward, +1 = full forward, 0 = no walk.
+   *  Updated by the touch handler each pinch frame; consumed by the
+   *  movement integration in useFrame. Stays at 0 on desktop. */
+  const touchWalkVelocity = useRef(0);
   const renderedScale = useRef(POINTER_SCALE);
 
   const tmpVec = useRef(new Vector3());
@@ -437,28 +453,77 @@ function ActiveCursor(): JSX.Element {
     const TOUCH_TAP_DIST_THRESHOLD = 10;
     const TOUCH_TAP_TIME_THRESHOLD_MS = 250;
     const TOUCH_LOOK_SENSITIVITY = MOUSE_SENSITIVITY * 1.6; // touch deltas read smaller than mouse
+    /** Pinch distance delta (px) that maps to full forward / backward
+     *  throttle. ±150 fits on most phone screens without requiring a
+     *  super-wide finger spread; smaller values get jittery, larger
+     *  values feel sluggish. */
+    const PINCH_FULL_THROTTLE_DELTA = 150;
 
+    // ---------- single-finger gesture (look + tap) ----------
     let touchStartX = 0;
     let touchStartY = 0;
     let touchLastX = 0;
     let touchLastY = 0;
     let touchStartTime = 0;
     let touchIsDrag = false;
+    let touchSingleActive = false;
+
+    // ---------- two-finger gesture (pinch → forward/back) ----------
+    let pinchActive = false;
+    let pinchStartDist = 0;
+
+    const fingerDistance = (e: TouchEvent): number => {
+      const a = e.touches[0];
+      const b = e.touches[1];
+      if (!a || !b) {
+        return 0;
+      }
+      return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+    };
 
     const onTouchStart = (e: TouchEvent): void => {
-      const t = e.touches[0];
-      if (!t) {
+      // First touch is the canonical user gesture on mobile — unlock
+      // the AudioContext on every touchstart so any path through the
+      // app reaches a real `source.start()` with a running ctx.
+      sfx.unlock();
+
+      if (e.touches.length === 2) {
+        // Second finger landed: switch into pinch mode. Cancel any
+        // pending single-finger gesture so the touchend doesn't fire
+        // a synthetic click when the user lifts the first finger.
+        pinchActive = true;
+        pinchStartDist = fingerDistance(e);
+        touchSingleActive = false;
+        touchIsDrag = false;
+        touchWalkVelocity.current = 0;
         return;
       }
-      touchStartX = touchLastX = t.clientX;
-      touchStartY = touchLastY = t.clientY;
-      touchStartTime = performance.now();
-      touchIsDrag = false;
-      // First touch is the canonical user gesture on mobile — unlock
-      // the AudioContext now so subsequent taps can produce sound.
-      sfx.unlock();
+      if (e.touches.length === 1) {
+        const t = e.touches[0]!;
+        touchStartX = touchLastX = t.clientX;
+        touchStartY = touchLastY = t.clientY;
+        touchStartTime = performance.now();
+        touchIsDrag = false;
+        touchSingleActive = true;
+      }
     };
+
     const onTouchMove = (e: TouchEvent): void => {
+      if (pinchActive && e.touches.length >= 2) {
+        // Distance delta from start = continuous throttle. Pinch out
+        // (fingers spread) → positive delta → walk forward; pinch in
+        // → negative delta → walk back. Held = constant velocity.
+        const currentDist = fingerDistance(e);
+        const delta = currentDist - pinchStartDist;
+        const v = Math.max(-1, Math.min(1, delta / PINCH_FULL_THROTTLE_DELTA));
+        touchWalkVelocity.current = v;
+        e.preventDefault();
+        return;
+      }
+
+      if (!touchSingleActive) {
+        return;
+      }
       const t = e.touches[0];
       if (!t) {
         return;
@@ -494,7 +559,19 @@ function ActiveCursor(): JSX.Element {
       // overlapping the look gesture.
       e.preventDefault();
     };
-    const onTouchEnd = (): void => {
+
+    const onTouchEnd = (e: TouchEvent): void => {
+      // Pinch ends as soon as we drop below 2 fingers — don't wait
+      // for both to lift, otherwise the throttle stays applied while
+      // the user transitions back to a single finger.
+      if (pinchActive && e.touches.length < 2) {
+        pinchActive = false;
+        touchWalkVelocity.current = 0;
+      }
+      if (!touchSingleActive || e.touches.length !== 0) {
+        return;
+      }
+      touchSingleActive = false;
       if (touchIsDrag) {
         return; // drag already handled; no synthetic click
       }
@@ -684,21 +761,22 @@ function ActiveCursor(): JSX.Element {
     const sp = Math.sin(pitch);
 
     // Forward = (0, 0, -1) rotated by Euler(pitch, yaw, 0, 'YXZ') — same
-    // direction the camera is looking. W/S move along this so the avatar
-    // flies up/down when the camera is pitched.
-    // Strafe (A/D) drops pitch so left/right stays horizontal (FPS feel).
+    // direction the camera is looking. W/S (and 2-finger pinch on
+    // mobile) move along this so the avatar flies up/down when the
+    // camera is pitched. Strafe (A/D) drops pitch so left/right stays
+    // horizontal (FPS feel). Mobile has no strafe yet — 2-finger
+    // pinch is forward/back only, A/D is desktop-only.
     let mx = 0;
     let my = 0;
     let mz = 0;
-    if (keys.current.w) {
-      mx += -sy * cp;
-      my += sp;
-      mz += -cy * cp;
-    }
-    if (keys.current.s) {
-      mx -= -sy * cp;
-      my -= sp;
-      mz -= -cy * cp;
+    // Forward axis contribution: keys are binary (±1), the touch
+    // throttle is continuous (-1..+1).
+    const fwdInput =
+      (keys.current.w ? 1 : 0) - (keys.current.s ? 1 : 0) + touchWalkVelocity.current;
+    if (fwdInput !== 0) {
+      mx += fwdInput * -sy * cp;
+      my += fwdInput * sp;
+      mz += fwdInput * -cy * cp;
     }
     if (keys.current.d) {
       mx += cy;
@@ -711,7 +789,12 @@ function ActiveCursor(): JSX.Element {
 
     const len = Math.hypot(mx, my, mz);
     if (len > 0) {
-      const step = (WALK_SPEED * delta) / len;
+      // Cap normalisation at 1 so partial throttles (e.g. touch pinch
+      // at half spread) move at half speed instead of being scaled
+      // back up to full. Diagonals (W+D = len √2) still get the
+      // anti-faster-diagonals normalisation.
+      const cappedLen = Math.max(1, len);
+      const step = (WALK_SPEED * delta) / cappedLen;
       avatarPos.current.x += mx * step;
       avatarPos.current.y += my * step;
       avatarPos.current.z += mz * step;
