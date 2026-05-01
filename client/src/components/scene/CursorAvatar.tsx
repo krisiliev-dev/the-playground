@@ -712,14 +712,6 @@ interface ModeProps {
 function PointerCursor({ refs }: ModeProps): null {
   const { pointer, camera } = useThree();
   const revealState = useWorldStore((s) => s.revealState);
-  useEffect(() => {
-    // eslint-disable-next-line no-console
-    console.log('[diag] PointerCursor — MOUNT', new Date().toISOString());
-    return () => {
-      // eslint-disable-next-line no-console
-      console.log('[diag] PointerCursor — UNMOUNT', new Date().toISOString());
-    };
-  }, []);
   // Reusable buffers — three Vector3 + one PerspectiveCamera used for
   // the projection + lookAt math. Owned here (not in the shared refs)
   // because they're write-only scratch space.
@@ -835,14 +827,6 @@ function AvatarCursor({ refs }: ModeProps): null {
   const { camera } = useThree();
   const dimensions = useWorldStore((s) => s.environment.dimensions);
   const pressedTargetPoint = useWorldStore((s) => s.pressedTargetPoint);
-  useEffect(() => {
-    // eslint-disable-next-line no-console
-    console.log('[diag] AvatarCursor — MOUNT', new Date().toISOString());
-    return () => {
-      // eslint-disable-next-line no-console
-      console.log('[diag] AvatarCursor — UNMOUNT', new Date().toISOString());
-    };
-  }, []);
 
   // Scratch buffers owned by AvatarCursor — write-only per frame.
   const tmpVec = useRef(new Vector3());

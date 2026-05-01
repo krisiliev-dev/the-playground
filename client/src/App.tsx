@@ -137,14 +137,14 @@ function useAvatarDevHotkey(): void {
 }
 
 /**
- * Audio mute coordination. `frameloop="never"` halts rendering but
- * the AudioContext is independent — a wallAmbient loop that was
- * playing when the user flipped into Simple Experience would keep
- * playing over the document. We therefore drive the live master
- * volume from `(documentMode || muted)`, with documentMode acting
- * as a transient mute layered on top of PauseMenu's explicit user
- * preference. Returning to 3D restores audio to the user's chosen
- * level.
+ * Audio mute coordination. The render-loop pause stops useFrame
+ * but the AudioContext is independent — a wallAmbient loop that
+ * was playing when the user flipped into Simple Experience would
+ * keep playing over the document. We therefore drive the live
+ * master volume from `(documentMode || muted)`, with documentMode
+ * acting as a transient mute layered on top of PauseMenu's
+ * explicit user preference. Returning to 3D restores audio to the
+ * user's chosen level.
  */
 function useAudioMute(): void {
   const documentMode = useWorldStore((s) => s.documentMode);
@@ -212,54 +212,10 @@ function FrameLoopController(): null {
   return null;
 }
 
-/**
- * Diagnostic — counts component mounts so we can see whether the
- * 3D shell is remounting on documentMode toggles. To remove once
- * we've proven the architecture is stable.
- */
-function SceneRootTracker(): null {
-  useEffect(() => {
-    // eslint-disable-next-line no-console
-    console.log('[diag] SceneRoot inside Canvas — MOUNT', new Date().toISOString());
-    return () => {
-      // eslint-disable-next-line no-console
-      console.log('[diag] SceneRoot inside Canvas — UNMOUNT', new Date().toISOString());
-    };
-  }, []);
-  return null;
-}
-
-/** Diagnostic — log every change to documentMode, controlsDismissed,
- *  revealState, menuOpen so we can see exactly what state mutates
- *  around the doc → 3D toggle. */
-function useStateChangeDiag(): void {
-  const documentMode = useWorldStore((s) => s.documentMode);
-  const controlsDismissed = useWorldStore((s) => s.controlsDismissed);
-  const revealState = useWorldStore((s) => s.revealState);
-  const menuOpen = useWorldStore((s) => s.menuOpen);
-  useEffect(() => {
-    // eslint-disable-next-line no-console
-    console.log('[diag] documentMode →', documentMode);
-  }, [documentMode]);
-  useEffect(() => {
-    // eslint-disable-next-line no-console
-    console.log('[diag] controlsDismissed →', controlsDismissed);
-  }, [controlsDismissed]);
-  useEffect(() => {
-    // eslint-disable-next-line no-console
-    console.log('[diag] revealState →', revealState);
-  }, [revealState]);
-  useEffect(() => {
-    // eslint-disable-next-line no-console
-    console.log('[diag] menuOpen →', menuOpen);
-  }, [menuOpen]);
-}
-
 export function App(): JSX.Element {
   useGlobalMouseFeedback();
   useAvatarDevHotkey();
   useAudioMute();
-  useStateChangeDiag();
   // Simple Experience document mode. When true, the 3D scene
   // (Canvas + cursor + animations) is *paused and hidden* rather
   // than torn down: `frameloop="never"` stops the GPU work, and a
@@ -306,8 +262,6 @@ export function App(): JSX.Element {
   const handleBootFailed = useCallback(() => setBootState('failed'), []);
 
   const handleCreated = useCallback((state: RootState): void => {
-    // eslint-disable-next-line no-console
-    console.log('[diag] Canvas onCreated fired', new Date().toISOString());
     const canvas = state.gl.domElement;
     const glContext = state.gl.getContext() as
       | (WebGLRenderingContext & { isContextLost?: () => boolean })
@@ -395,7 +349,6 @@ export function App(): JSX.Element {
             style={styles.canvas}
             onCreated={handleCreated}
           >
-            <SceneRootTracker />
             <FrameLoopController />
             <color attach="background" args={['#0a0a12']} />
             <Suspense fallback={null}>
