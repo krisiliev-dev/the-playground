@@ -10,9 +10,7 @@ export {
   Portal,
   Sword,
   RevealOrchestrator,
-  useRevealAudio,
   PORTAL_CONSTANTS,
   SWORD_CONSTANTS,
   REVEAL_TIMINGS,
-  REVEAL_AUDIO_SOURCES,
 } from './reveal';

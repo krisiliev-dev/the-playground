@@ -35,6 +35,7 @@ import {
 import { useWorldStore } from '@/store';
 import { triggerImpactShake } from '../cameraShake';
 import { type SwordSlot } from './vibeFormation';
+import { sfx, type PositionalLoopHandle } from '../../audio/SfxManager';
 
 const SWORD_URL = '/models/sword/scene.gltf';
 
@@ -212,6 +213,79 @@ export function Sword({ slot, staggerIndex = 0 }: SwordProps): JSX.Element {
 
   const stateEnteredAt = useRef(0);
   const previousState = useRef(revealState);
+  /** Per-sword flying-audio loop handle. Created when this sword's
+   *  swing begins, position-updated each frame to track the mesh,
+   *  stopped on impact. Ref so it survives re-renders. */
+  const flyingHandleRef = useRef<PositionalLoopHandle | null>(null);
+  /** Previous-frame sword position, for velocity calculation. The
+   *  difference (currentPos - prevPos) / delta gives the per-frame
+   *  velocity vector, whose magnitude drives the flying loop's volume
+   *  and pitch — fast-moving swords sound louder and pitch up
+   *  slightly, slow ones drop in both, so the cascade reads as
+   *  acceleration/deceleration rather than a flat sustain. */
+  const prevSwordPos = useRef(new Vector3());
+  /** Previous-frame sword rotation, for angular-velocity calculation.
+   *  Quaternion.angleTo gives the radian delta per frame; divided by
+   *  dt this is rad/s. The sword does fast helicopter-blade rotation
+   *  during pre + post phases (8 + 1.5 turns), so this is the second
+   *  big kinematic input alongside translation velocity. Mapped to a
+   *  pitch component on the flying loop — spinning blades are higher-
+   *  pitched than coasting ones. */
+  const prevSwordQuat = useRef(new Quaternion());
+  /** Previous-frame linear speed and acceleration. The chain
+   *   pos → speed → accel → jerk
+   *  gives us four kinematic levels; jerk (rate-of-change of
+   *  acceleration) is what reads as "erratic motion" in audio terms.
+   *  Smooth scripted curves have low jerk; sudden direction changes
+   *  spike it. We map jerk to small random pitch dithering on the
+   *  flying loop so erratic moments sound rougher than smooth ones. */
+  const prevSpeed = useRef(0);
+  const prevAccel = useRef(0);
+  /** Velocity magnitude at the moment of slam fire — captured to
+   *  scale the swordSlam cue's volume + pitch jitter, so harder hits
+   *  (faster impact velocity) feel heavier. */
+  const slamVelocity = useRef(0);
+  // Stop the flying loop if the sword unmounts mid-flight (e.g. test
+  // teardown or hot-reload) so it doesn't keep humming.
+  useEffect(
+    () => () => {
+      flyingHandleRef.current?.stop();
+      flyingHandleRef.current = null;
+    },
+    [],
+  );
+  // Stop the flying loop whenever the reveal leaves the swinging
+  // state. The per-frame slam check only fires while `revealState ===
+  // 'swinging'`, so if the orchestrator advances to `impact` before
+  // a sword's swing arc completes (timer-driven, not slam-driven),
+  // the slam path is skipped and the loop would otherwise keep
+  // humming forever. This effect catches every state-exit path AND
+  // fires a catch-up slam for any sword that hasn't fired one yet,
+  // so all 11 slams are guaranteed audible regardless of timer race.
+  useEffect(() => {
+    if (revealState === 'swinging') {
+      return;
+    }
+    flyingHandleRef.current?.stop(80);
+    flyingHandleRef.current = null;
+    if (revealState === 'impact' && !impactFired.current && clickHit) {
+      impactFired.current = true;
+      const SLAM_POS_JITTER = 20;
+      // Use a moderate default velocity for catch-up slams since the
+      // sword may not have completed its arc to peak speed.
+      const fallbackVel = 60;
+      void sfx.play('swordSlam', {
+        volumeMultiplier: 0.55,
+        pitchJitter: 0.6 + Math.min(0.15, fallbackVel / 400),
+        filterGain: (Math.random() - 0.5) * 20,
+        position: {
+          x: clickHit.point[0] + (Math.random() - 0.5) * SLAM_POS_JITTER,
+          y: clickHit.point[1] + (Math.random() - 0.5) * SLAM_POS_JITTER,
+          z: clickHit.point[2] + (Math.random() - 0.5) * SLAM_POS_JITTER,
+        },
+      });
+    }
+  }, [revealState, clickHit]);
   useEffect(() => {
     if (previousState.current !== revealState) {
       stateEnteredAt.current = performance.now() / 1000;
@@ -512,6 +586,19 @@ export function Sword({ slot, staggerIndex = 0 }: SwordProps): JSX.Element {
     // Fire this sword's flash exactly when its effective swing begins.
     if (revealState === 'swinging' && flashStartedAt.current < 0 && t >= 0) {
       flashStartedAt.current = state.clock.elapsedTime;
+      // Spawn punch: per-sword cue at the spawn point. Reverb is set
+      // in the manifest so the cube room "rings" each spawn.
+      const spawnAt = { x: spawnPos.x, y: spawnPos.y, z: spawnPos.z };
+      void sfx.play('spawnFlash', { volumeMultiplier: 0.5, position: spawnAt });
+      // Per-sword flying loop: starts at spawn, position is updated
+      // each frame below to track the sword's mesh. Distance falloff
+      // is handled by the panner so close-passing swords swell while
+      // far ones stay quiet — the "dynamicness" the user wanted from
+      // the cascade.
+      flyingHandleRef.current = sfx.playPositionalLoop('swordFlying', spawnAt, {
+        pitchJitter: 0.12,
+        volumeMultiplier: 0.7,
+      });
     }
     // Fire this sword's IMPACT flash + shake when it reaches the end of
     // its swing (slams into the wall ring after the post leg).
@@ -519,6 +606,43 @@ export function Sword({ slot, staggerIndex = 0 }: SwordProps): JSX.Element {
       impactFlashStartedAt.current = state.clock.elapsedTime;
       impactFired.current = true;
       triggerImpactShake(state.clock.elapsedTime);
+      // Stop this sword's flying loop with a short fade so the cut
+      // isn't an audible click — the slam's transient and the room's
+      // wet tail cover the silence.
+      flyingHandleRef.current?.stop(60);
+      flyingHandleRef.current = null;
+      // Velocity-driven slam + spatial jitter. Each slam:
+      //   - Volume scaled by impact velocity (harder hit → louder).
+      //   - Pitch jitter widened to ±40% (was ±25%) for distinctness
+      //     across the 11-cascade.
+      //   - Position offset by a small random vector around the wall
+      //     hit point so each slam emits from a slightly different
+      //     spatial location — the panner gives them slightly
+      //     different stereo positions, helping the ear separate
+      //     them instead of merging into a single block.
+      const v = slamVelocity.current;
+      const velFactor = Math.min(1.6, 0.7 + v / 80);
+      // Wide jitter + spatial spread + per-fire EQ for cascade
+      // distinctness:
+      //   - pitchJitter 0.6 + velocity boost: each slam at a
+      //     noticeably different fundamental frequency.
+      //   - position jittered around hit point: each slam pans to a
+      //     different stereo location.
+      //   - filterGain ±10dB: high-shelf boost/cut at 3kHz varies per
+      //     slam — some bright, some dark. Slam.wav is low-end heavy,
+      //     so without per-fire EQ the 11 hits all sit in the same
+      //     frequency band and the ear can't separate them.
+      const SLAM_POS_JITTER = 20;
+      void sfx.play('swordSlam', {
+        volumeMultiplier: 0.55 * velFactor,
+        pitchJitter: 0.6 + Math.min(0.15, v / 400),
+        filterGain: (Math.random() - 0.5) * 20,
+        position: {
+          x: hitPoint.x + (Math.random() - 0.5) * SLAM_POS_JITTER,
+          y: hitPoint.y + (Math.random() - 0.5) * SLAM_POS_JITTER,
+          z: hitPoint.z + (Math.random() - 0.5) * SLAM_POS_JITTER,
+        },
+      });
     }
 
     let opacityTarget = 0;
@@ -660,6 +784,55 @@ export function Sword({ slot, staggerIndex = 0 }: SwordProps): JSX.Element {
     obj.position.copy(targetPos);
     obj.quaternion.copy(targetQuat);
     obj.scale.setScalar(calibratedScale.current * visualScale);
+
+    // Per-frame kinematics: position derivatives at four levels.
+    //   speed   (|dpos/dt|)        → volume + pitch (Doppler)
+    //   accel   (dspeed/dt)        → unused yet, but tracked for jerk
+    //   jerk    (|daccel/dt|)      → pitch dithering (erratic feel)
+    //   angSpeed (|dquat/dt|)      → pitch (spin component)
+    // Together: a stationary sword is silent, a fast-cruising sword
+    // hums steady, a sword changing direction sharply rattles slightly.
+    const dt = Math.max(delta, 1 / 240);
+    const dx = targetPos.x - prevSwordPos.current.x;
+    const dy = targetPos.y - prevSwordPos.current.y;
+    const dz = targetPos.z - prevSwordPos.current.z;
+    const speed = Math.sqrt(dx * dx + dy * dy + dz * dz) / dt;
+    prevSwordPos.current.copy(targetPos);
+    const accel = (speed - prevSpeed.current) / dt;
+    const jerk = Math.abs(accel - prevAccel.current) / dt;
+    prevSpeed.current = speed;
+    prevAccel.current = accel;
+    // Angular velocity in rad/s. Quaternion.angleTo returns the
+    // shortest rotation between the two — works for any axis without
+    // having to decompose into Euler angles.
+    const angDelta = prevSwordQuat.current.angleTo(targetQuat);
+    const angSpeed = angDelta / dt;
+    prevSwordQuat.current.copy(targetQuat);
+    // Stash the linear speed so the next-frame slam fire (which reads
+    // it before the position update) sees the velocity AT impact.
+    slamVelocity.current = speed;
+
+    // Track the flying loop's emitter to the sword's current world
+    // position so the panner pans + attenuates correctly through the
+    // flight. Volume + pitch are driven from kinematics. Smoothing
+    // inside SfxManager prevents zipper noise from per-frame jitter.
+    if (flyingHandleRef.current) {
+      flyingHandleRef.current.setPosition(targetPos.x, targetPos.y, targetPos.z);
+      // Volume curve: PURELY multiplicative on speed so a stationary
+      // sword (mid-phase, holding its VIBE-letter pose) is silent,
+      // not 40% as before. Peaks at 1.5× around speed=120 and caps.
+      const volBoost = Math.min(1.5, speed / 80);
+      flyingHandleRef.current.setVolume(volBoost);
+      // Pitch: Doppler (speed) + spin (angSpeed) + jerk dither.
+      // Jerk dither adds a small random component scaled by how
+      // erratic motion is right now — smooth flight is steady-pitched,
+      // sudden swerves rattle the pitch.
+      const speedPitch = Math.min(0.25, speed / 800);
+      const spinPitch = Math.min(0.2, angSpeed / 18);
+      const jerkAmount = Math.min(0.15, jerk / 50000);
+      const jerkDither = (Math.random() - 0.5) * jerkAmount;
+      flyingHandleRef.current.setPlaybackRate(0.95 + speedPitch + spinPitch + jerkDither);
+    }
 
     const lerpT = 1 - Math.exp(-LERP_RATE * delta);
     scene.traverse((o: Object3D) => {

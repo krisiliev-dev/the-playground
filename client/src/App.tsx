@@ -1,8 +1,11 @@
-import { Suspense, lazy, useEffect } from 'react';
-import { Canvas } from '@react-three/fiber';
+import { Suspense, lazy, useCallback, useEffect, useState } from 'react';
+import { Canvas, type RootState } from '@react-three/fiber';
 import { World, PostFx, DevTools, ShakeGroup, CursorAvatar } from '@/components/scene';
-import { CursorText, Crosshair, ControlsHint } from '@/components/overlay';
+import { CursorText, Crosshair, ControlsHint, LoadingScreen } from '@/components/overlay';
+import { sfx } from '@/components/audio/SfxManager';
 import { useWorldStore } from '@/store';
+
+type BootState = 'loading' | 'ready' | 'failed';
 
 const AdminPanel = lazy(() =>
   import('@/components/admin/AdminPanel').then((m) => ({ default: m.AdminPanel })),
@@ -14,6 +17,34 @@ function isAdminRoute(): boolean {
   }
   const params = new URLSearchParams(window.location.search);
   return params.get('admin') === '1';
+}
+
+/**
+ * Global mouse-feedback audio. Mousedown fires the `mouseDown` cue
+ * (also serves as the audio-unlock gesture for Safari — must be the
+ * first synchronous action on the click event), mouseup fires
+ * `mouseUp`. Together they form a two-part click sound played on
+ * every press anywhere on the page.
+ */
+function useGlobalMouseFeedback(): void {
+  useEffect(() => {
+    const onMouseDown = (): void => {
+      // Unlock first — Safari requires the AudioContext +
+      // resume() to happen on the synchronous gesture path. Then
+      // play the mousedown cue.
+      sfx.unlock();
+      void sfx.play('mouseDown');
+    };
+    const onMouseUp = (): void => {
+      void sfx.play('mouseUp');
+    };
+    window.addEventListener('mousedown', onMouseDown);
+    window.addEventListener('mouseup', onMouseUp);
+    return () => {
+      window.removeEventListener('mousedown', onMouseDown);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+  }, []);
 }
 
 /**
@@ -44,13 +75,77 @@ function useAvatarDevHotkey(): void {
 }
 
 export function App(): JSX.Element {
+  useGlobalMouseFeedback();
   useAvatarDevHotkey();
+  // Boot gate: LoadingScreen probes WebGL + preloads audio before we
+  // mount the real Canvas. Catches the "born-lost context" case at the
+  // earliest possible moment (against a throwaway probe canvas) and
+  // turns it into a clean retry UI instead of a silently broken scene.
+  const [bootState, setBootState] = useState<BootState>('loading');
+  // Runtime WebGL context loss recovery — once the scene is live, the
+  // real Canvas's onCreated handler attaches a webglcontextlost listener
+  // that flips this flag if the GPU process dies under us mid-session.
+  const [contextLost, setContextLost] = useState(false);
+
+  const handleBootReady = useCallback(() => setBootState('ready'), []);
+  const handleBootFailed = useCallback(() => setBootState('failed'), []);
+
+  const handleCreated = useCallback((state: RootState): void => {
+    const canvas = state.gl.domElement;
+    const glContext = state.gl.getContext() as
+      | (WebGLRenderingContext & { isContextLost?: () => boolean })
+      | (WebGL2RenderingContext & { isContextLost?: () => boolean });
+
+    // Born-lost: the renderer initialised against a context that's
+    // already in CONTEXT_LOST state. No frame will ever render.
+    if (glContext.isContextLost?.()) {
+      // eslint-disable-next-line no-console
+      console.error('[webgl] context already lost at Canvas creation');
+      setContextLost(true);
+      return;
+    }
+
+    const onLost = (e: Event): void => {
+      // preventDefault is what enables the browser to dispatch
+      // webglcontextrestored later — without it, the context is
+      // permanently gone.
+      e.preventDefault();
+      // eslint-disable-next-line no-console
+      console.error('[webgl] context lost during runtime');
+      setContextLost(true);
+    };
+    const onRestored = (): void => {
+      // eslint-disable-next-line no-console
+      console.log('[webgl] context restored — full reload still recommended');
+    };
+    canvas.addEventListener('webglcontextlost', onLost);
+    canvas.addEventListener('webglcontextrestored', onRestored);
+  }, []);
 
   if (isAdminRoute()) {
     return (
       <Suspense fallback={null}>
         <AdminPanel />
       </Suspense>
+    );
+  }
+
+  if (bootState === 'loading') {
+    return (
+      <div style={styles.root}>
+        <LoadingScreen onReady={handleBootReady} onFailed={handleBootFailed} />
+      </div>
+    );
+  }
+
+  if (bootState === 'failed') {
+    return (
+      <div style={styles.root}>
+        <ContextLostOverlay
+          title="Display unavailable"
+          body="Your browser couldn't initialise a 3D context. This is usually a transient driver hiccup — reloading often resolves it."
+        />
+      </div>
     );
   }
 
@@ -76,6 +171,7 @@ export function App(): JSX.Element {
           failIfMajorPerformanceCaveat: false,
         }}
         style={styles.canvas}
+        onCreated={handleCreated}
       >
         <color attach="background" args={['#0a0a12']} />
         <Suspense fallback={null}>
@@ -92,6 +188,35 @@ export function App(): JSX.Element {
       <Crosshair />
       <ControlsHint />
       <CursorText />
+      {contextLost && (
+        <ContextLostOverlay
+          title="Display crashed"
+          body="The 3D renderer lost its GPU context. This is rare; reloading restores the scene."
+        />
+      )}
+    </div>
+  );
+}
+
+interface ContextLostOverlayProps {
+  title: string;
+  body: string;
+}
+
+function ContextLostOverlay({ title, body }: ContextLostOverlayProps): JSX.Element {
+  return (
+    <div style={styles.contextLostOverlay} role="alertdialog" aria-modal="true">
+      <div style={styles.contextLostInner}>
+        <h2 style={styles.contextLostTitle}>{title}</h2>
+        <p style={styles.contextLostBody}>{body}</p>
+        <button
+          type="button"
+          style={styles.contextLostButton}
+          onClick={() => window.location.reload()}
+        >
+          Reload
+        </button>
+      </div>
     </div>
   );
 }
@@ -107,5 +232,46 @@ const styles: Record<string, React.CSSProperties> = {
     width: '100%',
     height: '100%',
     display: 'block',
+  },
+  contextLostOverlay: {
+    position: 'fixed',
+    inset: 0,
+    backgroundColor: 'rgba(10, 10, 18, 0.9)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 9999,
+  },
+  contextLostInner: {
+    maxWidth: 380,
+    padding: '24px 28px',
+    borderRadius: 8,
+    border: '1px solid #00ffcc',
+    backgroundColor: '#12121a',
+    color: '#e0e0e8',
+    fontFamily: 'system-ui, sans-serif',
+    textAlign: 'center',
+  },
+  contextLostTitle: {
+    margin: '0 0 12px',
+    fontSize: 20,
+    color: '#00ffcc',
+    letterSpacing: 0.5,
+  },
+  contextLostBody: {
+    margin: '0 0 20px',
+    fontSize: 14,
+    lineHeight: 1.5,
+  },
+  contextLostButton: {
+    padding: '8px 24px',
+    fontSize: 14,
+    fontWeight: 600,
+    letterSpacing: 0.5,
+    color: '#0a0a12',
+    backgroundColor: '#00ffcc',
+    border: 'none',
+    borderRadius: 4,
+    cursor: 'pointer',
   },
 };
