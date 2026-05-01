@@ -11,7 +11,7 @@ import {
 } from '@/components/overlay';
 import { sfx } from '@/components/audio/SfxManager';
 import { isInteractionSynthSuppressed } from '@/components/scene/Interactable';
-import { About, Projects, Writing } from '@/routes';
+import { About, Home, Projects, Writing } from '@/routes';
 import { useWorldStore } from '@/store';
 
 type BootState = 'loading' | 'ready' | 'failed';
@@ -234,7 +234,7 @@ export function App(): JSX.Element {
             split out into individual case study / article pages
             when content lands in step 6 of the build order. */}
         <Routes>
-          <Route path="/" element={null} />
+          <Route path="/" element={<Home />} />
           <Route path="/about" element={<About />} />
           <Route path="/projects" element={<Projects />} />
           <Route path="/projects/:slug" element={<Projects />} />

@@ -40,6 +40,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { About } from '../src/routes/About.js';
+import { Home } from '../src/routes/Home.js';
 import { Projects } from '../src/routes/Projects.js';
 import { Writing } from '../src/routes/Writing.js';
 
@@ -51,6 +52,20 @@ interface RouteConfig {
 }
 
 const ROUTES: ReadonlyArray<RouteConfig> = [
+  {
+    // Home is special — its prerendered output overwrites
+    // dist/index.html (the SPA shell). Static-host fallback rules
+    // route every unknown URL to this file, so the home content
+    // serves as the SPA shell *and* the home-page link preview
+    // surface. Visually it's `sr-only`-styled, so sighted users see
+    // the cube formation; crawlers + screen readers see real
+    // content.
+    path: '/',
+    Component: Home,
+    title: 'Kristiyan Iliev',
+    description:
+      'Software engineer building interactive 3D experiences. Click the cube to enter, or jump to a section.',
+  },
   {
     path: '/about',
     Component: About,
@@ -116,9 +131,14 @@ function render(route: RouteConfig): string {
 let written = 0;
 for (const route of ROUTES) {
   const html = render(route);
-  const outDir = resolve(distDir, route.path.replace(/^\//, ''));
-  mkdirSync(outDir, { recursive: true });
-  const outPath = resolve(outDir, 'index.html');
+  // The home route ('/') overwrites dist/index.html (the shell);
+  // every other route writes to dist/<route>/index.html so static
+  // hosts serve the matching prerendered HTML directly.
+  const outPath =
+    route.path === '/'
+      ? resolve(distDir, 'index.html')
+      : resolve(distDir, route.path.replace(/^\//, ''), 'index.html');
+  mkdirSync(dirname(outPath), { recursive: true });
   writeFileSync(outPath, html, 'utf-8');
   // eslint-disable-next-line no-console
   console.log(`✓ prerendered ${route.path} → ${outPath.replace(`${distDir}/`, 'dist/')}`);
