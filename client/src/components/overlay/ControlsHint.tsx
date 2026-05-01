@@ -11,6 +11,7 @@
 import { useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { useWorldStore } from '@/store';
+import { useIsTouchPrimary } from '@/utils';
 
 const FADE_EASE = 'cubic-bezier(0.2, 0.8, 0.3, 1)';
 
@@ -19,6 +20,7 @@ export function ControlsHint(): JSX.Element | null {
   const controlsDismissed = useWorldStore((s) => s.controlsDismissed);
   const setControlsDismissed = useWorldStore((s) => s.setControlsDismissed);
   const [shown, setShown] = useState(false);
+  const isTouch = useIsTouchPrimary();
   /** Drives the CSS transition target state. False on mount → opacity 0,
    *  scaled-down. Flipped to true via rAF so the browser paints the
    *  "from" state first, then the transition runs. */
@@ -51,9 +53,13 @@ export function ControlsHint(): JSX.Element | null {
       // Request pointer lock SYNCHRONOUSLY here — we're inside the click
       // handler, so the user-activation token is still valid. Doing this
       // in a React effect later fails with "requires a user gesture".
+      // querySelector returns null in test/jsdom (no canvas yet), and
+      // also in the rare case the canvas is unmounted between the
+      // dismiss timer arming and the click landing — both are fine to
+      // skip silently.
       const canvas = document.querySelector('canvas');
-      if (canvas instanceof HTMLCanvasElement) {
-        void canvas.requestPointerLock?.();
+      if (canvas instanceof HTMLCanvasElement && typeof canvas.requestPointerLock === 'function') {
+        void canvas.requestPointerLock();
       }
     };
     const timer = window.setTimeout(() => {
@@ -96,21 +102,25 @@ export function ControlsHint(): JSX.Element | null {
           Controls
         </div>
         <div style={staggerRow('0.25s')}>
-          <span style={styles.key}>W A S D</span>
-          <span style={styles.label}>move</span>
+          <span style={styles.key}>{isTouch ? '2 fingers' : 'W A S D'}</span>
+          <span style={styles.label}>{isTouch ? 'pinch to move' : 'move'}</span>
         </div>
         <div style={staggerRow('0.35s')}>
-          <span style={styles.key}>mouse</span>
-          <span style={styles.label}>look around</span>
+          <span style={styles.key}>{isTouch ? '1 finger' : 'mouse'}</span>
+          <span style={styles.label}>{isTouch ? 'swipe to look' : 'look around'}</span>
+        </div>
+        <div style={staggerRow('0.45s')}>
+          <span style={styles.key}>{isTouch ? 'tap / hold' : 'click / hold'}</span>
+          <span style={styles.label}>interact</span>
         </div>
         <div
           style={{
             ...styles.hint,
             opacity: active ? 0.55 : 0,
-            transition: `opacity 0.5s ${FADE_EASE} 0.5s`,
+            transition: `opacity 0.5s ${FADE_EASE} 0.6s`,
           }}
         >
-          click anywhere to dismiss
+          {isTouch ? 'tap anywhere to dismiss' : 'click anywhere to dismiss'}
         </div>
       </div>
     </div>

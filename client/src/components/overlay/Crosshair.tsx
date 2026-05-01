@@ -6,10 +6,16 @@
  */
 import type { CSSProperties } from 'react';
 import { useWorldStore } from '@/store';
+import { useIsTouchPrimary } from '@/utils';
 
 export function Crosshair(): JSX.Element | null {
   const controlsDismissed = useWorldStore((s) => s.controlsDismissed);
-  if (!controlsDismissed) {
+  const isTouch = useIsTouchPrimary();
+  // Mobile doesn't need a crosshair — the click target is wherever
+  // the user's finger lands, not screen centre. Showing a fixed
+  // reticle that doesn't represent the actual interaction point is
+  // more confusing than helpful on touch.
+  if (!controlsDismissed || isTouch) {
     return null;
   }
 

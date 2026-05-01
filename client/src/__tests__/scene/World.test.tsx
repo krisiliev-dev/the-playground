@@ -46,6 +46,16 @@ vi.mock('@/components/scene/Haze3D', () => ({
   Haze3D: () => null,
 }));
 
+// InteractionController uses useThree + per-frame raycasting; stub it
+// since the World test only verifies child mounting, not interaction.
+vi.mock('@/components/scene/Interactable', () => ({
+  InteractionController: () => null,
+}));
+
+vi.mock('@/components/scene/InteractableTestCube', () => ({
+  InteractableTestCube: () => null,
+}));
+
 describe('World', () => {
   it('renders without crashing', () => {
     const { container } = render(<World />);

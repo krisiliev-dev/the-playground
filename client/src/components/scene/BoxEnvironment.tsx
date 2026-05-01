@@ -4,6 +4,7 @@ import { BackSide, DataTexture, Raycaster, Vector3 } from 'three';
 import type { IUniform, Mesh, ShaderMaterial, Vector3Tuple } from 'three';
 import { GRID_MATERIAL_CONSTANTS, GridMaterial } from './GridMaterial';
 import { useWorldStore, type RevealState } from '@/store';
+import { walkCellCrossings } from './cellWalk';
 
 interface BoxEnvironmentProps {
   dimensions: Vector3Tuple;
@@ -182,11 +183,11 @@ export function BoxEnvironment({ dimensions }: BoxEnvironmentProps): JSX.Element
       // Compare in box-local — both prevHit and localHit are in that frame.
       const sameWall = prevHit.current.distanceTo(localHit) < spacing * 4;
 
-      if (sameWall && prevCellU !== currCellU) {
-        const dir = Math.sign(currCellU - prevCellU);
-        let cell = prevCellU;
-        while (cell !== currCellU) {
-          const crossingU = (cell + (dir > 0 ? 1 : 0)) * spacing;
+      if (sameWall) {
+        // U-axis crossings: one captured segment per grid line the
+        // cursor crossed in the U direction. See ./cellWalk for the
+        // bounded-loop math.
+        walkCellCrossings(prevCellU, currCellU, spacing, (crossingU) => {
           pushCaught(caught.current, {
             axis: uAxis.clone(),
             along: vAxis.clone(),
@@ -195,14 +196,8 @@ export function BoxEnvironment({ dimensions }: BoxEnvironmentProps): JSX.Element
             segMin: currCellV * spacing,
             segMax: (currCellV + 1) * spacing,
           });
-          cell += dir;
-        }
-      }
-      if (sameWall && prevCellV !== currCellV) {
-        const dir = Math.sign(currCellV - prevCellV);
-        let cell = prevCellV;
-        while (cell !== currCellV) {
-          const crossingV = (cell + (dir > 0 ? 1 : 0)) * spacing;
+        });
+        walkCellCrossings(prevCellV, currCellV, spacing, (crossingV) => {
           pushCaught(caught.current, {
             axis: vAxis.clone(),
             along: uAxis.clone(),
@@ -211,8 +206,7 @@ export function BoxEnvironment({ dimensions }: BoxEnvironmentProps): JSX.Element
             segMin: currCellU * spacing,
             segMax: (currCellU + 1) * spacing,
           });
-          cell += dir;
-        }
+        });
       }
     }
 

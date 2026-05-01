@@ -3,6 +3,7 @@ import { Canvas, type RootState } from '@react-three/fiber';
 import { World, PostFx, DevTools, ShakeGroup, CursorAvatar } from '@/components/scene';
 import { CursorText, Crosshair, ControlsHint, LoadingScreen } from '@/components/overlay';
 import { sfx } from '@/components/audio/SfxManager';
+import { isInteractionSynthSuppressed } from '@/components/scene/Interactable';
 import { useWorldStore } from '@/store';
 
 type BootState = 'loading' | 'ready' | 'failed';
@@ -25,6 +26,12 @@ function isAdminRoute(): boolean {
  * first synchronous action on the click event), mouseup fires
  * `mouseUp`. Together they form a two-part click sound played on
  * every press anywhere on the page.
+ *
+ * On touch devices, also unlock on the *real* touchstart event —
+ * iOS Safari's synthetic mouse events from a tap can vary in their
+ * gesture-stack treatment, but a literal touchstart handler runs on
+ * the actual tap, on the same call stack as the user gesture. This
+ * is the most reliable point to call `sfx.unlock()` for mobile.
  */
 function useGlobalMouseFeedback(): void {
   useEffect(() => {
@@ -33,16 +40,36 @@ function useGlobalMouseFeedback(): void {
       // resume() to happen on the synchronous gesture path. Then
       // play the mousedown cue.
       sfx.unlock();
+      // On mobile, iOS Safari fires synthetic mousedown after a
+      // touchend that our touch path already handled. Skip the
+      // audio cue if we're inside the suppression window so the
+      // mouseDown/Up sounds don't double up.
+      if (isInteractionSynthSuppressed()) {
+        return;
+      }
       void sfx.play('mouseDown');
     };
     const onMouseUp = (): void => {
+      if (isInteractionSynthSuppressed()) {
+        return;
+      }
       void sfx.play('mouseUp');
+    };
+    const onTouchStart = (): void => {
+      // First touch on mobile is the canonical user gesture — unlock
+      // the AudioContext synchronously inside this handler so iOS
+      // Safari sees the unlock pattern on the gesture stack. The
+      // touch path in CursorAvatar plays the mouseDown cue directly
+      // when appropriate; we don't fire it here to avoid duplication.
+      sfx.unlock();
     };
     window.addEventListener('mousedown', onMouseDown);
     window.addEventListener('mouseup', onMouseUp);
+    window.addEventListener('touchstart', onTouchStart, { passive: true });
     return () => {
       window.removeEventListener('mousedown', onMouseDown);
       window.removeEventListener('mouseup', onMouseUp);
+      window.removeEventListener('touchstart', onTouchStart);
     };
   }, []);
 }

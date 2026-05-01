@@ -51,6 +51,24 @@ interface AppActions {
   /** Mark the post-impact controls hint as dismissed. Triggers the
    *  camera transition into 3rd-person avatar mode. */
   setControlsDismissed: (dismissed: boolean) => void;
+  /** Set which interactable the crosshair is currently aimed at, or
+   *  null if nothing is in range. The InteractionController updates
+   *  this each frame; individual `useInteractable` consumers read it
+   *  to drive their own highlight visuals. The `point` is the
+   *  raycast hit position in world space — captured here (not in a
+   *  controller-private ref) so click handlers + tests can read the
+   *  same value the raycaster wrote. Pass `null` for both when
+   *  nothing is hovered. */
+  setHoveredInteractable: (id: string | null, point?: [number, number, number] | null) => void;
+  /** Mark mouse-down over an interactable. CursorAvatar reads this to
+   *  lean the cursor forward to *touch* the target while held. The
+   *  point is the world-space hit position from the crosshair raycast,
+   *  so the cursor lerps right up to the surface the user clicked.
+   *  Future draggables can also subscribe to drive per-frame motion. */
+  beginInteractPress: (id: string, point: [number, number, number]) => void;
+  /** Release the press. CursorAvatar lerps back to the follow rig.
+   *  Called on every mouse-up regardless of where the cursor ended up. */
+  endInteractPress: () => void;
 }
 
 const createInitialPlayer = (): Player => ({
@@ -70,56 +88,99 @@ interface RevealSlice {
   controlsDismissed: boolean;
 }
 
-export const useWorldStore = create<AppState & AppActions & RevealSlice>((set) => ({
-  // State
-  player: createInitialPlayer(),
-  environment: DEFAULT_ENVIRONMENT,
-  activeZoneId: null,
-  isReady: false,
-  revealState: 'idle',
-  clickHit: null,
-  controlsDismissed: false,
-  // Avatar lives from page load — small at first (cursor-sized), then grows
-  // once the reveal completes. See CursorAvatar.tsx for the scale logic.
-  cursorAvatarActive: true,
+interface InteractionSlice {
+  /** Id of the interactable the crosshair is currently aimed at,
+   *  or null if nothing is in range. Updated by the InteractionController
+   *  each frame; consumed by individual `useInteractable` callers for
+   *  their highlight visuals. */
+  hoveredInteractableId: string | null;
+  /** World-space hit point on the hovered interactable's surface,
+   *  paired with `hoveredInteractableId`. The InteractionController
+   *  writes this each frame alongside the id; click handlers read
+   *  it on mousedown to seed the press's target point. Lives in the
+   *  store (not a controller-private ref) so the click → press
+   *  pipeline is observable from outside, and tests can inject a
+   *  hit directly. Null whenever `hoveredInteractableId` is null. */
+  hoveredInteractablePoint: [number, number, number] | null;
+  /** Id of the interactable currently being pressed (mouse-down landed
+   *  on it, mouse-up hasn't fired yet). Decoupled from `hovered…` so
+   *  callers can detect "press started here, cursor since wandered" —
+   *  useful for drag interactions where the press anchors a binding. */
+  pressedInteractableId: string | null;
+  /** World-space point the cursor is leaning toward (the raycast hit
+   *  on the interactable at the moment of mouse-down). Null when no
+   *  press is active. */
+  pressedTargetPoint: [number, number, number] | null;
+}
 
-  // Actions
-  setPlayerPosition: (position) =>
-    set((state) => ({
-      player: { ...state.player, position },
-    })),
+export const useWorldStore = create<AppState & AppActions & RevealSlice & InteractionSlice>(
+  (set) => ({
+    // State
+    player: createInitialPlayer(),
+    environment: DEFAULT_ENVIRONMENT,
+    activeZoneId: null,
+    isReady: false,
+    revealState: 'idle',
+    clickHit: null,
+    controlsDismissed: false,
+    // Avatar lives from page load — small at first (cursor-sized), then grows
+    // once the reveal completes. See CursorAvatar.tsx for the scale logic.
+    cursorAvatarActive: true,
+    hoveredInteractableId: null,
+    hoveredInteractablePoint: null,
+    pressedInteractableId: null,
+    pressedTargetPoint: null,
 
-  setPlayerRotation: (rotation) =>
-    set((state) => ({
-      player: { ...state.player, rotation },
-    })),
+    // Actions
+    setPlayerPosition: (position) =>
+      set((state) => ({
+        player: { ...state.player, position },
+      })),
 
-  setActiveZone: (zoneId) => set({ activeZoneId: zoneId }),
+    setPlayerRotation: (rotation) =>
+      set((state) => ({
+        player: { ...state.player, rotation },
+      })),
 
-  updateEnvironment: (config) => set({ environment: config }),
+    setActiveZone: (zoneId) => set({ activeZoneId: zoneId }),
 
-  setReady: (ready) => set({ isReady: ready }),
+    updateEnvironment: (config) => set({ environment: config }),
 
-  advanceReveal: () =>
-    set((state) => {
-      const idx = REVEAL_ORDER.indexOf(state.revealState);
-      if (idx < 0 || idx >= REVEAL_ORDER.length - 1) {
-        return state;
-      }
-      const next = REVEAL_ORDER[idx + 1];
-      if (!next) {
-        return state;
-      }
-      return { revealState: next };
-    }),
+    setReady: (ready) => set({ isReady: ready }),
 
-  resetReveal: () => set({ revealState: 'idle', clickHit: null, controlsDismissed: false }),
+    advanceReveal: () =>
+      set((state) => {
+        const idx = REVEAL_ORDER.indexOf(state.revealState);
+        if (idx < 0 || idx >= REVEAL_ORDER.length - 1) {
+          return state;
+        }
+        const next = REVEAL_ORDER[idx + 1];
+        if (!next) {
+          return state;
+        }
+        return { revealState: next };
+      }),
 
-  setClickHit: (hit) => set({ clickHit: hit }),
+    resetReveal: () => set({ revealState: 'idle', clickHit: null, controlsDismissed: false }),
 
-  toggleCursorAvatar: () => set((state) => ({ cursorAvatarActive: !state.cursorAvatarActive })),
+    setClickHit: (hit) => set({ clickHit: hit }),
 
-  setCursorAvatarActive: (active) => set({ cursorAvatarActive: active }),
+    toggleCursorAvatar: () => set((state) => ({ cursorAvatarActive: !state.cursorAvatarActive })),
 
-  setControlsDismissed: (dismissed) => set({ controlsDismissed: dismissed }),
-}));
+    setCursorAvatarActive: (active) => set({ cursorAvatarActive: active }),
+
+    setControlsDismissed: (dismissed) => set({ controlsDismissed: dismissed }),
+
+    setHoveredInteractable: (id, point = null) =>
+      // Always pair id + point: when id is null, point should also be
+      // null (no hover, no surface). When id is non-null, callers
+      // SHOULD pass a point — but if they don't (legacy call sites),
+      // we clear the point so it can't go stale relative to the id.
+      set({ hoveredInteractableId: id, hoveredInteractablePoint: id ? point : null }),
+
+    beginInteractPress: (id, point) =>
+      set({ pressedInteractableId: id, pressedTargetPoint: point }),
+
+    endInteractPress: () => set({ pressedInteractableId: null, pressedTargetPoint: null }),
+  }),
+);

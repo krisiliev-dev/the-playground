@@ -120,6 +120,40 @@ export const SFX = {
     volume: 0.4,
     reverb: { wet: 0.12 },
   },
+  /** Avatar-interaction click — fires when the user clicks an
+   *  interactable in the world. Reuses the click waveform but runs it
+   *  through a heavier DSP chain so it lands as "impact, not feedback":
+   *    - Aggressive compressor (-12 dB / 12:1 / 0.5 ms attack) slams
+   *      transients down so the body feels closer to the peak.
+   *    - Heavy soft saturation (0.6) adds harmonic content — the ear
+   *      reads this as weight without raising peak level.
+   *    - High-shelf +6 dB at 3 kHz adds bite and articulation.
+   *    - Heavy room reverb (0.4) for spatial size.
+   *  Layered with `interactImpact` (low boom) for the "double-hit"
+   *  character — fired together by InteractionController. */
+  interactClick: {
+    variants: ['/audio/cursor/click.wav'],
+    volume: 2.0,
+    reverb: { wet: 0.4 },
+    effects: {
+      compress: { threshold: -12, ratio: 12, attack: 0.0005, release: 0.05 },
+      saturate: 0.7,
+      filter: { type: 'highshelf', freq: 3000, gain: 8 },
+    },
+  },
+  /** Avatar-interaction sub-boom — layered under `interactClick` for
+   *  weight. Reuses the impact rumble waveform. The compressor here
+   *  is gentler (longer attack so the low-frequency body breathes
+   *  rather than being slammed). High wet gives it the room-thump
+   *  character. */
+  interactImpact: {
+    variants: ['/audio/impact/rumble-low.wav'],
+    volume: 1.15,
+    reverb: { wet: 0.5 },
+    effects: {
+      compress: { threshold: -18, ratio: 8, attack: 0.001, release: 0.1 },
+    },
+  },
   /** Mouse-button-down cue — fires globally on every mousedown, so
    *  the user gets immediate audio feedback the instant they press.
    *  Paired with `mouseUp` (fires on release) for a complete two-part

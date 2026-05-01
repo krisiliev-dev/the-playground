@@ -34,34 +34,40 @@ import {
 } from 'three';
 import { useWorldStore } from '@/store';
 import { triggerImpactShake } from '../cameraShake';
-import { type SwordSlot } from './vibeFormation';
+import { FORMATION_SCALE, type SwordSlot } from './vibeFormation';
 import { sfx, type PositionalLoopHandle } from '../../audio/SfxManager';
 import { useSwordKinematics } from './useSwordKinematics';
+import { MID_FORWARD, SWING_DURATION, SWING_DURATION_MS } from './constants';
+import { computeSpawnPoint } from './spawnGeometry';
+import {
+  computeOrientationPhase,
+  computeSpinAngle,
+  computeTiltAngle,
+  computeTrajectoryProgress,
+  computeVisualScale,
+} from './swordPhases';
+import {
+  computeImpactFlashFrame,
+  computeSlamPitchJitter,
+  computeSlamVelocityFactor,
+  computeSpawnFlashFrame,
+  jitterAxis,
+} from './swordEffects';
 
 const SWORD_URL = '/models/sword/scene.gltf';
 
 /** Target world-space height of the sword. Drives the scale factor we
- *  derive from the live bbox so the blade always lands on the wall. */
-const TARGET_FULL_HEIGHT = 10;
-
-/** Spawn-position offsets. Lateral is computed dynamically (ray-cast
- *  to the right side wall of the cube minus an inset), so the spawn
- *  always lands AT the side wall regardless of where the camera was
- *  when the user clicked. Forward + up are small fixed offsets. */
-const SPAWN_FIXED_FWD = 80;
-const SPAWN_FIXED_UP = 20;
-/** Inset from the cube wall — sword spawns this many units inside the
- *  side wall surface so it's not embedded in the wall. */
-const SPAWN_WALL_INSET = 30;
-
-/** Letter-plane forward distance from the click camera. Mid pose is in
- *  this plane (camera-relative), so the formation reads at a fixed
- *  visual size regardless of where the click hit on the wall. */
-const MID_FORWARD = 22;
+ *  derive from the live bbox so the blade always lands on the wall.
+ *  Scaled by the formation factor so swords don't overflow into
+ *  adjacent letters on narrow-aspect displays — letter geometry and
+ *  blade length shrink together. */
+const TARGET_FULL_HEIGHT = 10 * FORMATION_SCALE;
 
 /** End ring radius around the click point on the wall. Each sword lands
- *  on the ring at angle `slot.endAngle`. */
-const END_RADIUS = 10;
+ *  on the ring at angle `slot.endAngle`. Scaled with the formation so
+ *  that on narrow aspects the swords land in a tighter ring
+ *  proportional to the letter size. */
+const END_RADIUS = 10 * FORMATION_SCALE;
 /** Visual scale at spawn — disabled (set to 1.0). Apparent "incoming"
  *  growth now comes from real depth (spawn at ~320 lateral / 80 forward
  *  is much farther than mid at 22 forward), so perspective alone makes
@@ -75,16 +81,6 @@ const SPAWN_VISUAL_SCALE = 1.0;
  *  modest magnitude — just enough to feel like gravity-assisted motion. */
 const BOW_LEG1_VERTICAL = 5;
 const BOW_LEG2_VERTICAL = 7;
-
-/** Explicit swing phases — pre extended for the slow sword approach.
- *  Pre: 3.5s deliberate approach (rocket-flight from far spawn → formation).
- *  Mid: 1.2s formation hold (bullet-time camera orbit).
- *  Post: 0.8s slam into the wall ring.
- *  Total per-sword 5.5s. */
-const SWING_PRE = 3.5;
-const SWING_MID = 1.2;
-const SWING_POST = 0.8;
-const SWING_DURATION = SWING_PRE + SWING_MID + SWING_POST;
 
 /** Time spent rotating between sideways (tip along trajectory) and the
  *  upright letter-stroke pose. With longer pre, bumped to 0.5s — gives
@@ -127,12 +123,6 @@ const FLASH_RISE_FRACTION = 0.2;
 const IMPACT_FLASH_DURATION = 0.18;
 const IMPACT_FLASH_INITIAL_SCALE = 0.6;
 const IMPACT_FLASH_MAX_SCALE = 7;
-
-/** Smoothstep — cubic ease in/out. Standard tweener for phase-internal
- *  easing across each phase of the swing. */
-function smoothstep(t: number): number {
-  return t * t * (3 - 2 * t);
-}
 
 const TMP_BLADE_LOCAL = new Vector3(0, 1, 0);
 
@@ -258,12 +248,12 @@ export function Sword({ slot, staggerIndex = 0 }: SwordProps): JSX.Element {
       const fallbackVel = 60;
       void sfx.play('swordSlam', {
         volumeMultiplier: 0.55,
-        pitchJitter: 0.6 + Math.min(0.15, fallbackVel / 400),
-        filterGain: (Math.random() - 0.5) * 20,
+        pitchJitter: computeSlamPitchJitter(fallbackVel),
+        filterGain: jitterAxis(Math.random, 20),
         position: {
-          x: clickHit.point[0] + (Math.random() - 0.5) * SLAM_POS_JITTER,
-          y: clickHit.point[1] + (Math.random() - 0.5) * SLAM_POS_JITTER,
-          z: clickHit.point[2] + (Math.random() - 0.5) * SLAM_POS_JITTER,
+          x: clickHit.point[0] + jitterAxis(Math.random, SLAM_POS_JITTER),
+          y: clickHit.point[1] + jitterAxis(Math.random, SLAM_POS_JITTER),
+          z: clickHit.point[2] + jitterAxis(Math.random, SLAM_POS_JITTER),
         },
       });
     }
@@ -447,60 +437,12 @@ export function Sword({ slot, staggerIndex = 0 }: SwordProps): JSX.Element {
     wallRight.crossVectors(wallUp, hitNormal).normalize();
 
     // ------- positions -------
-    // Spawn: at the right side wall of the cube. Compute the lateral
-    // distance to the wall by ray-casting camRight from clickCamPos
-    // to the cube boundary, then offset slightly inward (SPAWN_WALL_INSET)
-    // so the sword isn't embedded in the wall surface.
-    let tWall = Infinity;
-    if (Math.abs(camRight.x) > 1e-6) {
-      const t1 = (cubeHalf.x - clickCamPos.x) / camRight.x;
-      const t2 = (-cubeHalf.x - clickCamPos.x) / camRight.x;
-      if (t1 > 0 && t1 < tWall) {
-        tWall = t1;
-      }
-      if (t2 > 0 && t2 < tWall) {
-        tWall = t2;
-      }
-    }
-    if (Math.abs(camRight.y) > 1e-6) {
-      const t1 = (cubeHalf.y - clickCamPos.y) / camRight.y;
-      const t2 = (-cubeHalf.y - clickCamPos.y) / camRight.y;
-      if (t1 > 0 && t1 < tWall) {
-        tWall = t1;
-      }
-      if (t2 > 0 && t2 < tWall) {
-        tWall = t2;
-      }
-    }
-    if (Math.abs(camRight.z) > 1e-6) {
-      const t1 = (cubeHalf.z - clickCamPos.z) / camRight.z;
-      const t2 = (-cubeHalf.z - clickCamPos.z) / camRight.z;
-      if (t1 > 0 && t1 < tWall) {
-        tWall = t1;
-      }
-      if (t2 > 0 && t2 < tWall) {
-        tWall = t2;
-      }
-    }
-    const lateralDist = Math.max(0, tWall - SPAWN_WALL_INSET);
-    spawnPos
-      .copy(clickCamPos)
-      .addScaledVector(camRight, lateralDist)
-      .addScaledVector(camFwd, SPAWN_FIXED_FWD)
-      .addScaledVector(camUp, SPAWN_FIXED_UP);
-    // Clamp to cube interior. The camFwd/camUp offsets can push the
-    // final position past a non-camRight wall (e.g. when the camera is
-    // rotated so camRight has significant Z component, the +Z wall is
-    // closer than the +X wall). Per-axis clamp guarantees inside-cube
-    // regardless of camera orientation.
-    {
-      const limX = cubeHalf.x - SPAWN_WALL_INSET;
-      const limY = cubeHalf.y - SPAWN_WALL_INSET;
-      const limZ = cubeHalf.z - SPAWN_WALL_INSET;
-      spawnPos.x = Math.max(-limX, Math.min(limX, spawnPos.x));
-      spawnPos.y = Math.max(-limY, Math.min(limY, spawnPos.y));
-      spawnPos.z = Math.max(-limZ, Math.min(limZ, spawnPos.z));
-    }
+    // Spawn: ray-cast camRight from the click camera to the nearest
+    // cube wall, back off by SPAWN_WALL_INSET, then offset forward + up
+    // by the fixed camera-relative offsets. Per-axis clamp keeps the
+    // spawn inside the cube regardless of camera orientation. See
+    // ./spawnGeometry for the full math + tests.
+    computeSpawnPoint(spawnPos, clickCamPos, camRight, camFwd, camUp, cubeHalf);
     // Mid: stroke centre in the click-cam-relative letter plane (formation
     // hovers in the air close to camera).
     midPos
@@ -603,26 +545,20 @@ export function Sword({ slot, staggerIndex = 0 }: SwordProps): JSX.Element {
       //     different stereo positions, helping the ear separate
       //     them instead of merging into a single block.
       const v = slamVelocity.current;
-      const velFactor = Math.min(1.6, 0.7 + v / 80);
       // Wide jitter + spatial spread + per-fire EQ for cascade
-      // distinctness:
-      //   - pitchJitter 0.6 + velocity boost: each slam at a
-      //     noticeably different fundamental frequency.
-      //   - position jittered around hit point: each slam pans to a
-      //     different stereo location.
-      //   - filterGain ±10dB: high-shelf boost/cut at 3kHz varies per
-      //     slam — some bright, some dark. Slam.wav is low-end heavy,
-      //     so without per-fire EQ the 12 hits all sit in the same
-      //     frequency band and the ear can't separate them.
+      // distinctness — see ./swordEffects for the velocity → volume
+      // and velocity → pitch envelopes. Math.random for the jittered
+      // values: each slam pans to a different stereo location and
+      // gets a slightly different per-fire high-shelf EQ.
       const SLAM_POS_JITTER = 20;
       void sfx.play('swordSlam', {
-        volumeMultiplier: 0.55 * velFactor,
-        pitchJitter: 0.6 + Math.min(0.15, v / 400),
-        filterGain: (Math.random() - 0.5) * 20,
+        volumeMultiplier: 0.55 * computeSlamVelocityFactor(v),
+        pitchJitter: computeSlamPitchJitter(v),
+        filterGain: jitterAxis(Math.random, 20),
         position: {
-          x: hitPoint.x + (Math.random() - 0.5) * SLAM_POS_JITTER,
-          y: hitPoint.y + (Math.random() - 0.5) * SLAM_POS_JITTER,
-          z: hitPoint.z + (Math.random() - 0.5) * SLAM_POS_JITTER,
+          x: hitPoint.x + jitterAxis(Math.random, SLAM_POS_JITTER),
+          y: hitPoint.y + jitterAxis(Math.random, SLAM_POS_JITTER),
+          z: hitPoint.z + jitterAxis(Math.random, SLAM_POS_JITTER),
         },
       });
     }
@@ -660,96 +596,38 @@ export function Sword({ slot, staggerIndex = 0 }: SwordProps): JSX.Element {
           break;
         }
 
-        // ------- position (curve param p, mapped through the 3 phases) -------
-        // Pre: ease-OUT cubic — sword starts fast (rocket bursting in
-        // from the distance) and decelerates into formation. The decel
-        // IS the "U-turn into position" feel, suave settling.
-        // Mid: tiny linear drift through the formation.
-        // Post: ease-IN cubic — sword launches from formation,
-        // accelerates exponentially into the wall.
-        let p: number;
-        if (t < SWING_PRE) {
-          const phaseT = t / SWING_PRE;
-          const eased = 1 - Math.pow(1 - phaseT, 3);
-          p = 0.5 * eased;
-        } else if (t < SWING_PRE + SWING_MID) {
-          const phaseT = (t - SWING_PRE) / SWING_MID;
-          p = 0.5 + 0.05 * phaseT;
-        } else {
-          const phaseT = Math.min(1, (t - SWING_PRE - SWING_MID) / SWING_POST);
-          const eased = phaseT * phaseT * phaseT;
-          p = 0.55 + 0.45 * eased;
-        }
-        trajectoryCurve.getPoint(p, targetPos);
+        // Position along the curve, plus per-phase orientation, tilt,
+        // spin, and visual scale — all computed by the pure helpers in
+        // ./swordPhases so the phase logic is testable without
+        // instantiating Three.js. Quaternion application stays here
+        // because it needs the per-frame buffers (tmpQ, target, …).
+        trajectoryCurve.getPoint(computeTrajectoryProgress(t), targetPos);
 
-        // ------- orientation (sideways → upright → sideways) -------
-        // Pre flies sideways (tip-along-trajectory + slice roll), pivots
-        // upright in the last 0.5s. Mid holds upright. Post takes the
-        // ENTIRE 1s to rotate back to sideways — slow tilt-back into the
-        // sideways pose, so the formation gracefully unfolds toward the
-        // wall instead of snapping out in 0.5s.
-        if (t < SWING_PRE - ORIENTATION_TURN_TIME) {
+        const orient = computeOrientationPhase(t, ORIENTATION_TURN_TIME);
+        if (orient.phase === 'spawn') {
           targetQuat.copy(spawnQuat);
-        } else if (t < SWING_PRE) {
-          const ot = (t - (SWING_PRE - ORIENTATION_TURN_TIME)) / ORIENTATION_TURN_TIME;
-          targetQuat.copy(spawnQuat).slerp(midQuat, smoothstep(ot));
-        } else if (t < SWING_PRE + SWING_MID) {
+        } else if (orient.phase === 'spawn-to-mid') {
+          targetQuat.copy(spawnQuat).slerp(midQuat, orient.alpha);
+        } else if (orient.phase === 'mid') {
           targetQuat.copy(midQuat);
         } else {
-          // Post: full 1s slerp from midQuat (upright, broadside) to
-          // endQuat (sideways, slice-rolled).
-          const ot = Math.min(1, (t - SWING_PRE - SWING_MID) / SWING_POST);
-          targetQuat.copy(midQuat).slerp(endQuat, smoothstep(ot));
+          targetQuat.copy(midQuat).slerp(endQuat, orient.alpha);
         }
 
-        // ------- italics tilt (mid + fade through post) -------
-        // Mid: +TILT_MAX → -TILT_MAX over 2s. Post: continues from
-        // -TILT_MAX → 0 over 1s, so the formation un-tilts smoothly as
-        // it rotates to sideways instead of cutting off at the boundary.
-        let tiltAngle = 0;
-        if (t >= SWING_PRE && t < SWING_PRE + SWING_MID) {
-          const midPhaseT = (t - SWING_PRE) / SWING_MID;
-          tiltAngle = TILT_MAX * (1 - 2 * midPhaseT);
-        } else if (t >= SWING_PRE + SWING_MID && t < SWING_PRE + SWING_MID + SWING_POST) {
-          const postPhaseT = (t - SWING_PRE - SWING_MID) / SWING_POST;
-          tiltAngle = -TILT_MAX * (1 - postPhaseT);
-        }
+        const tiltAngle = computeTiltAngle(t, TILT_MAX);
         if (tiltAngle !== 0) {
           tmpQ.setFromAxisAngle(camFwd, tiltAngle);
           targetQuat.premultiply(tmpQ);
         }
 
-        // ------- tumble (end-over-end spin in world frame) -------
-        // Spin angle eases out (fast → slow) within each phase so each
-        // ends at exactly N×2π — that's identity, so the sword lands
-        // cleanly without residual rotation. Spin is zero through mid
-        // so the formation reads as a held pose, not a frozen tumble.
-        let spinAngle = 0;
-        if (t < SWING_PRE) {
-          const phaseT = t / SWING_PRE;
-          const easeOut = 1 - Math.pow(1 - phaseT, 3);
-          spinAngle = PRE_ROTATIONS * 2 * Math.PI * easeOut;
-        } else if (t < SWING_PRE + SWING_MID) {
-          spinAngle = 0;
-        } else {
-          const phaseT = Math.min(1, (t - SWING_PRE - SWING_MID) / SWING_POST);
-          const easeOut = 1 - Math.pow(1 - phaseT, 3);
-          spinAngle = POST_ROTATIONS * 2 * Math.PI * easeOut;
-        }
         // Spin around world-space camera-up axis so the sword swings
         // sideways in the camera's horizontal plane (helicopter-blade
         // rotation rather than vertical end-over-end tumble).
+        const spinAngle = computeSpinAngle(t, PRE_ROTATIONS, POST_ROTATIONS);
         tmpQ.setFromAxisAngle(camUp, spinAngle);
         targetQuat.premultiply(tmpQ);
 
-        // ------- visual scale (small → full over the pre phase) -------
-        if (t < SWING_PRE) {
-          const phaseT = t / SWING_PRE;
-          visualScale = SPAWN_VISUAL_SCALE + (1 - SPAWN_VISUAL_SCALE) * smoothstep(phaseT);
-        } else {
-          visualScale = 1;
-        }
-
+        visualScale = computeVisualScale(t, SPAWN_VISUAL_SCALE);
         opacityTarget = 1;
         break;
       }
@@ -788,19 +666,21 @@ export function Sword({ slot, staggerIndex = 0 }: SwordProps): JSX.Element {
       const flashMat = flashSprite.material;
       const startedAt = flashStartedAt.current;
       if (startedAt >= 0) {
-        const elapsed = state.clock.elapsedTime - startedAt;
-        if (elapsed < FLASH_DURATION) {
-          const p = elapsed / FLASH_DURATION;
-          flashSprite.scale.setScalar(
-            FLASH_INITIAL_SCALE + p * (FLASH_MAX_SCALE - FLASH_INITIAL_SCALE),
-          );
-          flashMat.opacity =
-            p < FLASH_RISE_FRACTION
-              ? p / FLASH_RISE_FRACTION
-              : Math.max(0, 1 - (p - FLASH_RISE_FRACTION) / (1 - FLASH_RISE_FRACTION));
-        } else {
-          flashMat.opacity = 0;
+        const frame = computeSpawnFlashFrame(
+          state.clock.elapsedTime - startedAt,
+          FLASH_DURATION,
+          FLASH_INITIAL_SCALE,
+          FLASH_MAX_SCALE,
+          FLASH_RISE_FRACTION,
+        );
+        // Only update the visible scale while the flash is still
+        // alive — past `duration` the helper returns opacity = 0 and
+        // the sprite hides itself, so leaving stale scale on the
+        // dormant sprite is fine.
+        if (frame.opacity > 0) {
+          flashSprite.scale.setScalar(frame.scale);
         }
+        flashMat.opacity = frame.opacity;
       } else {
         flashMat.opacity = 0;
       }
@@ -813,18 +693,16 @@ export function Sword({ slot, staggerIndex = 0 }: SwordProps): JSX.Element {
       const impactMat = impactSprite.material;
       const startedAt = impactFlashStartedAt.current;
       if (startedAt >= 0) {
-        const elapsed = state.clock.elapsedTime - startedAt;
-        if (elapsed < IMPACT_FLASH_DURATION) {
-          const p = elapsed / IMPACT_FLASH_DURATION;
-          impactSprite.scale.setScalar(
-            IMPACT_FLASH_INITIAL_SCALE + p * (IMPACT_FLASH_MAX_SCALE - IMPACT_FLASH_INITIAL_SCALE),
-          );
-          // Hard pop + linear fade — impact reads as a sharp hit, not
-          // a soft glow.
-          impactMat.opacity = 1 - p;
-        } else {
-          impactMat.opacity = 0;
+        const frame = computeImpactFlashFrame(
+          state.clock.elapsedTime - startedAt,
+          IMPACT_FLASH_DURATION,
+          IMPACT_FLASH_INITIAL_SCALE,
+          IMPACT_FLASH_MAX_SCALE,
+        );
+        if (frame.opacity > 0) {
+          impactSprite.scale.setScalar(frame.scale);
         }
+        impactMat.opacity = frame.opacity;
       } else {
         impactMat.opacity = 0;
       }
@@ -866,5 +744,5 @@ useGLTF.preload(SWORD_URL);
 
 export const SWORD_CONSTANTS = {
   TARGET_FULL_HEIGHT,
-  SWING_DURATION_MS: SWING_DURATION * 1000,
+  SWING_DURATION_MS,
 } as const;
