@@ -149,14 +149,38 @@ const ALL_STROKES: readonly NamedStroke[] = [
 
 export const VIBE_SWORD_COUNT = ALL_STROKES.length;
 
+/** Aspect-ratio-driven uniform scale applied to the whole VIBE
+ *  formation (mid positions + sword length downstream in Sword.tsx).
+ *  Wider viewports (landscape monitors, tablets in landscape) get the
+ *  full 1.0 scale; narrower viewports (phone portrait) shrink the
+ *  formation so it fits horizontally without changing the camera
+ *  choreography. Linear from `MIN_SCALE` at very narrow aspects to
+ *  `1.0` at `1.5` aspect-ratio and above. */
+const FORMATION_MIN_SCALE = 0.55;
+const FORMATION_FULL_SCALE_ASPECT = 1.5;
+function computeFormationScale(): number {
+  if (typeof window === 'undefined') {
+    return 1;
+  }
+  const aspect = window.innerWidth / window.innerHeight;
+  if (aspect >= FORMATION_FULL_SCALE_ASPECT) {
+    return 1;
+  }
+  const t = aspect / FORMATION_FULL_SCALE_ASPECT;
+  return Math.max(FORMATION_MIN_SCALE, t);
+}
+export const FORMATION_SCALE = computeFormationScale();
+
 /** Final formation. End angles distribute the swords evenly around the
  *  click point on the wall; spawn position is derived from the mid pose
  *  in Sword.tsx (each sword spawns far in front of the camera, at a
- *  lateral offset proportional to where it'll end up in the letter). */
+ *  lateral offset proportional to where it'll end up in the letter).
+ *  midPos is scaled uniformly by `FORMATION_SCALE` so the whole word
+ *  fits horizontally on narrow viewports. */
 export const VIBE_SLOTS: readonly SwordSlot[] = ALL_STROKES.map((s, i) => ({
   id: s.id,
   variant: SHARED_VARIANT,
-  midPos: s.mid,
+  midPos: [s.mid[0] * FORMATION_SCALE, s.mid[1] * FORMATION_SCALE] as const,
   midDir: s.dir,
   endAngle: (i * 2 * Math.PI) / VIBE_SWORD_COUNT,
 }));

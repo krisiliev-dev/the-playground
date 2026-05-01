@@ -37,12 +37,16 @@ import { triggerImpactShake } from '../cameraShake';
 import { type SwordSlot } from './vibeFormation';
 import { sfx, type PositionalLoopHandle } from '../../audio/SfxManager';
 import { useSwordKinematics } from './useSwordKinematics';
+import { FORMATION_SCALE } from './vibeFormation';
 
 const SWORD_URL = '/models/sword/scene.gltf';
 
 /** Target world-space height of the sword. Drives the scale factor we
- *  derive from the live bbox so the blade always lands on the wall. */
-const TARGET_FULL_HEIGHT = 10;
+ *  derive from the live bbox so the blade always lands on the wall.
+ *  Scaled by the formation factor so swords don't overflow into
+ *  adjacent letters on narrow-aspect displays — letter geometry and
+ *  blade length shrink together. */
+const TARGET_FULL_HEIGHT = 10 * FORMATION_SCALE;
 
 /** Spawn-position offsets. Lateral is computed dynamically (ray-cast
  *  to the right side wall of the cube minus an inset), so the spawn
@@ -61,7 +65,10 @@ const MID_FORWARD = 22;
 
 /** End ring radius around the click point on the wall. Each sword lands
  *  on the ring at angle `slot.endAngle`. */
-const END_RADIUS = 10;
+/** Radius of the end-circle around the click point on the wall.
+ *  Scaled with the formation so that on narrow aspects the swords
+ *  land in a tighter ring proportional to the letter size. */
+const END_RADIUS = 10 * FORMATION_SCALE;
 /** Visual scale at spawn — disabled (set to 1.0). Apparent "incoming"
  *  growth now comes from real depth (spawn at ~320 lateral / 80 forward
  *  is much farther than mid at 22 forward), so perspective alone makes
