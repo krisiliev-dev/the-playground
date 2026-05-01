@@ -78,4 +78,24 @@ describe('CursorAvatar', () => {
     // After deactivation, the previous (empty) cursor style is restored.
     expect(document.body.style.cursor).not.toBe('none');
   });
+
+  it('restores the system cursor when the pause menu opens, re-hides on close', () => {
+    useWorldStore.setState({ menuOpen: false });
+    useWorldStore.getState().setCursorAvatarActive(true);
+    const { rerender } = render(<CursorAvatar />);
+    expect(document.body.style.cursor).toBe('none');
+
+    // Menu opens — the cursor effect re-runs because menuOpen is in
+    // its dep array; the cleanup of the previous run restores the
+    // body cursor, and the new run early-returns (no hiding).
+    useWorldStore.setState({ menuOpen: true });
+    rerender(<CursorAvatar />);
+    expect(document.body.style.cursor).not.toBe('none');
+
+    // Menu closes — the effect re-runs again, this time taking the
+    // hide path because menuOpen is false and active is still true.
+    useWorldStore.setState({ menuOpen: false });
+    rerender(<CursorAvatar />);
+    expect(document.body.style.cursor).toBe('none');
+  });
 });

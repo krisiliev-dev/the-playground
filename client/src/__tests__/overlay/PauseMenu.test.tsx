@@ -9,6 +9,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { PauseMenu } from '@/components/overlay/PauseMenu';
 import { sfx } from '@/components/audio/SfxManager';
+import { useWorldStore } from '@/store';
 
 function setMatchMedia(matches: boolean): void {
   window.matchMedia = ((query: string) =>
@@ -41,10 +42,18 @@ describe('PauseMenu', () => {
   beforeEach(() => {
     originalMatchMedia = window.matchMedia;
     setMatchMedia(false); // desktop default
+    // Reset store fields the menu writes to / reads from.
+    useWorldStore.setState({
+      menuOpen: false,
+      controlsDismissed: false,
+      pressedInteractableId: null,
+      pressedTargetPoint: null,
+    });
   });
 
   afterEach(() => {
     window.matchMedia = originalMatchMedia;
+    useWorldStore.setState({ menuOpen: false });
   });
 
   describe('desktop — no chrome when closed', () => {
@@ -276,6 +285,91 @@ describe('PauseMenu', () => {
       renderMenu();
       fireEvent.click(screen.getByLabelText('Open menu'));
       expect(screen.getByText(/tap outside to close/)).toBeInTheDocument();
+    });
+  });
+
+  describe('store integration + side effects', () => {
+    it('writes menuOpen=true to the store on open and false on close', () => {
+      renderMenu();
+      expect(useWorldStore.getState().menuOpen).toBe(false);
+
+      act(() => {
+        window.dispatchEvent(mEvent());
+      });
+      expect(useWorldStore.getState().menuOpen).toBe(true);
+
+      act(() => {
+        window.dispatchEvent(mEvent());
+      });
+      expect(useWorldStore.getState().menuOpen).toBe(false);
+    });
+
+    it('ends any in-progress interaction press when opening', () => {
+      // Simulate a press that was active when the user pressed M.
+      useWorldStore.getState().beginInteractPress('cube-A', [1, 2, 3]);
+      expect(useWorldStore.getState().pressedInteractableId).toBe('cube-A');
+
+      renderMenu();
+      act(() => {
+        window.dispatchEvent(mEvent());
+      });
+      // Press cleared so the cursor doesn't stay leaned forward
+      // through menu mode.
+      expect(useWorldStore.getState().pressedInteractableId).toBeNull();
+      expect(useWorldStore.getState().pressedTargetPoint).toBeNull();
+    });
+
+    it('requests pointer-lock on close when in avatar mode', () => {
+      // Set up: avatar mode + a canvas with a spy-able requestPointerLock.
+      useWorldStore.setState({ controlsDismissed: true });
+      const canvas = document.createElement('canvas');
+      const spy = vi.fn();
+      // Define on the instance directly — jsdom's HTMLCanvasElement
+      // doesn't ship requestPointerLock, so this stays our spy.
+      Object.defineProperty(canvas, 'requestPointerLock', {
+        configurable: true,
+        value: spy,
+      });
+      document.body.appendChild(canvas);
+
+      renderMenu();
+      // Open then close — the close path is what should trigger
+      // re-acquisition.
+      act(() => {
+        window.dispatchEvent(mEvent());
+      });
+      expect(spy).not.toHaveBeenCalled();
+      act(() => {
+        window.dispatchEvent(mEvent());
+      });
+      expect(spy).toHaveBeenCalledTimes(1);
+
+      document.body.removeChild(canvas);
+    });
+
+    it('does NOT request pointer-lock on close outside avatar mode', () => {
+      // Pre-avatar mode: the user hasn't dismissed the controls hint
+      // yet, so pointer-lock shouldn't be expected to be active and
+      // re-acquiring it would surprise them.
+      useWorldStore.setState({ controlsDismissed: false });
+      const canvas = document.createElement('canvas');
+      const spy = vi.fn();
+      Object.defineProperty(canvas, 'requestPointerLock', {
+        configurable: true,
+        value: spy,
+      });
+      document.body.appendChild(canvas);
+
+      renderMenu();
+      act(() => {
+        window.dispatchEvent(mEvent());
+      });
+      act(() => {
+        window.dispatchEvent(mEvent());
+      });
+      expect(spy).not.toHaveBeenCalled();
+
+      document.body.removeChild(canvas);
     });
   });
 });

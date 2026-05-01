@@ -87,6 +87,11 @@ export function PauseMenu(): JSX.Element | null {
   // clicks of perceived weirdness instead of one. Re-acquiring
   // here, on the same user gesture that closed the menu, means
   // the user is back in 3D mode immediately with no naked click.
+  //
+  // wasOpen ref tracks the previous state so the initial mount
+  // (open=false, but never been open) doesn't trigger the close-
+  // side-effects.
+  const wasOpen = useRef(false);
   useEffect(() => {
     useWorldStore.getState().setMenuOpen(open);
     if (open) {
@@ -94,7 +99,7 @@ export function PauseMenu(): JSX.Element | null {
         document.exitPointerLock?.();
       }
       useWorldStore.getState().endInteractPress();
-    } else {
+    } else if (wasOpen.current) {
       // Only re-acquire when in avatar mode (controlsDismissed).
       // Outside avatar mode, pointer-lock isn't expected to be
       // active so re-acquiring would surprise the user.
@@ -109,6 +114,7 @@ export function PauseMenu(): JSX.Element | null {
         }
       }
     }
+    wasOpen.current = open;
   }, [open]);
 
   // Focus the first interactive item on open so keyboard navigation
