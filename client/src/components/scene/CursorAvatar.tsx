@@ -26,11 +26,14 @@ import {
   MeshStandardMaterial,
   PerspectiveCamera,
   Quaternion,
+  Raycaster,
+  Vector2,
   Vector3,
 } from 'three';
 import { useWorldStore } from '@/store';
 import { useIsTouchPrimary } from '@/utils';
 import { sfx } from '../audio/SfxManager';
+import { interactableHandlers } from './Interactable';
 
 const MODEL_URL = '/models/3d_icon_cursor.glb';
 
@@ -116,7 +119,7 @@ const OUTLINE_SCALE = 1.06;
  *  pre-fix asymmetric outline the user liked, but as a deliberate
  *  authored choice instead of a pivot accident. */
 const OUTLINE_SHIFT_X_FRACTION = 0.012;
-const OUTLINE_SHIFT_Y_FRACTION = -0.012;
+const OUTLINE_SHIFT_Y_FRACTION = -0.05;
 
 useGLTF.preload(MODEL_URL);
 
@@ -152,7 +155,7 @@ export function CursorAvatar(): JSX.Element | null {
 
 function ActiveCursor(): JSX.Element {
   const groupRef = useRef<Group>(null);
-  const { pointer, camera, gl } = useThree();
+  const { pointer, camera, gl, scene } = useThree();
 
   const revealState = useWorldStore((s) => s.revealState);
   const controlsDismissed = useWorldStore((s) => s.controlsDismissed);
@@ -507,6 +510,40 @@ function ActiveCursor(): JSX.Element {
       return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
     };
 
+    // Re-used raycaster + NDC buffer for the touch-position raycast
+    // (separate from the InteractionController's crosshair raycaster
+    // — that one shoots through screen centre; this one shoots
+    // through wherever the user's finger landed).
+    const touchRaycaster = new Raycaster();
+    const touchNDC = new Vector2();
+
+    /** Raycast from the touch's screen position into the scene and
+     *  return the first interactable hit within range, or null. */
+    const interactableUnderTouch = (
+      clientX: number,
+      clientY: number,
+    ): { id: string; point: Vector3 } | null => {
+      touchNDC.set((clientX / window.innerWidth) * 2 - 1, -(clientY / window.innerHeight) * 2 + 1);
+      touchRaycaster.setFromCamera(touchNDC, camera);
+      const hits = touchRaycaster.intersectObjects(scene.children, true);
+      for (const hit of hits) {
+        const data = hit.object.userData;
+        if (!data.interactable) {
+          continue;
+        }
+        const range = (data.interactableRange as number | undefined) ?? 60;
+        if (hit.distance > range) {
+          break;
+        }
+        const id = data.interactableId as string | undefined;
+        if (!id) {
+          continue;
+        }
+        return { id, point: hit.point };
+      }
+      return null;
+    };
+
     const onTouchStart = (e: TouchEvent): void => {
       // First touch is the canonical user gesture on mobile — unlock
       // the AudioContext on every touchstart so any path through the
@@ -520,7 +557,12 @@ function ActiveCursor(): JSX.Element {
         pinchActive = true;
         pinchStartDist = fingerDistance(e);
         touchSingleActive = false;
-        pressInteractActive = false;
+        // If a press was active, release it cleanly — the user is
+        // transitioning to a navigation gesture.
+        if (pressInteractActive) {
+          pressInteractActive = false;
+          useWorldStore.getState().endInteractPress();
+        }
         touchIsDrag = false;
         touchWalkVelocity.current = 0;
         return;
@@ -531,21 +573,31 @@ function ActiveCursor(): JSX.Element {
         touchStartY = t.clientY;
         touchStartTime = performance.now();
 
-        // If the crosshair is currently on an interactable, treat
-        // this touch as a press-to-interact, not a swipe-to-look.
-        // Synthesise mousedown so the InteractionController starts
-        // the press immediately (cursor leans). Movement during this
-        // touch is ignored; touchend will synthesise mouseup.
-        const hoveredId = useWorldStore.getState().hoveredInteractableId;
-        if (hoveredId) {
+        // Raycast from the *touch's* screen position to see if the
+        // finger landed on an interactable. This is the mobile
+        // analogue of "click on the object" — independent of where
+        // the crosshair (screen centre) is pointing.
+        const touchHit = interactableUnderTouch(t.clientX, t.clientY);
+        if (touchHit) {
           pressInteractActive = true;
           touchSingleActive = false;
-          const init = { bubbles: true, clientX: t.clientX, clientY: t.clientY } as const;
-          window.dispatchEvent(new MouseEvent('mousedown', init));
+          // Drive the press directly via the store + audio; we
+          // bypass the InteractionController on this path because
+          // its mousedown handler uses the *crosshair* hit, not the
+          // touch hit. The cursor's lean animation reads from
+          // `pressedTargetPoint` regardless of how the press began.
+          useWorldStore
+            .getState()
+            .beginInteractPress(touchHit.id, [
+              touchHit.point.x,
+              touchHit.point.y,
+              touchHit.point.z,
+            ]);
+          void sfx.play('mouseDown');
           return;
         }
 
-        // No interactable under the crosshair — this is a candidate
+        // No interactable under the finger — this is a candidate
         // swipe-to-look or quick-tap-on-empty.
         touchLastX = t.clientX;
         touchLastY = t.clientY;
@@ -622,15 +674,24 @@ function ActiveCursor(): JSX.Element {
         touchWalkVelocity.current = 0;
       }
 
-      // Press-on-interactable: complete the gesture by synthesising
-      // mouseup. This fires whether the user held briefly (works as
-      // a quick tap) or for several seconds (works as a sustained
-      // press); the lean stays visible for at least
-      // MIN_PRESS_HOLD_MS in either case.
+      // Press-on-interactable: commit the interaction by reading
+      // the pressed id from the store, firing its registered
+      // handler, playing the heavy click audio, and ending the
+      // press. We don't synthesise mousedown/mouseup here because
+      // those would trigger the InteractionController's crosshair-
+      // based logic, which doesn't know about the touch's hit.
       if (pressInteractActive && e.touches.length === 0) {
         pressInteractActive = false;
-        const init = { bubbles: true, clientX: touchStartX, clientY: touchStartY } as const;
-        window.dispatchEvent(new MouseEvent('mouseup', init));
+        const state = useWorldStore.getState();
+        const pressedId = state.pressedInteractableId;
+        if (pressedId) {
+          const handler = interactableHandlers.get(pressedId);
+          handler?.();
+          void sfx.play('interactClick');
+          void sfx.play('interactImpact');
+        }
+        void sfx.play('mouseUp');
+        state.endInteractPress();
         return;
       }
 
@@ -670,7 +731,11 @@ function ActiveCursor(): JSX.Element {
         document.exitPointerLock?.();
       }
     };
-  }, [isPostClick, gl.domElement, camera]);
+    // `scene` is stable across renders (the r3f root) so `scene.children`
+    // is intentionally not in the deps — we only need a fresh closure
+    // when the input bindings change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPostClick, gl.domElement, camera, scene]);
 
   // Anchor avatar position + reset yaw/pitch the moment the user dismisses
   // ControlsHint (controlsDismissed → isAvatar). Discards any mouse delta

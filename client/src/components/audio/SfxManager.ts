@@ -725,18 +725,14 @@ class SfxManager {
     console.log('[sfx-debug] unlock: ctx created, state=', this.ctx.state);
 
     // iOS silent-switch bypass — see `silenceUnlockAudio` declaration.
-    // Created lazily inside the gesture path so the .play() call is
-    // a permitted user-initiated playback. Wrapped in catch because
-    // some browsers reject .play() if autoplay constraints aren't
-    // met; if it fails, audio still works on platforms where the
-    // silent switch isn't an issue.
+    // Use a real silent WAV file (not a data URL) because iOS Safari
+    // rejects zero-data data URLs silently in some versions, without
+    // firing the `play()` rejection handler. Volume slightly above
+    // zero so iOS recognises it as actively playing media.
     if (!this.silenceUnlockAudio) {
-      const a = new Audio(
-        // 1-second silent 8 kHz mono WAV, base64-encoded.
-        'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEAQB8AAEAfAAABAAgAAABmYWN0BAAAAAAAAABkYXRhAAAAAA==',
-      );
+      const a = new Audio('/audio/silence.wav');
       a.loop = true;
-      a.volume = 0;
+      a.volume = 0.0001;
       a.play()
         .then(() => {
           // eslint-disable-next-line no-console

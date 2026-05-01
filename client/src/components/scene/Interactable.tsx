@@ -48,7 +48,14 @@ const MIN_PRESS_HOLD_MS = 130;
  *  click lands on a hovered interactable. Plain Map (not store state)
  *  because functions don't belong in a serialisable store, and
  *  registration is component-lifecycle bound. */
-const interactableHandlers = new Map<string, () => void>();
+/** Module-scoped registry of interactable id → click handler. Exported
+ *  so the mobile touch path in `CursorAvatar` can fire the matching
+ *  handler directly when a touch lands on an interactable, without
+ *  going through the InteractionController's crosshair-driven
+ *  mousedown logic (which is the right pipeline for desktop but
+ *  wrong for touch where the finger position — not screen centre —
+ *  determines the press target). */
+export const interactableHandlers = new Map<string, () => void>();
 
 interface UseInteractableOpts {
   /** Stable identifier — used as the key both in the registry and in
