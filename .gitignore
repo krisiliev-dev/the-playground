@@ -7,6 +7,7 @@ client/node_modules
 
 # ── Build output ────────────────────────────────────────────────────
 client/dist/
+client/storybook-static/
 server/target/
 
 # ── IDE / Editor ────────────────────────────────────────────────────

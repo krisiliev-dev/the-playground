@@ -16,7 +16,9 @@
     "format": "prettier --check \"src/**/*.{ts,tsx,css,json}\"",
     "format:fix": "prettier --write \"src/**/*.{ts,tsx,css,json}\"",
     "typecheck": "tsc --noEmit",
-    "validate": "pnpm lint && pnpm format && pnpm typecheck && pnpm test:run"
+    "validate": "pnpm lint && pnpm format && pnpm typecheck && pnpm test:run",
+    "storybook": "storybook dev -p 6006",
+    "build-storybook": "storybook build"
   },
   "dependencies": {
     "@react-three/drei": "^9.114.0",
@@ -53,6 +55,12 @@
     "prettier": "^3.3.0",
     "typescript": "^5.6.0",
     "vite": "^5.4.0",
-    "vitest": "^2.1.0"
+    "vitest": "^2.1.0",
+    "@storybook/addon-a11y": "^10.3.6",
+    "@storybook/addon-docs": "^10.3.6",
+    "@storybook/addon-onboarding": "^10.3.6",
+    "@storybook/react-vite": "^10.3.6",
+    "eslint-plugin-storybook": "^10.3.6",
+    "storybook": "^10.3.6"
   }
 }
