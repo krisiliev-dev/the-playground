@@ -190,6 +190,7 @@ export function CursorAvatar(): JSX.Element | null {
   const active = useWorldStore((s) => s.cursorAvatarActive);
   const revealState = useWorldStore((s) => s.revealState);
   const menuOpen = useWorldStore((s) => s.menuOpen);
+  const documentMode = useWorldStore((s) => s.documentMode);
   const isTouch = useIsTouchPrimary();
 
   // Hide the OS cursor while the avatar is active — except when the
@@ -199,7 +200,12 @@ export function CursorAvatar(): JSX.Element | null {
   // bug, since the browser only reveals the OS cursor on its own
   // when there's an interaction surface to point at).
   useEffect(() => {
-    if (!active || menuOpen) {
+    // Restore the OS cursor whenever the user is interacting with
+    // chrome rather than the 3D world: the pause menu, or document
+    // mode (the latter reachable via the Simple Experience portal
+    // *or* the menu, so gating only on menuOpen leaves doc-mode
+    // users with a hidden cursor over the document).
+    if (!active || menuOpen || documentMode) {
       return;
     }
     const previous = document.body.style.cursor;
@@ -207,7 +213,7 @@ export function CursorAvatar(): JSX.Element | null {
     return () => {
       document.body.style.cursor = previous;
     };
-  }, [active, menuOpen]);
+  }, [active, menuOpen, documentMode]);
 
   if (!active) {
     return null;

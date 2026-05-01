@@ -261,16 +261,30 @@ export function App(): JSX.Element {
   // that flips this flag if the GPU process dies under us mid-session.
   const [contextLost, setContextLost] = useState(false);
 
-  // Reclaim pointer-lock when returning from document mode while in
-  // avatar mode. DocumentShell sets `pendingPointerLock = true`
-  // synchronously inside its "Switch to 3D experience" click
-  // handler. We can't request the lock until the Canvas is actually
-  // in the DOM, so the effect fires when *either* documentMode goes
-  // false (Canvas was already mounted from a prior 3D session) or
-  // bootState becomes 'ready' (first-time 3D entry from a fresh
-  // doc-mode load — LoadingScreen ran in between).
+  // Pointer-lock + entry/exit choreography around document mode.
+  //
+  //   Entering doc mode: release pointer-lock so the browser hands
+  //   the OS cursor back to the user. Without this, the SE portal
+  //   click flips documentMode but the canvas still owns the cursor,
+  //   and the user is stuck with no cursor over the document.
+  //   Mouselook also remains live (the mousemove handler gates on
+  //   pointerLockElement === canvas), so an explicit exit doubles
+  //   as the kill-switch for in-doc input bleed.
+  //
+  //   Returning to 3D in avatar mode: reclaim pointer-lock if
+  //   DocumentShell set the `pendingPointerLock` signal in its
+  //   "Switch to 3D experience" click handler. Effect fires when
+  //   *either* documentMode goes false (Canvas already mounted) or
+  //   bootState becomes 'ready' (first-time 3D entry from a fresh
+  //   doc-mode load — LoadingScreen ran in between).
   useEffect(() => {
-    if (documentMode || bootState !== 'ready') {
+    if (documentMode) {
+      if (typeof document !== 'undefined' && document.pointerLockElement) {
+        document.exitPointerLock?.();
+      }
+      return;
+    }
+    if (bootState !== 'ready') {
       return;
     }
     const { pendingPointerLock, setPendingPointerLock } = useWorldStore.getState();

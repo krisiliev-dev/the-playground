@@ -1,166 +1,248 @@
 /**
- * Portals — the four interactable gateways inside the sword formation
- * that lead to each section of the portfolio.
+ * Portals — the four interactable gateways the swords "conjure" on the
+ * wall they impacted. Visually a disc split into four pie-slice
+ * quadrants centred on `clickHit.point`, each portal one quarter:
+ *
+ *   ╭───╮
+ *   │NW │NE   ← top half: Projects (NW), About (NE)
+ *   ├───┤
+ *   │SW │SE   ← bottom half: Writing (SW), Simple Experience (SE)
+ *   ╰───╯
  *
  * Three "section" portals (About, Projects, Writing) navigate via
- * react-router. The fourth, "Simple Experience", flips `documentMode`
- * to true instead — it's a *mode* toggle, not a route, and is
- * visually distinct (clean axis-aligned frame instead of the organic
- * glowing ring) to signal the fourth-wall break.
+ * react-router; the fourth, Simple Experience, flips `documentMode`
+ * to true and is colored neutrally to read as a fourth-wall break.
  *
- * Mounted only after `revealState === 'revealed'` so the formation
- * has finished its sword animation and the user is in avatar mode
- * with the controls hint dismissed (or about to dismiss it). The
- * existing useInteractable hook handles the crosshair-aim-and-click
- * interaction; navigation goes through `pendingNavigation` in the
- * store because react-router context doesn't reliably bridge across
- * R3F's reconciler.
+ * The whole disc lies flat on the cube wall the user clicked, with
+ * a small offset along the wall's inward normal to avoid z-fighting.
+ * A parent `<group>` carries the position + orientation; the four
+ * pie children are `<circleGeometry>` meshes with `thetaStart` /
+ * `thetaLength` set so the slices butt up against each other (with
+ * a small angular GAP for visual cleanliness).
  *
- * Phase 1: click-to-activate only, route lands on the existing
- * RoomPage overlay. Subsequent phases will add the click-lerp camera
- * animation, walk-through detection, and per-section 3D rooms.
+ * Mounted only after `revealState === 'revealed'` and a non-null
+ * `clickHit` is in the store — both gates always co-occur in
+ * practice, but the explicit `clickHit` check keeps the type
+ * narrowing clean.
+ *
+ * Phase 1: click trigger only. Click-lerp camera animation,
+ * walk-through detection, and per-section 3D rooms come in
+ * subsequent phases.
  */
-import { useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
-import type { MeshStandardMaterial, Vector3Tuple } from 'three';
+import { Quaternion, Vector3, type Group, type MeshStandardMaterial } from 'three';
 import { useInteractable } from './Interactable';
 import { useWorldStore } from '@/store';
 
-const PORTAL_RADIUS = 5;
-const PORTAL_TUBE = 0.6;
-const PORTAL_RING_SEGMENTS = 48;
-const SE_FRAME_SEGMENTS = 4;
-/** Anchor row z — just past the formation along the user's spawn axis,
- *  so a forward walk carries the avatar through them naturally. */
-const PORTAL_Z = -340;
-/** Eye-level y; matches the camera's default Y. */
-const PORTAL_Y = 0;
-/** Horizontal spacing. With radius 5, 30 units between centres
- *  leaves a comfortable gap between rings. */
-const PORTAL_SPACING = 30;
-/** Centred row of four portals → x extents are ±1.5 × spacing. */
-const PORTAL_X = (i: number): number => (i - 1.5) * PORTAL_SPACING;
+/** Disc radius — fills roughly the visual extent of the VIBE
+ *  formation. Tunable; 10 is a reasonable starting point. */
+const PORTAL_RADIUS = 10;
+/** Distance along the wall's inward normal to position the disc.
+ *  Just enough to avoid z-fighting against the wall geometry. */
+const PORTAL_NORMAL_OFFSET = 0.1;
+/** Angular gap (radians) between pie slices, so they read as four
+ *  distinct portals rather than a single solid disc. */
+const PORTAL_GAP = 0.04;
+/** CircleGeometry radial segments — higher = smoother arc edge. */
+const PORTAL_SEGMENTS = 64;
+/** A full quarter of the disc, less the angular gap on each side. */
+const QUARTER = Math.PI / 2;
 
-const HOVER_SCALE = 1.1;
-const PRESS_SCALE = 0.95;
+const HOVER_SCALE = 1.05;
+const PRESS_SCALE = 0.97;
 const SCALE_LERP_RATE = 12;
 const IDLE_EMISSIVE = 0.7;
 const HOVER_EMISSIVE = 1.5;
 const PRESS_EMISSIVE = 2.5;
+const SE_IDLE_EMISSIVE = 0;
+const SE_HOVER_EMISSIVE = 0.3;
+const SE_PRESS_EMISSIVE = 0.6;
 
-interface SectionPortalConfig {
+interface PieConfig {
   id: string;
-  label: string;
-  path: string;
+  /** Lower-left corner of the quarter in radians (counter-clockwise
+   *  from +X). Each pie covers `[thetaStart, thetaStart + QUARTER]`. */
+  thetaStart: number;
+  /** Hex color for both `color` and `emissive`. */
   color: string;
-  index: number;
 }
 
-const SECTION_PORTALS: ReadonlyArray<SectionPortalConfig> = [
-  { id: 'portal-about', label: 'About', path: '/about', color: '#00ffcc', index: 0 },
-  { id: 'portal-projects', label: 'Projects', path: '/projects', color: '#ff6ec7', index: 1 },
-  { id: 'portal-writing', label: 'Writing', path: '/writing', color: '#ffcc66', index: 2 },
+const SECTION_PIES: ReadonlyArray<PieConfig & { path: string }> = [
+  // NE quadrant (top-right): About.
+  { id: 'portal-about', path: '/about', thetaStart: 0, color: '#00ffcc' },
+  // NW quadrant (top-left): Projects.
+  { id: 'portal-projects', path: '/projects', thetaStart: QUARTER, color: '#ff6ec7' },
+  // SW quadrant (bottom-left): Writing.
+  { id: 'portal-writing', path: '/writing', thetaStart: 2 * QUARTER, color: '#ffcc66' },
 ];
 
-const SE_PORTAL_INDEX = 3;
+const SE_PIE: PieConfig = {
+  id: 'portal-simple-experience',
+  // SE quadrant (bottom-right) — picks up the layout's compass
+  // mnemonic at the same time as the Simple Experience name. Neutral
+  // off-white color so the slice reads as "different in kind" from
+  // the three section quadrants.
+  thetaStart: 3 * QUARTER,
+  color: '#e0fffa',
+};
 
 export function Portals(): JSX.Element | null {
   const revealState = useWorldStore((s) => s.revealState);
-  // Portals live inside the formation — only mount once the reveal
-  // sequence has settled into 'revealed'. Earlier states have the
-  // swords mid-flight, so the portals would be visually noisy.
-  if (revealState !== 'revealed') {
+  const clickHit = useWorldStore((s) => s.clickHit);
+
+  // Disc lives where the swords landed. Both gates fire together in
+  // practice — `revealState='revealed'` is set by RevealOrchestrator
+  // only after `clickHit` was written — but the explicit clickHit
+  // check narrows the type and short-circuits if state ever drifts.
+  if (revealState !== 'revealed' || !clickHit) {
     return null;
   }
+
+  return <PortalsDisc clickHit={clickHit} />;
+}
+
+interface PortalsDiscProps {
+  clickHit: NonNullable<ReturnType<typeof useWorldStore.getState>['clickHit']>;
+}
+
+function PortalsDisc({ clickHit }: PortalsDiscProps): JSX.Element {
+  // Position + orientation derive deterministically from clickHit.
+  // We apply them imperatively via a ref instead of declarative props
+  // because R3F's `quaternion` prop trips the eslint
+  // `react/no-unknown-property` rule, and converting to Euler angles
+  // every render is more code than just copying into the Group.
+  const groupRef = useRef<Group>(null);
+  const transform = useMemo(() => {
+    const point = new Vector3(...clickHit.point);
+    const normal = new Vector3(...clickHit.normal);
+    // Float the disc a hair inward from the wall to dodge z-fighting.
+    const pos = point.clone().addScaledVector(normal, PORTAL_NORMAL_OFFSET);
+    // CircleGeometry's surface normal is +Z; rotate to point along
+    // the wall's inward normal so the disc sits flat on the wall.
+    const quat = new Quaternion().setFromUnitVectors(new Vector3(0, 0, 1), normal);
+    return { position: pos, quaternion: quat };
+  }, [clickHit.point, clickHit.normal]);
+
+  useEffect(() => {
+    const g = groupRef.current;
+    if (!g) {
+      return;
+    }
+    g.position.copy(transform.position);
+    g.quaternion.copy(transform.quaternion);
+  }, [transform]);
+
   return (
-    <>
-      {SECTION_PORTALS.map((p) => (
-        <SectionPortal
-          key={p.id}
-          id={p.id}
-          path={p.path}
-          color={p.color}
-          position={[PORTAL_X(p.index), PORTAL_Y, PORTAL_Z]}
+    <group ref={groupRef}>
+      {SECTION_PIES.map((pie) => (
+        <SectionPortalPie
+          key={pie.id}
+          id={pie.id}
+          thetaStart={pie.thetaStart}
+          color={pie.color}
+          path={pie.path}
         />
       ))}
-      <SimpleExperiencePortal position={[PORTAL_X(SE_PORTAL_INDEX), PORTAL_Y, PORTAL_Z]} />
-    </>
+      <SimpleExperiencePortalPie thetaStart={SE_PIE.thetaStart} color={SE_PIE.color} />
+    </group>
   );
 }
 
-interface SectionPortalProps {
+interface SectionPortalPieProps {
   id: string;
-  path: string;
+  thetaStart: number;
   color: string;
-  position: Vector3Tuple;
+  path: string;
 }
 
-function SectionPortal({ id, path, color, position }: SectionPortalProps): JSX.Element {
+function SectionPortalPie({ id, thetaStart, color, path }: SectionPortalPieProps): JSX.Element {
   const setPendingNavigation = useWorldStore((s) => s.setPendingNavigation);
   const { ref, isHovered, isPressed } = useInteractable({
     id,
     onInteract: () => setPendingNavigation(path),
   });
-  const matRef = useRef<MeshStandardMaterial>(null);
-  const renderedScale = useRef(1);
-
-  useFrame((_state, delta) => {
-    const mesh = ref.current;
-    if (!mesh) {
-      return;
-    }
-    const targetScale = isPressed ? PRESS_SCALE : isHovered ? HOVER_SCALE : 1;
-    const k = 1 - Math.exp(-SCALE_LERP_RATE * delta);
-    renderedScale.current += (targetScale - renderedScale.current) * k;
-    mesh.scale.setScalar(renderedScale.current);
-
-    const mat = matRef.current;
-    if (mat) {
-      mat.emissiveIntensity = isPressed
-        ? PRESS_EMISSIVE
-        : isHovered
-          ? HOVER_EMISSIVE
-          : IDLE_EMISSIVE;
-    }
-  });
 
   return (
-    <mesh ref={ref} position={position}>
-      <torusGeometry args={[PORTAL_RADIUS, PORTAL_TUBE, 16, PORTAL_RING_SEGMENTS]} />
-      <meshStandardMaterial
-        ref={matRef}
-        color={color}
-        emissive={color}
-        emissiveIntensity={IDLE_EMISSIVE}
-        metalness={0.4}
-        roughness={0.3}
-      />
-    </mesh>
+    <PortalPieMesh
+      meshRef={ref}
+      thetaStart={thetaStart}
+      color={color}
+      emissive={color}
+      isHovered={isHovered}
+      isPressed={isPressed}
+      idleEmissive={IDLE_EMISSIVE}
+      hoverEmissive={HOVER_EMISSIVE}
+      pressEmissive={PRESS_EMISSIVE}
+    />
   );
 }
 
-interface SimpleExperiencePortalProps {
-  position: Vector3Tuple;
+interface SimpleExperiencePortalPieProps {
+  thetaStart: number;
+  color: string;
 }
 
-/**
- * The Simple Experience portal. Visually a clean axis-aligned
- * square frame — torus with 4 tubular segments rotated 45° so the
- * sides line up with world axes. White, low-glow, metallic — reads
- * as a "frame" rather than an organic gateway. ADR-003 calls this
- * out as the fourth-wall-breaking element of the formation.
- */
-function SimpleExperiencePortal({ position }: SimpleExperiencePortalProps): JSX.Element {
+/** The Simple Experience pie. Same geometry as the section pies, but
+ *  toggles `documentMode` instead of routing and uses neutral white
+ *  with no idle glow — telegraphs that this slice exits the 3D
+ *  experience rather than navigating within it. */
+function SimpleExperiencePortalPie({
+  thetaStart,
+  color,
+}: SimpleExperiencePortalPieProps): JSX.Element {
   const setDocumentMode = useWorldStore((s) => s.setDocumentMode);
   const { ref, isHovered, isPressed } = useInteractable({
-    id: 'portal-simple-experience',
+    id: SE_PIE.id,
     onInteract: () => setDocumentMode(true),
   });
+
+  return (
+    <PortalPieMesh
+      meshRef={ref}
+      thetaStart={thetaStart}
+      color={color}
+      emissive="#ffffff"
+      isHovered={isHovered}
+      isPressed={isPressed}
+      idleEmissive={SE_IDLE_EMISSIVE}
+      hoverEmissive={SE_HOVER_EMISSIVE}
+      pressEmissive={SE_PRESS_EMISSIVE}
+    />
+  );
+}
+
+interface PortalPieMeshProps {
+  meshRef: ReturnType<typeof useInteractable>['ref'];
+  thetaStart: number;
+  color: string;
+  emissive: string;
+  isHovered: boolean;
+  isPressed: boolean;
+  idleEmissive: number;
+  hoverEmissive: number;
+  pressEmissive: number;
+}
+
+/** Shared mesh body — both portal kinds use the same pie geometry
+ *  and the same hover/press feedback math. The only differences are
+ *  the colors + emissive intensities, which are passed in as props. */
+function PortalPieMesh({
+  meshRef,
+  thetaStart,
+  color,
+  emissive,
+  isHovered,
+  isPressed,
+  idleEmissive,
+  hoverEmissive,
+  pressEmissive,
+}: PortalPieMeshProps): JSX.Element {
   const matRef = useRef<MeshStandardMaterial>(null);
   const renderedScale = useRef(1);
 
   useFrame((_state, delta) => {
-    const mesh = ref.current;
+    const mesh = meshRef.current;
     if (!mesh) {
       return;
     }
@@ -171,22 +253,23 @@ function SimpleExperiencePortal({ position }: SimpleExperiencePortalProps): JSX.
 
     const mat = matRef.current;
     if (mat) {
-      // Lower emissive overall — the SE portal is a frame, not a glowing
-      // gateway. Hover/press still modulate so the affordance reads.
-      mat.emissiveIntensity = isPressed ? 0.6 : isHovered ? 0.3 : 0;
+      mat.emissiveIntensity = isPressed ? pressEmissive : isHovered ? hoverEmissive : idleEmissive;
     }
   });
 
   return (
-    <mesh ref={ref} position={position} rotation={[0, 0, Math.PI / 4]}>
-      <torusGeometry args={[PORTAL_RADIUS + 0.5, 0.4, 8, SE_FRAME_SEGMENTS]} />
+    <mesh ref={meshRef}>
+      <circleGeometry
+        args={[PORTAL_RADIUS, PORTAL_SEGMENTS, thetaStart + PORTAL_GAP / 2, QUARTER - PORTAL_GAP]}
+      />
       <meshStandardMaterial
         ref={matRef}
-        color="#e0fffa"
-        emissive="#ffffff"
-        emissiveIntensity={0}
-        metalness={0.6}
+        color={color}
+        emissive={emissive}
+        emissiveIntensity={idleEmissive}
+        metalness={0.4}
         roughness={0.3}
+        side={2}
       />
     </mesh>
   );
