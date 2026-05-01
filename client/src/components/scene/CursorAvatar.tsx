@@ -16,6 +16,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { useGLTF } from '@react-three/drei';
 import {
+  Box3,
   Color,
   Euler,
   Group,
@@ -64,14 +65,6 @@ const AVATAR_WALL_MARGIN = 8;
  *  same rate drives the orientation slerp (camera-aligned + forward
  *  tilt while pressed; back to yaw-only on release). */
 const LEAN_LERP_RATE = 32;
-/** Distance the cursor pulls back from the actual surface point so
- *  the visible tip lands at the surface instead of clipping through.
- *  Tuned for the cursor model + AVATAR_SCALE = 0.03 — the model's
- *  visible tip sits roughly this far from its group origin in world
- *  units once scaled. Bumped after early testing showed the body
- *  (not the tip) was at the crosshair; adjust by eye if the cursor
- *  model changes. */
-const CURSOR_TIP_OFFSET = 3.5;
 /** Extra forward pitch applied to the cursor's orientation while
  *  pressed — beyond the captured press-time camera alignment — so
  *  the cursor visibly *leans into* the target. ~32° is the smallest
@@ -214,6 +207,17 @@ function ActiveCursor(): JSX.Element {
       });
       mesh.renderOrder = 999;
     });
+    // Measure where the cursor's visible tip is relative to the model
+    // pivot. For OS-arrow-cursor models the tip is at the upper-left
+    // of the bbox (min X, max Y). Stored in the model's local frame,
+    // pre-scale — at press time we rotate by pressAnchorQuat and
+    // multiply by AVATAR_SCALE to get the world-space offset, then
+    // subtract from the hit point to place the group origin such that
+    // the visible tip lands on the hit. updateMatrixWorld() runs
+    // first so Box3.setFromObject sees the correct geometry positions.
+    gltf.scene.updateMatrixWorld(true);
+    const bbox = new Box3().setFromObject(gltf.scene);
+    tipLocalOffset.current.set(bbox.min.x, bbox.max.y, (bbox.min.z + bbox.max.z) / 2);
   }, [gltf.scene]);
 
   useEffect(() => {
@@ -271,12 +275,6 @@ function ActiveCursor(): JSX.Element {
    *  interactable's surface. */
   const pressedTargetPoint = useWorldStore((s) => s.pressedTargetPoint);
   const leanTarget = useRef(new Vector3());
-  /** Forward direction captured at press-start, NOT recomputed from
-   *  the live camera each frame. This is what makes the cursor stay
-   *  anchored in world space when the user rotates the camera while
-   *  holding — without the snapshot, the lean target tracks the
-   *  camera's current forward and the cursor "follows" the rotation. */
-  const pressAnchorForward = useRef(new Vector3());
   /** Cursor target quaternion captured at press-start (camera
    *  orientation at the moment of press × forward-tilt). Frozen for
    *  the duration of the press so the tilt reveals itself as the
@@ -288,15 +286,26 @@ function ActiveCursor(): JSX.Element {
     () => new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), LEAN_TILT_RAD),
     [],
   );
-  // Capture the camera's forward + composed lean quaternion the
-  // moment a press starts. `pressedTargetPoint` flips from null →
-  // tuple on `beginInteractPress`, so the dep array runs the capture
-  // once per press, after which both refs are read-only until release.
+  /** Vector from the cursor's group origin (model pivot) to the
+   *  visible tip, in the cursor model's local frame (PRE-scale).
+   *  Measured once from the model's bounding box on mount: for
+   *  OS-arrow-cursor-shaped models the tip is at the upper-left
+   *  bbox corner (min.x, max.y). Used at press-time to position the
+   *  cursor so its visible tip — not its pivot — lands on the
+   *  raycast hit point. */
+  const tipLocalOffset = useRef(new Vector3());
+  /** Working buffer for the world-space tip offset (= tipLocalOffset
+   *  rotated by pressAnchorQuat × AVATAR_SCALE). Recomputed each
+   *  press frame because pressAnchorQuat is captured per-press. */
+  const tipWorldBuffer = useRef(new Vector3());
+  // Capture the composed lean quaternion the moment a press starts.
+  // `pressedTargetPoint` flips from null → tuple on
+  // `beginInteractPress`, so this effect runs once per press; the ref
+  // is read-only until release.
   useEffect(() => {
     if (!pressedTargetPoint) {
       return;
     }
-    pressAnchorForward.current.set(0, 0, -1).applyQuaternion(camera.quaternion);
     pressAnchorQuat.copy(camera.quaternion).multiply(leanTiltQuat);
   }, [pressedTargetPoint, camera, leanTiltQuat, pressAnchorQuat]);
   /** The cursor's *rendered* world position, persisted across frames.
@@ -762,12 +771,20 @@ function ActiveCursor(): JSX.Element {
       let cursorPosTarget: Vector3;
       let cursorQuatTarget: Quaternion;
       if (pressedTargetPoint) {
-        // Position + orientation use the press-time captured values,
-        // not the live camera — so rotating the camera while held
-        // doesn't drag the cursor along; it stays anchored to the hit.
+        // Position the group such that the visible tip — measured
+        // once from the model's bbox — lands exactly on the raycast
+        // hit. tipWorldBuffer = tipLocal rotated by press-time quat,
+        // scaled by AVATAR_SCALE. groupOrigin = hit - tipWorldBuffer
+        // so groupOrigin + tipWorldBuffer = hit. Press-time captured
+        // values (not live camera) keep the cursor world-anchored
+        // while the user rotates the camera during a held press.
+        tipWorldBuffer.current
+          .copy(tipLocalOffset.current)
+          .applyQuaternion(pressAnchorQuat)
+          .multiplyScalar(AVATAR_SCALE);
         leanTarget.current
           .set(pressedTargetPoint[0], pressedTargetPoint[1], pressedTargetPoint[2])
-          .addScaledVector(pressAnchorForward.current, -CURSOR_TIP_OFFSET);
+          .sub(tipWorldBuffer.current);
         cursorPosTarget = leanTarget.current;
         cursorQuatTarget = pressAnchorQuat;
       } else {

@@ -35,6 +35,13 @@ import { sfx } from '../audio/SfxManager';
  *  interactable. The cube is 800 units across; 60 units puts the
  *  reach at "things in close visual proximity, not the entire room". */
 const INTERACT_RANGE = 60;
+/** Minimum visible duration for a press, in ms. Without this, a fast
+ *  mousedown-mouseup pair can release the press before the next
+ *  animation frame even renders, so the lean animation never plays —
+ *  the cursor appears not to move at all. We delay `endInteractPress`
+ *  until at least this much time has elapsed since `beginInteractPress`,
+ *  so even instant clicks still produce a visible peck animation. */
+const MIN_PRESS_HOLD_MS = 130;
 
 /** Module-scoped registry: id → click handler. Populated by the
  *  `useInteractable` hook, consumed by `InteractionController` when a
@@ -164,6 +171,12 @@ export function InteractionController(): null {
   // press/release this way also gives future draggable objects a
   // hold signal to subscribe to.
   useEffect(() => {
+    /** Time of the most recent `beginInteractPress`, used to enforce
+     *  MIN_PRESS_HOLD_MS so fast clicks still produce a visible lean
+     *  animation. */
+    let pressStartTime = 0;
+    let pendingReleaseTimer: ReturnType<typeof setTimeout> | null = null;
+
     const onMouseDown = (): void => {
       const state = useWorldStore.getState();
       if (!state.controlsDismissed) {
@@ -173,6 +186,14 @@ export function InteractionController(): null {
       if (!hit) {
         return;
       }
+      // If a previous release was still pending its minimum hold,
+      // cancel it — this new mousedown supersedes that animation
+      // window and starts a fresh one.
+      if (pendingReleaseTimer !== null) {
+        clearTimeout(pendingReleaseTimer);
+        pendingReleaseTimer = null;
+      }
+      pressStartTime = performance.now();
       beginInteractPress(hit.id, [hit.point.x, hit.point.y, hit.point.z]);
     };
     const onMouseUp = (): void => {
@@ -181,7 +202,8 @@ export function InteractionController(): null {
       // Commit: only if the press still targets the currently-hovered
       // interactable (i.e. mouse-down and mouse-up landed on the same
       // object). A press that wandered off doesn't fire — same
-      // semantics as a native click.
+      // semantics as a native click. Audio + handler fire on commit
+      // (mouseup), regardless of any visual hold delay below.
       if (pressedId && pressedId === state.hoveredInteractableId) {
         const handler = interactableHandlers.get(pressedId);
         handler?.();
@@ -189,15 +211,32 @@ export function InteractionController(): null {
         void sfx.play('interactClick');
         void sfx.play('interactImpact');
       }
-      if (pressedId) {
-        endInteractPress();
+      if (!pressedId) {
+        return;
       }
+      // Enforce minimum visible press duration. If the click was
+      // faster than MIN_PRESS_HOLD_MS, defer the actual release so
+      // the lean animation has time to play. Audio has already fired
+      // above, so the user hears the click at the right moment; the
+      // visual just lingers a few extra ms.
+      const heldMs = performance.now() - pressStartTime;
+      if (heldMs >= MIN_PRESS_HOLD_MS) {
+        endInteractPress();
+        return;
+      }
+      pendingReleaseTimer = setTimeout(() => {
+        endInteractPress();
+        pendingReleaseTimer = null;
+      }, MIN_PRESS_HOLD_MS - heldMs);
     };
     window.addEventListener('mousedown', onMouseDown);
     window.addEventListener('mouseup', onMouseUp);
     return () => {
       window.removeEventListener('mousedown', onMouseDown);
       window.removeEventListener('mouseup', onMouseUp);
+      if (pendingReleaseTimer !== null) {
+        clearTimeout(pendingReleaseTimer);
+      }
     };
   }, [beginInteractPress, endInteractPress]);
 
