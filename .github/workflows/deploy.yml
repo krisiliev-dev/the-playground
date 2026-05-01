@@ -2,14 +2,30 @@
 #
 # Deployment targets:
 # - Client: Vercel (automatic, no config needed here)
-# - Server: build the Docker image on the GitHub-hosted runner, ship it
-#   to EC2 over SSH as a tarball, `docker load` and run it there.
+# - Server: build the Docker image on the GitHub-hosted runner, push it
+#   to GitHub Container Registry (ghcr.io), then SSH to EC2 and run
+#   `docker pull` + (re)start the container.
 #
-# Why we don't build on EC2: the small EC2 instance can't compile this
-# Rust dep set inside the SSH command_timeout — 30+ minutes wasn't
-# enough on the cold path. The hosted runner (16 GB / 4 cores) plus
-# Buildx layer cache (cache-from/cache-to: type=gha) gets cold builds
-# under 5 min and warm builds under 1 min.
+# Why GHCR instead of SCPing tarballs:
+#   - `docker pull` fetches layers in parallel and dedups against
+#     anything already on the EC2 host. Layer that didn't change?
+#     Skipped. The previous `docker save → scp → docker load` chain
+#     shipped the entire 150–230 MB tarball every deploy.
+#   - GHCR is free for this repo (rate limits are generous for
+#     authenticated pulls).
+#   - Rollback is one command: `docker pull <image>:<old-sha>` on EC2.
+#
+# Why we don't build on EC2: small EC2 boxes can't compile this Rust
+# dep set inside the SSH command_timeout. The hosted runner (16 GB / 4
+# cores) plus Buildx layer cache (cache-from/cache-to: type=gha) gets
+# cold builds under 5 min and warm builds under 1 min.
+#
+# Realistic deploy-pipeline timing after this rewrite:
+#   - Build (warm cache):   ~1 min
+#   - Push to GHCR:         ~10–60 s (only changed layers)
+#   - EC2 docker pull:      ~5–30 s (only changed layers)
+#   - EC2 restart:          ~2–5 s
+#   Total (warm):           ~2 min, was ~12 min on the SCP path.
 
 name: Deploy
 
@@ -21,58 +37,76 @@ concurrency:
   group: deploy-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # ghcr.io/krisiliev-dev/the-playground/server  (lowercase required by GHCR)
+  IMAGE_NAME: ghcr.io/${{ github.repository }}/server
+
 jobs:
   deploy-server:
     name: "Build & Deploy Server"
     runs-on: ubuntu-latest
+    permissions:
+      # checkout
+      contents: read
+      # push image to ghcr.io
+      packages: write
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build server image with GHA layer cache
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build + push server image
         uses: docker/build-push-action@v5
         with:
           context: ./server
-          load: true
-          tags: playground-server:latest
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:latest
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          # GHA-cache layer dedup. Same scope key as the previous
+          # workflow so existing cached layers carry over.
           cache-from: type=gha,scope=server
           cache-to: type=gha,mode=max,scope=server
 
-      - name: Export image to tarball
-        run: docker save playground-server:latest -o playground-server.tar
-
-      - name: Copy image tarball to EC2
-        uses: appleboy/scp-action@v1
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          source: playground-server.tar
-          target: /tmp/
-          # scp-action wraps in tar+gzip before send; on the EC2 disk
-          # both the upload + remote untar of a ~230 MB image take ~9
-          # min combined. 20m gives a safety buffer.
-          command_timeout: 20m
-
-      - name: Load image and (re)start container on EC2
+      - name: Pull + (re)start on EC2
         uses: appleboy/ssh-action@v1
         env:
+          # GITHUB_TOKEN has read:packages by default and is valid for
+          # the duration of this workflow run — long enough for the
+          # SSH script to log in, pull, and log out. After the job
+          # ends the token expires.
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+          # Pull the SHA-tagged image (not :latest) so the container
+          # is pinned to this exact build. Rollback = re-trigger an
+          # older workflow run, which retags :latest accordingly.
+          IMAGE_TAG: ${{ env.IMAGE_NAME }}:${{ github.sha }}
           ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
           VIDEOS_PUBLIC_PREFIX: ${{ secrets.VIDEOS_PUBLIC_PREFIX }}
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          envs: ADMIN_TOKEN,VIDEOS_PUBLIC_PREFIX
-          # `docker load` of a 230 MB tarball on the EC2 box can exceed
-          # 5 min on slow EBS — bump to 15m. Subsequent deploys without
-          # layer changes finish in seconds (docker dedups by hash).
-          command_timeout: 15m
+          envs: GHCR_TOKEN,GHCR_USER,IMAGE_TAG,ADMIN_TOKEN,VIDEOS_PUBLIC_PREFIX
+          # docker pull from GHCR is parallel per-layer and dedups
+          # against anything already on the host. Cold pulls land
+          # under 60 s; warm pulls (just the changed Rust binary
+          # layer) under 10 s. 5 min is ample buffer.
+          command_timeout: 5m
           script: |
-            docker load -i /tmp/playground-server.tar
-            rm /tmp/playground-server.tar
+            set -euo pipefail
+            # Authenticate to GHCR for this pull. The token is scoped
+            # to the workflow run and goes away when we logout below.
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+            docker pull "$IMAGE_TAG"
             docker stop playground-server || true
             docker rm playground-server || true
             mkdir -p /home/ubuntu/videos
@@ -83,5 +117,9 @@ jobs:
               -v /home/ubuntu/videos:/home/appuser/videos \
               -e ADMIN_TOKEN="$ADMIN_TOKEN" \
               -e VIDEOS_PUBLIC_PREFIX="$VIDEOS_PUBLIC_PREFIX" \
-              playground-server:latest
+              "$IMAGE_TAG"
+            # Garbage-collect any older image layers that no running
+            # container references. Keeps the EC2 disk tidy across
+            # many deploys.
             docker image prune -f
+            docker logout ghcr.io
