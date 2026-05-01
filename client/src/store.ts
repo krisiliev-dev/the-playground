@@ -51,6 +51,12 @@ interface AppActions {
   /** Mark the post-impact controls hint as dismissed. Triggers the
    *  camera transition into 3rd-person avatar mode. */
   setControlsDismissed: (dismissed: boolean) => void;
+  /** True while the pause menu overlay is open. While set, the
+   *  cursor avatar's OS-cursor hide is paused (so the user gets a
+   *  real cursor for the menu), pointer-lock is forcibly released,
+   *  and the InteractionController bails on mousedown/mouseup so
+   *  clicks inside the menu can't drive 3D interactions. */
+  setMenuOpen: (open: boolean) => void;
   /** Set which interactable the crosshair is currently aimed at, or
    *  null if nothing is in range. The InteractionController updates
    *  this each frame; individual `useInteractable` consumers read it
@@ -86,6 +92,10 @@ interface RevealSlice {
   /** Whether the user has dismissed the post-impact controls hint.
    *  CursorAvatar gates its 3rd-person camera transition on this. */
   controlsDismissed: boolean;
+  /** True while the pause menu overlay is open. Read by
+   *  CursorAvatar (to restore the OS cursor + skip mouselook) and
+   *  by InteractionController (to bail on mousedown/mouseup). */
+  menuOpen: boolean;
 }
 
 interface InteractionSlice {
@@ -123,6 +133,7 @@ export const useWorldStore = create<AppState & AppActions & RevealSlice & Intera
     revealState: 'idle',
     clickHit: null,
     controlsDismissed: false,
+    menuOpen: false,
     // Avatar lives from page load — small at first (cursor-sized), then grows
     // once the reveal completes. See CursorAvatar.tsx for the scale logic.
     cursorAvatarActive: true,
@@ -170,6 +181,8 @@ export const useWorldStore = create<AppState & AppActions & RevealSlice & Intera
     setCursorAvatarActive: (active) => set({ cursorAvatarActive: active }),
 
     setControlsDismissed: (dismissed) => set({ controlsDismissed: dismissed }),
+
+    setMenuOpen: (open) => set({ menuOpen: open }),
 
     setHoveredInteractable: (id, point = null) =>
       // Always pair id + point: when id is null, point should also be

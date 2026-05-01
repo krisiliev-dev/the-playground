@@ -74,16 +74,18 @@ describe('PauseMenu', () => {
       expect(screen.queryByRole('dialog')).toBeNull();
     });
 
-    it('does NOT open on Esc (browser-reserved for pointer-lock + fullscreen exit)', () => {
+    it('does NOT respond to Esc at all (browser-reserved key)', () => {
+      // Esc is left to the browser's native behaviour — pointer-lock
+      // release on Chrome, plus fullscreen exit on Safari. We don't
+      // intercept it for opening or closing because the side effects
+      // fire either way and would happen on every menu interaction.
       renderMenu();
+      // Esc when closed: still closed.
       act(() => {
         window.dispatchEvent(escEvent());
       });
       expect(screen.queryByRole('dialog')).toBeNull();
-    });
-
-    it('closes on Esc when the menu is already open (a11y modal-dialog convention)', () => {
-      renderMenu();
+      // Open via M, then Esc: still open (Esc no longer closes).
       act(() => {
         window.dispatchEvent(mEvent());
       });
@@ -91,7 +93,7 @@ describe('PauseMenu', () => {
       act(() => {
         window.dispatchEvent(escEvent());
       });
-      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
     });
 
     it('treats uppercase M the same as lowercase', () => {

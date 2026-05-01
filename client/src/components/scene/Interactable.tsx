@@ -263,6 +263,15 @@ export function InteractionController(): null {
       if (!state.controlsDismissed) {
         return;
       }
+      // Pause-menu open: clicks belong to the menu, not the 3D
+      // crosshair pipeline. Without this gate, clicking the menu
+      // backdrop (which closes the menu) would also fire a
+      // crosshair-driven press on whatever happens to be under
+      // screen-centre, leading to the "menu closed but I'm still
+      // controlling the avatar" symptom.
+      if (state.menuOpen) {
+        return;
+      }
       const hoveredId = state.hoveredInteractableId;
       const hoveredPoint = state.hoveredInteractablePoint;
       if (!hoveredId || !hoveredPoint) {
@@ -286,6 +295,9 @@ export function InteractionController(): null {
         return;
       }
       const state = useWorldStore.getState();
+      if (state.menuOpen) {
+        return;
+      }
       const pressedId = state.pressedInteractableId;
       // Commit: only if the press still targets the currently-hovered
       // interactable (i.e. mouse-down and mouse-up landed on the same

@@ -189,10 +189,17 @@ interface CursorRefs {
 export function CursorAvatar(): JSX.Element | null {
   const active = useWorldStore((s) => s.cursorAvatarActive);
   const revealState = useWorldStore((s) => s.revealState);
+  const menuOpen = useWorldStore((s) => s.menuOpen);
   const isTouch = useIsTouchPrimary();
 
+  // Hide the OS cursor while the avatar is active — except when the
+  // pause menu is open. With the menu up the user expects a normal
+  // cursor for hovering buttons; the 3D cursor would just be in the
+  // way (and was the source of the "cursor invisible until hover"
+  // bug, since the browser only reveals the OS cursor on its own
+  // when there's an interaction surface to point at).
   useEffect(() => {
-    if (!active) {
+    if (!active || menuOpen) {
       return;
     }
     const previous = document.body.style.cursor;
@@ -200,7 +207,7 @@ export function CursorAvatar(): JSX.Element | null {
     return () => {
       document.body.style.cursor = previous;
     };
-  }, [active]);
+  }, [active, menuOpen]);
 
   if (!active) {
     return null;
@@ -439,6 +446,12 @@ function ActiveCursor(): JSX.Element {
       avatarPitch.current = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, next));
     };
     const onClick = (): void => {
+      // Skip pointer-lock acquisition while the menu is open — the
+      // user is interacting with the menu, and re-grabbing the
+      // cursor here would yank it back into the 3D world mid-click.
+      if (useWorldStore.getState().menuOpen) {
+        return;
+      }
       if (document.pointerLockElement !== canvas) {
         // Synchronous in click handler — user gesture is valid here.
         void canvas.requestPointerLock?.();

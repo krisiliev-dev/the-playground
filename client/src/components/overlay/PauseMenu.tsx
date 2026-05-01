@@ -19,6 +19,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { sfx } from '@/components/audio/SfxManager';
+import { useWorldStore } from '@/store';
 import { useIsTouchPrimary } from '@/utils';
 
 const NAV_ITEMS = [
@@ -51,17 +52,11 @@ export function PauseMenu(): JSX.Element | null {
   const isTouch = useIsTouchPrimary();
   const firstFocusRef = useRef<HTMLButtonElement>(null);
 
-  // M is the primary menu key. We deliberately do NOT use Esc to
-  // open: Esc is browser-reserved for releasing pointer-lock (Chrome,
-  // Safari) and exiting fullscreen (Safari), and intercepting it for
-  // the menu makes those side effects fire every time someone opens
-  // the menu — confusing on an immersive 3D site.
-  //
-  // Esc is still honored as a *close-only* shortcut when the menu is
-  // already open, so keyboard / screen-reader users get the standard
-  // modal-dialog "Esc dismisses" convention. The browser side effects
-  // fire too at that point, but that's acceptable — the user is
-  // already exiting the experience.
+  // M is the only menu key. Esc is *not* used: it has irreducible
+  // browser side effects (Chrome releases pointer-lock, Safari
+  // additionally exits fullscreen) that fire every time it's pressed,
+  // even when used "only to close" the menu. Letting Esc do its native
+  // browser thing without our interception is the cleaner UX.
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       // Don't capture from text inputs (admin panel typing, future
@@ -73,20 +68,33 @@ export function PauseMenu(): JSX.Element | null {
           return;
         }
       }
-      const key = e.key.toLowerCase();
-      if (key === 'm') {
+      if (e.key.toLowerCase() === 'm') {
         setOpen((o) => !o);
-        return;
-      }
-      if (key === 'escape') {
-        // Close-only — never opens via Esc, to keep browser semantics
-        // intact when the user is in the experience.
-        setOpen((o) => (o ? false : o));
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
+
+  // Side effects of opening/closing the menu — propagate to the
+  // store, release pointer-lock, force-end any in-progress
+  // interaction press so the cursor doesn't stay leaned forward
+  // through a menu interaction.
+  useEffect(() => {
+    useWorldStore.getState().setMenuOpen(open);
+    if (open) {
+      // Release pointer-lock so the OS cursor returns. Without this
+      // the user sees their cursor only when hovering over a menu
+      // button (the browser doesn't reveal it until interaction).
+      if (document.pointerLockElement) {
+        document.exitPointerLock?.();
+      }
+      // End any in-progress press so the 3D cursor doesn't stay
+      // visually stuck "leaned forward" into a hit point while the
+      // user is in menu mode.
+      useWorldStore.getState().endInteractPress();
+    }
+  }, [open]);
 
   // Focus the first interactive item on open so keyboard navigation
   // works without a mouse hand-off. Re-running on every open is
@@ -227,7 +235,9 @@ export function PauseMenu(): JSX.Element | null {
               </ul>
             </details>
 
-            <p style={styles.hint}>{isTouch ? 'tap outside' : 'press M'} to close</p>
+            <p style={styles.hint}>
+              {isTouch ? 'tap outside' : 'press M or click outside'} to close
+            </p>
           </div>
         </div>
       )}
