@@ -106,7 +106,7 @@ const BODY_COLOR_HEX = '#0a1a18';
  *  `depthTest: false` so it stays on top of haze/geometry like the
  *  cursor itself. */
 const OUTLINE_COLOR_HEX = '#ffffff';
-const OUTLINE_SCALE = 1.08;
+const OUTLINE_SCALE = 1.04;
 
 useGLTF.preload(MODEL_URL);
 
