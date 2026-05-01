@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { Canvas, type RootState } from '@react-three/fiber';
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { World, PostFx, DevTools, ShakeGroup, CursorAvatar } from '@/components/scene';
@@ -129,6 +129,24 @@ export function App(): JSX.Element {
   // real Canvas's onCreated handler attaches a webglcontextlost listener
   // that flips this flag if the GPU process dies under us mid-session.
   const [contextLost, setContextLost] = useState(false);
+  // Live ref into `documentMode` so the webglcontextlost listener
+  // (created once inside the `onCreated` callback) can read the
+  // current value without re-binding. When the user flips into
+  // document mode, the Canvas unmounts and that fires
+  // webglcontextlost — but it's an *expected* teardown, not a crash,
+  // so the listener should bail in that case.
+  const documentModeRef = useRef(documentMode);
+  useEffect(() => {
+    documentModeRef.current = documentMode;
+  }, [documentMode]);
+  // Reset the `contextLost` flag whenever documentMode toggles. The
+  // ref-guard above prevents the listener from setting it during a
+  // clean unmount, but the event can fire asynchronously around the
+  // mode flip — clearing it here keeps a stale "Display crashed"
+  // overlay from showing when the user switches back to 3D.
+  useEffect(() => {
+    setContextLost(false);
+  }, [documentMode]);
 
   const handleBootReady = useCallback(() => setBootState('ready'), []);
   const handleBootFailed = useCallback(() => setBootState('failed'), []);
@@ -153,6 +171,13 @@ export function App(): JSX.Element {
       // webglcontextrestored later — without it, the context is
       // permanently gone.
       e.preventDefault();
+      // Entering Simple Experience unmounts the Canvas, which fires
+      // webglcontextlost on the way out. That's an expected
+      // teardown, not a runtime crash — bail without flipping the
+      // overlay so the user can switch back to 3D cleanly.
+      if (documentModeRef.current) {
+        return;
+      }
       // eslint-disable-next-line no-console
       console.error('[webgl] context lost during runtime');
       setContextLost(true);
