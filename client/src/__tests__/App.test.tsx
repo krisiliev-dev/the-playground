@@ -103,15 +103,20 @@ describe('App', () => {
 
   // ── Simple Experience document mode (ADR-003 step 4) ────────────
   describe('documentMode', () => {
-    it('renders the DocumentShell only on the first-load doc-mode path (no Canvas booted yet)', () => {
+    it('pre-boots the Canvas in the background even on first-load doc mode (so toggling back is instant)', () => {
+      // The Canvas mounts on the very first render regardless of
+      // documentMode — we trade a one-time WebGL-init cost for a
+      // zero-frame toggle when the user later clicks "Switch to 3D
+      // experience". The 3D shell is hidden via visibility, not
+      // detached from the DOM.
       useWorldStore.setState({ documentMode: true });
       render(<App />);
-      // First load with documentMode=true skips the WebGL probe,
-      // boot loader, and Canvas mount entirely — the user gets the
-      // document straight away.
-      expect(screen.queryByTestId('r3f-canvas')).toBeNull();
-      expect(screen.queryByTestId('loading-screen')).toBeNull();
+      expect(screen.getByTestId('r3f-canvas')).toBeInTheDocument();
       expect(screen.getByLabelText(/Home — Kristiyan Iliev/)).toBeInTheDocument();
+      // The 3D wrapper is hidden — visibility flipped, pointer events off.
+      const wrapper = screen.getByTestId('r3f-canvas').parentElement;
+      expect(wrapper!.style.visibility).toBe('hidden');
+      expect(wrapper!.style.pointerEvents).toBe('none');
     });
 
     it('boots the Canvas (3D shell) when documentMode is false', () => {

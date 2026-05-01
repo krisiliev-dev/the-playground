@@ -243,46 +243,22 @@ export function App(): JSX.Element {
     );
   }
 
-  // First-load Simple Experience path. Until the user explicitly
-  // opts into 3D, we never mount the Canvas — saving the WebGL
-  // probe, preload, and persistent memory cost for visitors who
-  // came in via Simple Experience and may never leave.
-  if (documentMode && bootState === 'loading') {
-    return (
-      <BrowserRouter>
-        <DocumentShell>
-          <SectionRoutes />
-        </DocumentShell>
-      </BrowserRouter>
-    );
-  }
-
-  // Active boot probe — only runs in 3D mode, since document mode
-  // bypasses the Canvas entirely on first load.
-  if (bootState === 'loading') {
-    return (
-      <div style={styles.root}>
-        <LoadingScreen onReady={handleBootReady} onFailed={handleBootFailed} />
-      </div>
-    );
-  }
-
-  // Boot probe failed in 3D mode — show the unavailable overlay.
-  // (Document mode has no Canvas to fail, so this branch is 3D-only.)
-  if (bootState === 'failed' && !documentMode) {
-    return (
-      <div style={styles.root}>
-        <ContextLostOverlay
-          title="Display unavailable"
-          body="Your browser couldn't initialise a 3D context. This is usually a transient driver hiccup — reloading often resolves it."
-        />
-      </div>
-    );
-  }
-
-  // Past this point, bootState is 'ready' (or 'failed' but in
-  // document mode where it doesn't matter). The Canvas is
-  // permanent; documentMode flips its visibility + frameloop.
+  // Single, stable render tree. Every interactive state — initial
+  // doc mode, first-time 3D boot, subsequent toggles — flows through
+  // this same JSX shape, so React reconciles in place rather than
+  // unmounting and remounting on each transition. The previous code
+  // had four separate early returns; switching between them tore
+  // down the BrowserRouter + Canvas + scene each time, which is what
+  // the user kept seeing as "the landing sequence playing again".
+  //
+  // The Canvas wrapper renders unconditionally (so it mounts once
+  // on the very first render), and the boot probe runs in the
+  // background even in document mode — by the time the user clicks
+  // "Switch to 3D experience", `bootState === 'ready'` and the toggle
+  // is just a visibility flip. Cost: doc-mode-only users pay the
+  // ~500ms WebGL probe + persistent context memory; gain: zero-frame
+  // toggle, no replay of any intro animation, no respawn.
+  const dim = documentMode || bootState !== 'ready';
   return (
     <BrowserRouter>
       <div
@@ -293,53 +269,67 @@ export function App(): JSX.Element {
           // resize the framebuffer down, then back up on toggle.
           // visibility:hidden preserves layout dimensions; the canvas
           // pixels stay valid and reappear instantly when toggled.
-          visibility: documentMode ? 'hidden' : 'visible',
-          pointerEvents: documentMode ? 'none' : 'auto',
+          visibility: dim ? 'hidden' : 'visible',
+          pointerEvents: dim ? 'none' : 'auto',
         }}
-        aria-hidden={documentMode ? true : undefined}
+        aria-hidden={dim ? true : undefined}
       >
-        <Canvas
-          camera={CANVAS_CAMERA}
-          dpr={CANVAS_DPR}
-          gl={CANVAS_GL}
-          // `frameloop="never"` halts the render loop entirely while
-          // in document mode — no useFrame ticks, no GPU draw calls,
-          // CPU and GPU drop to idle. Animations resume from exactly
-          // their pre-pause state when we flip back to 'always'.
-          frameloop={documentMode ? 'never' : 'always'}
-          style={styles.canvas}
-          onCreated={handleCreated}
-        >
-          <color attach="background" args={['#0a0a12']} />
-          <Suspense fallback={null}>
-            <ShakeGroup>
-              <World />
-            </ShakeGroup>
-          </Suspense>
-          {/* Cursor lives outside ShakeGroup so it doesn't jitter with the
-              camera-shake on sword impacts. */}
-          <CursorAvatar />
-          <PostFx />
-          <DevTools />
-        </Canvas>
+        {bootState === 'loading' && (
+          <LoadingScreen onReady={handleBootReady} onFailed={handleBootFailed} />
+        )}
+        {bootState === 'ready' && (
+          <Canvas
+            camera={CANVAS_CAMERA}
+            dpr={CANVAS_DPR}
+            gl={CANVAS_GL}
+            // `frameloop="never"` halts the render loop entirely while
+            // in document mode — no useFrame ticks, no GPU draw calls,
+            // CPU and GPU drop to idle. Animations resume from exactly
+            // their pre-pause state when we flip back to 'always'.
+            frameloop={documentMode ? 'never' : 'always'}
+            style={styles.canvas}
+            onCreated={handleCreated}
+          >
+            <color attach="background" args={['#0a0a12']} />
+            <Suspense fallback={null}>
+              <ShakeGroup>
+                <World />
+              </ShakeGroup>
+            </Suspense>
+            {/* Cursor lives outside ShakeGroup so it doesn't jitter with the
+                camera-shake on sword impacts. */}
+            <CursorAvatar />
+            <PostFx />
+            <DevTools />
+          </Canvas>
+        )}
+        {bootState === 'failed' && !documentMode && (
+          <ContextLostOverlay
+            title="Display unavailable"
+            body="Your browser couldn't initialise a 3D context. This is usually a transient driver hiccup — reloading often resolves it."
+          />
+        )}
+        {/* 3D-only overlays. Mounted only when actively in 3D so
+            their listeners (M-key, click handlers) don't fire in
+            document mode. Local state in these is acceptable to
+            reset on toggle — they don't hold scene state. */}
+        {bootState === 'ready' && !documentMode && (
+          <>
+            <Crosshair />
+            <ControlsHint />
+            <CursorText />
+            <PauseMenu />
+            <SectionRoutes />
+          </>
+        )}
       </div>
-      {/* Mode-specific UI layered on top of the (possibly hidden)
-          Canvas. DocumentShell takes over the viewport in doc mode;
-          the 3D-only overlays (Crosshair, ControlsHint, CursorText,
-          PauseMenu) are conditionally mounted so their listeners
-          aren't running in document mode. */}
-      {documentMode ? (
+      {/* DocumentShell — sibling of the 3D wrapper, only rendered in
+          doc mode. Has its own SectionRoutes since it lays the matched
+          route into its main slot rather than as a fixed-overlay card. */}
+      {documentMode && (
         <DocumentShell>
           <SectionRoutes />
         </DocumentShell>
-      ) : (
-        <>
-          <Crosshair />
-          <ControlsHint />
-          <CursorText />
-          <PauseMenu />
-          <SectionRoutes />
-        </>
       )}
       {contextLost && !documentMode && (
         <ContextLostOverlay
