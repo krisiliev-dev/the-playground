@@ -233,11 +233,14 @@ export function PauseMenu(): JSX.Element | null {
 
             <button
               type="button"
-              style={styles.itemDisabled}
-              disabled
-              title="Document view lands in step 4 of ADR-003"
+              style={styles.item}
+              onClick={() => {
+                useWorldStore.getState().setDocumentMode(true);
+                close();
+              }}
+              title="Switch to a flat document layout — no 3D, no animations, just text and links"
             >
-              Simple Experience (coming soon)
+              Simple Experience →
             </button>
 
             <button type="button" style={styles.item} onClick={toggleMute}>

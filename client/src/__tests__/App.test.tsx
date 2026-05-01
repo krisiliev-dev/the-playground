@@ -55,10 +55,17 @@ vi.mock('@/components/overlay', () => ({
 describe('App', () => {
   beforeEach(() => {
     useWorldStore.getState().setCursorAvatarActive(false);
+    // Default every test to the 3D shell. The documentMode describe
+    // block flips this on per-test where needed. Resetting here keeps
+    // localStorage persistence from leaking between tests.
+    window.localStorage.clear();
+    useWorldStore.setState({ documentMode: false });
   });
 
   afterEach(() => {
     useWorldStore.getState().setCursorAvatarActive(false);
+    useWorldStore.setState({ documentMode: false });
+    window.localStorage.clear();
   });
 
   it('renders without crashing', () => {
@@ -71,6 +78,25 @@ describe('App', () => {
     const canvas = screen.getByTestId('r3f-canvas');
     const world = screen.getByTestId('world');
     expect(canvas).toContainElement(world);
+  });
+
+  // ── Simple Experience document mode (ADR-003 step 4) ────────────
+  describe('documentMode', () => {
+    it('renders the DocumentShell instead of the Canvas when documentMode is true', () => {
+      useWorldStore.setState({ documentMode: true });
+      render(<App />);
+      // The 3D Canvas + boot LoadingScreen are bypassed entirely.
+      expect(screen.queryByTestId('r3f-canvas')).toBeNull();
+      expect(screen.queryByTestId('loading-screen')).toBeNull();
+      // DocumentShell renders the brand link as the page header.
+      expect(screen.getByLabelText(/Home — Kristiyan Iliev/)).toBeInTheDocument();
+    });
+
+    it('renders the Canvas (3D shell) when documentMode is false', () => {
+      useWorldStore.setState({ documentMode: false });
+      render(<App />);
+      expect(screen.getByTestId('r3f-canvas')).toBeInTheDocument();
+    });
   });
 
   // ── Temporary 'C' hotkey for cursor avatar (Phase 5) ───────────

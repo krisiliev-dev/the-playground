@@ -224,4 +224,34 @@ describe('useWorldStore', () => {
       expect(useWorldStore.getState().clickHit).toBeNull();
     });
   });
+
+  describe('documentMode', () => {
+    beforeEach(() => {
+      // Each test starts from documentMode === false with a clean
+      // localStorage so persistence assertions are deterministic.
+      window.localStorage.clear();
+      useWorldStore.getState().setDocumentMode(false);
+      window.localStorage.clear();
+    });
+
+    it('defaults to a boolean (false in test env without prior persistence)', () => {
+      const { documentMode } = useWorldStore.getState();
+      expect(typeof documentMode).toBe('boolean');
+      expect(documentMode).toBe(false);
+    });
+
+    it('setDocumentMode flips the flag', () => {
+      useWorldStore.getState().setDocumentMode(true);
+      expect(useWorldStore.getState().documentMode).toBe(true);
+      useWorldStore.getState().setDocumentMode(false);
+      expect(useWorldStore.getState().documentMode).toBe(false);
+    });
+
+    it('persists the chosen value to localStorage', () => {
+      useWorldStore.getState().setDocumentMode(true);
+      expect(window.localStorage.getItem('documentMode')).toBe('true');
+      useWorldStore.getState().setDocumentMode(false);
+      expect(window.localStorage.getItem('documentMode')).toBe('false');
+    });
+  });
 });

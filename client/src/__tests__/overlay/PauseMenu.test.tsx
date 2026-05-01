@@ -238,14 +238,41 @@ describe('PauseMenu', () => {
     });
   });
 
-  describe('Simple Experience toggle (placeholder until step 4)', () => {
-    it('renders disabled with the "(coming soon)" label', () => {
+  describe('Simple Experience toggle', () => {
+    beforeEach(() => {
+      // Document mode is persisted, so each test starts from `false`
+      // with localStorage cleared to keep assertions deterministic.
+      window.localStorage.clear();
+      useWorldStore.setState({ documentMode: false });
+    });
+
+    it('renders enabled (no longer the "coming soon" placeholder)', () => {
       renderMenu();
       act(() => {
         window.dispatchEvent(mEvent());
       });
       const seBtn = screen.getByText(/Simple Experience/);
-      expect(seBtn).toBeDisabled();
+      expect(seBtn).not.toBeDisabled();
+    });
+
+    it('flips documentMode to true when clicked', () => {
+      renderMenu();
+      act(() => {
+        window.dispatchEvent(mEvent());
+      });
+      expect(useWorldStore.getState().documentMode).toBe(false);
+      fireEvent.click(screen.getByText(/Simple Experience/));
+      expect(useWorldStore.getState().documentMode).toBe(true);
+    });
+
+    it('closes the menu after toggling', () => {
+      renderMenu();
+      act(() => {
+        window.dispatchEvent(mEvent());
+      });
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+      fireEvent.click(screen.getByText(/Simple Experience/));
+      expect(screen.queryByRole('dialog')).toBeNull();
     });
   });
 

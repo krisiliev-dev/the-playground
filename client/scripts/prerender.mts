@@ -39,10 +39,15 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// The store reads `typeof window === 'undefined'` and defaults
+// `documentMode` to `true` for SSR — see `readPersistedDocumentMode`
+// in `store.ts`. So `RoomPage` and `Home` emit their document-mode
+// variants here without any explicit setup from this script.
 import { About } from '../src/routes/About.js';
 import { Home } from '../src/routes/Home.js';
 import { Projects } from '../src/routes/Projects.js';
 import { Writing } from '../src/routes/Writing.js';
+import { DocumentShell } from '../src/components/document/DocumentShell.js';
 
 interface RouteConfig {
   path: string;
@@ -97,11 +102,17 @@ function render(route: RouteConfig): string {
   // MemoryRouter works server-side (no DOM dependency) and is fine
   // for one-shot SSG rendering — we don't need history navigation,
   // just a Router context so `<Link>` resolves cleanly.
+  //
+  // Wrap the route in DocumentShell so the prerendered HTML matches
+  // exactly what App.tsx would render in document mode at runtime.
+  // That parity is what makes hydration clean: a user with
+  // localStorage `documentMode === 'true'` sees no flicker between
+  // SSR and client.
   const content = renderToString(
     React.createElement(
       MemoryRouter,
       { initialEntries: [route.path] },
-      React.createElement(route.Component),
+      React.createElement(DocumentShell, null, React.createElement(route.Component)),
     ),
   );
 

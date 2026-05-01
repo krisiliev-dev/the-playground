@@ -12,6 +12,7 @@ import {
 import { sfx } from '@/components/audio/SfxManager';
 import { isInteractionSynthSuppressed } from '@/components/scene/Interactable';
 import { About, Home, Projects, Writing } from '@/routes';
+import { DocumentShell } from '@/components/document';
 import { useWorldStore } from '@/store';
 
 type BootState = 'loading' | 'ready' | 'failed';
@@ -112,6 +113,13 @@ function useAvatarDevHotkey(): void {
 export function App(): JSX.Element {
   useGlobalMouseFeedback();
   useAvatarDevHotkey();
+  // Simple Experience document mode: when true, we render the entire
+  // site as a flat document (DocumentShell + matched route), bypassing
+  // the Canvas + boot gate + overlay stack entirely. The toggle lives
+  // in PauseMenu and is persisted to localStorage; the prerender
+  // script also forces this branch so prerendered HTML is always the
+  // crawler-friendly document variant.
+  const documentMode = useWorldStore((s) => s.documentMode);
   // Boot gate: LoadingScreen probes WebGL + preloads audio before we
   // mount the real Canvas. Catches the "born-lost context" case at the
   // earliest possible moment (against a throwaway probe canvas) and
@@ -162,6 +170,28 @@ export function App(): JSX.Element {
       <Suspense fallback={null}>
         <AdminPanel />
       </Suspense>
+    );
+  }
+
+  // Simple Experience: render the document variant of the site —
+  // DocumentShell provides chrome (header + nav + footer + back-to-3D
+  // toggle), and the matched route renders into its main slot. No
+  // Canvas, no boot gate, no overlays.
+  if (documentMode) {
+    return (
+      <BrowserRouter>
+        <DocumentShell>
+          <Routes>
+            <Route path="/" element={<Home />} />
+            <Route path="/about" element={<About />} />
+            <Route path="/projects" element={<Projects />} />
+            <Route path="/projects/:slug" element={<Projects />} />
+            <Route path="/writing" element={<Writing />} />
+            <Route path="/writing/:slug" element={<Writing />} />
+            <Route path="*" element={<Home />} />
+          </Routes>
+        </DocumentShell>
+      </BrowserRouter>
     );
   }
 

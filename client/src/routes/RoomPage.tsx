@@ -1,20 +1,23 @@
 /**
  * RoomPage — shared shell for the four section routes (About, Projects,
- * Writing, and the placeholder Home). Renders as a fixed overlay above
- * the 3D canvas so navigating to a route is visually distinct from
- * being at `/` (the formation).
+ * Writing, and the placeholder Home). Has two visual variants:
  *
- * This is the proto-Simple-Experience layout. In step 4 of the
- * portfolio build (see ADR-003), it'll be promoted into a fully-styled
- * document view that the Simple Experience toggle can render. For now
- * it's a minimal placeholder so the routing layer is observable.
+ *   - 3D mode (`documentMode === false`): renders as a fixed overlay
+ *     above the cube formation, with the cyan/teal cube-room
+ *     aesthetic. The "Back to formation" link returns to `/`.
+ *   - Document mode (`documentMode === true`): renders as a plain
+ *     `<article>` inside DocumentShell's main slot — no fixed
+ *     positioning, no card chrome, no back-to-formation link
+ *     (DocumentShell's own header nav covers section navigation
+ *     and the footer holds the "Switch to 3D experience" button).
  *
- * The shell handles: fixed positioning, the cyan/teal cube-room
- * aesthetic, the back link, and the title. Per-section components
- * pass `title` + their content as children.
+ * Per-section components pass `title` + their content as children.
+ * The variant choice is made here, not in the section components,
+ * so each section's content lives in one place.
  */
 import { Link } from 'react-router-dom';
 import type { CSSProperties, ReactNode } from 'react';
+import { useWorldStore } from '@/store';
 
 interface RoomPageProps {
   title: string;
@@ -22,6 +25,20 @@ interface RoomPageProps {
 }
 
 export function RoomPage({ title, children }: RoomPageProps): JSX.Element {
+  const documentMode = useWorldStore((s) => s.documentMode);
+
+  if (documentMode) {
+    return (
+      <article aria-live="polite">
+        <h1 style={styles.documentTitle}>{title}</h1>
+        <div style={styles.documentContent}>{children}</div>
+        <p style={styles.documentPlaceholder}>
+          Placeholder — real content lands in a future session.
+        </p>
+      </article>
+    );
+  }
+
   return (
     <div style={styles.wrap} aria-live="polite">
       <article style={styles.card}>
@@ -101,6 +118,24 @@ const styles: Record<string, CSSProperties> = {
     borderTop: '1px dashed rgba(0, 255, 204, 0.2)',
   },
   placeholder: {
+    fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace',
+    fontSize: 12,
+    color: 'rgba(0, 255, 204, 0.55)',
+  },
+  documentTitle: {
+    margin: '0 0 24px',
+    fontSize: 36,
+    fontWeight: 600,
+    letterSpacing: '0.02em',
+    color: '#e0fffa',
+  },
+  documentContent: {
+    fontSize: 16,
+    lineHeight: 1.65,
+    color: 'rgba(224, 255, 250, 0.85)',
+  },
+  documentPlaceholder: {
+    marginTop: 40,
     fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace',
     fontSize: 12,
     color: 'rgba(0, 255, 204, 0.55)',

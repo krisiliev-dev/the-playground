@@ -57,6 +57,9 @@ interface AppActions {
    *  and the InteractionController bails on mousedown/mouseup so
    *  clicks inside the menu can't drive 3D interactions. */
   setMenuOpen: (open: boolean) => void;
+  /** Toggle the Simple Experience document layout. Persisted to
+   *  localStorage so the user's choice survives reload. */
+  setDocumentMode: (mode: boolean) => void;
   /** Set which interactable the crosshair is currently aimed at, or
    *  null if nothing is in range. The InteractionController updates
    *  this each frame; individual `useInteractable` consumers read it
@@ -96,6 +99,51 @@ interface RevealSlice {
    *  CursorAvatar (to restore the OS cursor + skip mouselook) and
    *  by InteractionController (to bail on mousedown/mouseup). */
   menuOpen: boolean;
+  /** Simple Experience mode — when true, the site renders as a
+   *  document (clean header + nav + scrollable content) instead of
+   *  the 3D Canvas-and-overlays layout. Persisted to localStorage. */
+  documentMode: boolean;
+}
+
+/**
+ * Read the persisted documentMode preference.
+ *
+ * SSR / prerender path: returns `true`. The build-time prerender
+ * step renders the flat document variant so crawlers, link-preview
+ * bots, and screen readers see real content; the runtime swap to
+ * the 3D experience happens client-side after hydration. Initial-
+ * izing the store to `true` for SSR ensures components like
+ * `RoomPage` and `Home` that branch on this flag emit their
+ * document-mode JSX during `renderToString` — without this default,
+ * SSR would emit the 3D-mode variants, and the prerendered HTML
+ * would be useless to crawlers.
+ *
+ * Browser runtime path: reads `localStorage`, defaulting to `false`
+ * so JS users get the 3D experience unless they explicitly opted
+ * into Simple Experience.
+ */
+const DOCUMENT_MODE_STORAGE_KEY = 'documentMode';
+function readPersistedDocumentMode(): boolean {
+  if (typeof window === 'undefined') {
+    return true;
+  }
+  try {
+    return window.localStorage.getItem(DOCUMENT_MODE_STORAGE_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+function persistDocumentMode(mode: boolean): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  try {
+    window.localStorage.setItem(DOCUMENT_MODE_STORAGE_KEY, String(mode));
+  } catch {
+    /* localStorage may be blocked in private windows / specific
+       embed contexts. Mode then becomes session-only, which is an
+       acceptable degradation. */
+  }
 }
 
 interface InteractionSlice {
@@ -134,6 +182,7 @@ export const useWorldStore = create<AppState & AppActions & RevealSlice & Intera
     clickHit: null,
     controlsDismissed: false,
     menuOpen: false,
+    documentMode: readPersistedDocumentMode(),
     // Avatar lives from page load — small at first (cursor-sized), then grows
     // once the reveal completes. See CursorAvatar.tsx for the scale logic.
     cursorAvatarActive: true,
@@ -183,6 +232,11 @@ export const useWorldStore = create<AppState & AppActions & RevealSlice & Intera
     setControlsDismissed: (dismissed) => set({ controlsDismissed: dismissed }),
 
     setMenuOpen: (open) => set({ menuOpen: open }),
+
+    setDocumentMode: (mode) => {
+      persistDocumentMode(mode);
+      set({ documentMode: mode });
+    },
 
     setHoveredInteractable: (id, point = null) =>
       // Always pair id + point: when id is null, point should also be
