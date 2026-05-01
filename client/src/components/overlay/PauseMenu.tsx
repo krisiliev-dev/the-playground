@@ -29,7 +29,7 @@ const NAV_ITEMS = [
 ] as const;
 
 const KEYMAP_DESKTOP: ReadonlyArray<{ key: string; desc: string }> = [
-  { key: 'Esc', desc: 'open/close menu' },
+  { key: 'M', desc: 'open / close menu' },
   { key: 'W A S D', desc: 'walk' },
   { key: 'mouse', desc: 'look around' },
   { key: 'click / hold', desc: 'interact' },
@@ -51,15 +51,19 @@ export function PauseMenu(): JSX.Element | null {
   const isTouch = useIsTouchPrimary();
   const firstFocusRef = useRef<HTMLButtonElement>(null);
 
-  // Esc to toggle the menu open/closed. The browser also drops
-  // pointer-lock on Esc, which is *exactly* the pattern we want for
-  // an immersive site — releasing the pointer and surfacing the menu
-  // are conceptually one action ("pause the experience").
+  // M is the primary menu key. We deliberately do NOT use Esc to
+  // open: Esc is browser-reserved for releasing pointer-lock (Chrome,
+  // Safari) and exiting fullscreen (Safari), and intercepting it for
+  // the menu makes those side effects fire every time someone opens
+  // the menu — confusing on an immersive 3D site.
+  //
+  // Esc is still honored as a *close-only* shortcut when the menu is
+  // already open, so keyboard / screen-reader users get the standard
+  // modal-dialog "Esc dismisses" convention. The browser side effects
+  // fire too at that point, but that's acceptable — the user is
+  // already exiting the experience.
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key !== 'Escape') {
-        return;
-      }
       // Don't capture from text inputs (admin panel typing, future
       // forms). The user wants the platform behaviour there, not us.
       const target = e.target as HTMLElement | null;
@@ -69,7 +73,16 @@ export function PauseMenu(): JSX.Element | null {
           return;
         }
       }
-      setOpen((o) => !o);
+      const key = e.key.toLowerCase();
+      if (key === 'm') {
+        setOpen((o) => !o);
+        return;
+      }
+      if (key === 'escape') {
+        // Close-only — never opens via Esc, to keep browser semantics
+        // intact when the user is in the experience.
+        setOpen((o) => (o ? false : o));
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -214,7 +227,7 @@ export function PauseMenu(): JSX.Element | null {
               </ul>
             </details>
 
-            <p style={styles.hint}>{isTouch ? 'tap outside' : 'press Esc'} to close</p>
+            <p style={styles.hint}>{isTouch ? 'tap outside' : 'press M'} to close</p>
           </div>
         </div>
       )}

@@ -32,6 +32,7 @@ function renderMenu(initialPath = '/'): ReturnType<typeof render> {
   );
 }
 
+const mEvent = (): KeyboardEvent => new KeyboardEvent('keydown', { key: 'm' });
 const escEvent = (): KeyboardEvent => new KeyboardEvent('keydown', { key: 'Escape' });
 
 describe('PauseMenu', () => {
@@ -52,31 +53,59 @@ describe('PauseMenu', () => {
       expect(container.firstChild).toBeNull();
     });
 
-    it('opens on Esc keydown', () => {
+    it('opens on M keydown', () => {
       renderMenu();
       expect(screen.queryByRole('dialog')).toBeNull();
       act(() => {
-        window.dispatchEvent(escEvent());
+        window.dispatchEvent(mEvent());
       });
       expect(screen.getByRole('dialog')).toBeInTheDocument();
     });
 
-    it('closes on a second Esc keydown', () => {
+    it('closes on a second M keydown', () => {
+      renderMenu();
+      act(() => {
+        window.dispatchEvent(mEvent());
+      });
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+      act(() => {
+        window.dispatchEvent(mEvent());
+      });
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+
+    it('does NOT open on Esc (browser-reserved for pointer-lock + fullscreen exit)', () => {
       renderMenu();
       act(() => {
         window.dispatchEvent(escEvent());
+      });
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+
+    it('closes on Esc when the menu is already open (a11y modal-dialog convention)', () => {
+      renderMenu();
+      act(() => {
+        window.dispatchEvent(mEvent());
       });
       expect(screen.getByRole('dialog')).toBeInTheDocument();
       act(() => {
         window.dispatchEvent(escEvent());
       });
       expect(screen.queryByRole('dialog')).toBeNull();
+    });
+
+    it('treats uppercase M the same as lowercase', () => {
+      renderMenu();
+      act(() => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'M' }));
+      });
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
     });
 
     it('closes on backdrop click', () => {
       renderMenu();
       act(() => {
-        window.dispatchEvent(escEvent());
+        window.dispatchEvent(mEvent());
       });
       const backdrop = screen.getByRole('dialog');
       fireEvent.click(backdrop);
@@ -86,7 +115,7 @@ describe('PauseMenu', () => {
     it('does NOT close on click inside the card (stopPropagation)', () => {
       renderMenu();
       act(() => {
-        window.dispatchEvent(escEvent());
+        window.dispatchEvent(mEvent());
       });
       // The "Menu" heading is inside the card; clicking it should be
       // intercepted by the card's stopPropagation, NOT dismissed.
@@ -94,16 +123,14 @@ describe('PauseMenu', () => {
       expect(screen.queryByRole('dialog')).toBeInTheDocument();
     });
 
-    it('ignores Esc when focus is in a text input (lets the platform handle it)', () => {
+    it('ignores M when focus is in a text input (lets the platform handle it)', () => {
       const input = document.createElement('input');
       document.body.appendChild(input);
       input.focus();
 
       renderMenu();
-      // Esc dispatched from the input element bubbles up; the menu's
-      // listener checks `e.target.tagName` and bails for INPUT.
       act(() => {
-        const e = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true });
+        const e = new KeyboardEvent('keydown', { key: 'm', bubbles: true });
         input.dispatchEvent(e);
       });
       expect(screen.queryByRole('dialog')).toBeNull();
@@ -116,7 +143,7 @@ describe('PauseMenu', () => {
     it('is disabled when at /', () => {
       renderMenu('/');
       act(() => {
-        window.dispatchEvent(escEvent());
+        window.dispatchEvent(mEvent());
       });
       expect(screen.getByText('← Back')).toBeDisabled();
     });
@@ -124,7 +151,7 @@ describe('PauseMenu', () => {
     it('is enabled when at a non-root route', () => {
       renderMenu('/about');
       act(() => {
-        window.dispatchEvent(escEvent());
+        window.dispatchEvent(mEvent());
       });
       expect(screen.getByText('← Back')).not.toBeDisabled();
     });
@@ -134,7 +161,7 @@ describe('PauseMenu', () => {
     it('renders all four section links', () => {
       renderMenu();
       act(() => {
-        window.dispatchEvent(escEvent());
+        window.dispatchEvent(mEvent());
       });
       expect(screen.getByText('Home')).toBeInTheDocument();
       expect(screen.getByText('About')).toBeInTheDocument();
@@ -145,7 +172,7 @@ describe('PauseMenu', () => {
     it('section link is a Link with the right href', () => {
       renderMenu();
       act(() => {
-        window.dispatchEvent(escEvent());
+        window.dispatchEvent(mEvent());
       });
       const aboutLink = screen.getByText('About').closest('a');
       expect(aboutLink).toHaveAttribute('href', '/about');
@@ -156,7 +183,7 @@ describe('PauseMenu', () => {
     it('starts collapsed', () => {
       renderMenu();
       act(() => {
-        window.dispatchEvent(escEvent());
+        window.dispatchEvent(mEvent());
       });
       expect(screen.queryByText(/hello@/)).toBeNull();
     });
@@ -164,7 +191,7 @@ describe('PauseMenu', () => {
     it('expands the contact card on click and reveals email + GitHub + LinkedIn', () => {
       renderMenu();
       act(() => {
-        window.dispatchEvent(escEvent());
+        window.dispatchEvent(mEvent());
       });
       const toggle = screen.getByText(/Contact/);
       fireEvent.click(toggle);
@@ -179,7 +206,7 @@ describe('PauseMenu', () => {
       const spy = vi.spyOn(sfx, 'setMasterVolume');
       renderMenu();
       act(() => {
-        window.dispatchEvent(escEvent());
+        window.dispatchEvent(mEvent());
       });
       const audioBtn = screen.getByText(/Audio:/);
       fireEvent.click(audioBtn);
@@ -192,7 +219,7 @@ describe('PauseMenu', () => {
     it('button label reflects mute state', () => {
       renderMenu();
       act(() => {
-        window.dispatchEvent(escEvent());
+        window.dispatchEvent(mEvent());
       });
       expect(screen.getByText(/Audio: on/)).toBeInTheDocument();
       fireEvent.click(screen.getByText(/Audio:/));
@@ -204,7 +231,7 @@ describe('PauseMenu', () => {
     it('renders disabled with the "(coming soon)" label', () => {
       renderMenu();
       act(() => {
-        window.dispatchEvent(escEvent());
+        window.dispatchEvent(mEvent());
       });
       const seBtn = screen.getByText(/Simple Experience/);
       expect(seBtn).toBeDisabled();
@@ -243,7 +270,7 @@ describe('PauseMenu', () => {
       expect(screen.queryByText('W A S D')).toBeNull();
     });
 
-    it('hint text says "tap outside" instead of "press Esc"', () => {
+    it('hint text says "tap outside" instead of "press M"', () => {
       renderMenu();
       fireEvent.click(screen.getByLabelText('Open menu'));
       expect(screen.getByText(/tap outside to close/)).toBeInTheDocument();
