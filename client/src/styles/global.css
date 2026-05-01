@@ -26,6 +26,13 @@ body {
   font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* Block text-selection + iOS callout. Without these, a long press
+     on touch devices selects DOM nodes (the canvas, the crosshair,
+     etc.) and pops the iOS context-menu, fighting the hold-to-lean
+     interaction. */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 
 /* Prevent rubber-banding on mobile */

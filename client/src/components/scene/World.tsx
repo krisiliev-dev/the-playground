@@ -57,17 +57,20 @@ export function World(): JSX.Element {
       <Haze3D />
       {/* CursorAvatar moved out of World/ShakeGroup so the cursor doesn't
           inherit the camera-shake offset on each sword's wall impact. */}
-      {/* OrbitControls only owns the camera in idle mode — once the user
+      {/* OrbitControls owns the camera in idle mode — once the user
           clicks, CursorAvatar takes over with the 3rd-person follow rig.
-          Disabled on touch devices: the orbit controls' default
-          single-finger-rotate consumed the pre-reveal swipe gesture and
-          made the camera spin around before the user even started the
-          experience. Desktop drag-to-orbit is preserved. */}
+          On touch we disable rotation only (`enableRotate={false}`)
+          rather than the whole controls, so OrbitControls still applies
+          its `target` lookAt each frame and the camera correctly faces
+          the back wall. Setting `enabled={false}` on mobile turned out
+          to skip the lookAt and leave the camera in its default
+          orientation (looking at the world origin from z=-360, which
+          points the user *away* from the back wall). */}
       {revealState === 'idle' && (
         <OrbitControls
           enableZoom={false}
           enablePan={false}
-          enabled={!isTouch}
+          enableRotate={!isTouch}
           target={[0, 0, -360.01]}
         />
       )}

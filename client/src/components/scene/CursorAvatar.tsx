@@ -115,8 +115,8 @@ const OUTLINE_SCALE = 1.06;
  *  reads with weight toward the lower-right — same character as the
  *  pre-fix asymmetric outline the user liked, but as a deliberate
  *  authored choice instead of a pivot accident. */
-const OUTLINE_SHIFT_X_FRACTION = 0.06;
-const OUTLINE_SHIFT_Y_FRACTION = -0.06;
+const OUTLINE_SHIFT_X_FRACTION = 0.048;
+const OUTLINE_SHIFT_Y_FRACTION = -0.048;
 
 useGLTF.preload(MODEL_URL);
 

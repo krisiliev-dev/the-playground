@@ -693,7 +693,12 @@ class SfxManager {
       // Already unlocked. Still nudge resume in case the OS
       // suspended us in the background.
       if (this.ctx.state === 'suspended') {
-        void this.ctx.resume();
+        // eslint-disable-next-line no-console
+        console.log('[sfx-debug] unlock: ctx exists, state=suspended → resume()');
+        void this.ctx.resume().then(() => {
+          // eslint-disable-next-line no-console
+          console.log('[sfx-debug] resume resolved, state=', this.ctx?.state);
+        });
       }
       return;
     }
@@ -701,9 +706,13 @@ class SfxManager {
       window.AudioContext ??
       (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (typeof Ctor !== 'function') {
+      // eslint-disable-next-line no-console
+      console.warn('[sfx-debug] unlock: no AudioContext constructor');
       return;
     }
     this.ctx = new Ctor();
+    // eslint-disable-next-line no-console
+    console.log('[sfx-debug] unlock: ctx created, state=', this.ctx.state);
     this.masterGain = this.ctx.createGain();
     this.masterGain.gain.value = 1;
     this.masterGain.connect(this.ctx.destination);
@@ -713,18 +722,16 @@ class SfxManager {
     this.cubeReverb.connect(this.masterGain);
     // Silent unlock buffer — Safari needs an actual `source.start()`
     // call inside the gesture window before any other audio will
-    // produce sound, even after `resume()` succeeds. Use the ctx's
-    // own sampleRate (not a hard-coded 22050) so there's no resampling
-    // edge case, and route through masterGain so the unlock travels
-    // the same path real cues will take. Buffer is 256 samples ≈ 5–6
-    // ms of silence, longer than 1-sample which some Safari versions
-    // skip over without registering.
+    // produce sound, even after `resume()` succeeds.
     const unlock = this.ctx.createBufferSource();
     unlock.buffer = this.ctx.createBuffer(1, 256, this.ctx.sampleRate);
     unlock.connect(this.masterGain);
     unlock.start(0);
     // Synchronous resume on the gesture stack.
-    void this.ctx.resume();
+    void this.ctx.resume().then(() => {
+      // eslint-disable-next-line no-console
+      console.log('[sfx-debug] resume resolved, state=', this.ctx?.state);
+    });
   }
 
   /** Pure HTTP prefetch — pulls every cue's bytes into the browser

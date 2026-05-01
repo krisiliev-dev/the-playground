@@ -92,6 +92,14 @@ export function CursorText(): JSX.Element {
     return () => cancelAnimationFrame(rafId);
   }, []);
 
+  // Touch devices skip the lerp-toward-pointer entirely and use a
+  // CSS-only static centre. No transform churn → no rAF needed for
+  // the touch case (the rAF tick still runs but is a no-op visually
+  // when `isTouch` is true; cheap enough to leave alone).
+  if (isTouch) {
+    return <div style={{ ...staticCentredTextStyle, opacity: hidden ? 0 : 0.72 }}>{TEXT}</div>;
+  }
+
   return (
     <div ref={ref} style={{ ...textStyle, opacity: hidden ? 0 : 0.72 }}>
       {TEXT}
@@ -116,4 +124,26 @@ const textStyle: React.CSSProperties = {
   textShadow:
     '0 0 6px rgba(0, 0, 0, 0.95), 0 0 14px rgba(0, 0, 0, 0.85), 0 0 22px rgba(0, 255, 204, 0.5)',
   willChange: 'transform',
+};
+
+/** Centre via CSS `top/left: 50% + translate(-50%, -50%)` — the
+ *  text's geometric centre (not its top-left corner) lands on the
+ *  viewport centre regardless of the text's own width/height. */
+const staticCentredTextStyle: React.CSSProperties = {
+  position: 'fixed',
+  top: '50%',
+  left: '50%',
+  transform: 'translate(-50%, -50%)',
+  color: '#e6fffb',
+  fontSize: 14,
+  fontWeight: 500,
+  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+  pointerEvents: 'none',
+  zIndex: 10,
+  transition: 'opacity 0.6s ease-out',
+  letterSpacing: '0.04em',
+  textAlign: 'center',
+  textShadow:
+    '0 0 6px rgba(0, 0, 0, 0.95), 0 0 14px rgba(0, 0, 0, 0.85), 0 0 22px rgba(0, 255, 204, 0.5)',
+  whiteSpace: 'nowrap',
 };
