@@ -21,16 +21,6 @@ export type RevealState = 'idle' | 'armed' | 'swinging' | 'impact' | 'revealed';
 const REVEAL_ORDER: readonly RevealState[] = ['idle', 'armed', 'swinging', 'impact', 'revealed'];
 
 /**
- * Reveal phases that are mid-animation — clicked, but the swing /
- * impact sequence hasn't finished playing. When the user enters
- * Simple Experience from one of these (rare but possible),
- * `setDocumentMode(true)` fast-forwards to `revealed` so they come
- * back to a stable scene rather than to a frozen mid-swing whose
- * timer-driven refs were destroyed with the Canvas unmount.
- */
-const TRANSIENT_REVEAL_STATES: readonly RevealState[] = ['armed', 'swinging', 'impact'];
-
-/**
  * Where the user clicked, projected onto a cube wall. Stored as plain
  * tuples so the store stays JSON-serialisable for future multiplayer sync.
  */
@@ -38,32 +28,6 @@ export interface ClickHit {
   point: [number, number, number];
   /** Inward-facing wall normal at the hit (points toward camera). */
   normal: [number, number, number];
-}
-
-/**
- * Snapshot of the avatar's transient mid-experience state — body
- * position + look angles, plus the camera's world transform.
- * Captured when the Canvas is about to unmount (e.g. user flips
- * into Simple Experience), restored the next time the avatar
- * mounts so the user picks up exactly where they left off rather
- * than respawning at the cube centre.
- *
- * The camera fields exist so the visible follow-rig lerp ("camera
- * snaps from the Canvas's default `[0, 0, -360]` to wherever the
- * avatar is") doesn't fire on every doc → 3D return — without
- * them, the first few frames after restore would visibly catch up
- * even though the avatar position is correct.
- *
- * Plain tuples so the store stays JSON-serialisable (same
- * convention as `ClickHit`). Yaw + pitch are radians; position is
- * world space; quaternion is `[x, y, z, w]`.
- */
-export interface AvatarSnapshot {
-  position: [number, number, number];
-  yaw: number;
-  pitch: number;
-  cameraPosition: [number, number, number];
-  cameraQuaternion: [number, number, number, number];
 }
 
 // ─── Store Actions ───────────────────────────────────────────────────
@@ -96,13 +60,9 @@ interface AppActions {
   /** Toggle the Simple Experience document layout. Persisted to
    *  localStorage so the user's choice survives reload. */
   setDocumentMode: (mode: boolean) => void;
-  /** Persist the avatar's transient transform (position + look
-   *  angles) so it survives the Canvas unmount when the user flips
-   *  into Simple Experience and back. Pass `null` to clear. */
-  setAvatarSnapshot: (snapshot: AvatarSnapshot | null) => void;
   /** Set the one-shot pointer-lock signal — true when the user has
    *  asked to return to 3D from document mode and we should reclaim
-   *  the lock once the Canvas mounts. App clears it back to false
+   *  the lock on the next render. App clears it back to false
    *  after consuming. */
   setPendingPointerLock: (pending: boolean) => void;
   /** Set which interactable the crosshair is currently aimed at, or
@@ -148,19 +108,11 @@ interface RevealSlice {
    *  document (clean header + nav + scrollable content) instead of
    *  the 3D Canvas-and-overlays layout. Persisted to localStorage. */
   documentMode: boolean;
-  /** Last avatar transform captured before a Canvas unmount, or
-   *  null if the avatar hasn't run yet this session. Restored by
-   *  ActiveCursor on mount so flipping in/out of Simple Experience
-   *  doesn't respawn the user at the cube centre. */
-  avatarSnapshot: AvatarSnapshot | null;
   /** One-shot signal set by DocumentShell when the user clicks
    *  "Switch to 3D experience" *while in avatar mode*. App reads
-   *  + clears it inside handleCreated once the Canvas mounts, then
-   *  reclaims pointer-lock — so the user resumes mouselook without
-   *  a second confirming click. The signal lives in the store
-   *  (rather than a component ref) because the boot gate's
-   *  LoadingScreen can intervene between the click and the Canvas
-   *  mount, breaking any ref-based detection. */
+   *  + clears it on the doc → 3D render and reclaims pointer-lock,
+   *  so the user resumes mouselook without a second confirming
+   *  click. */
   pendingPointerLock: boolean;
 }
 
@@ -242,7 +194,6 @@ export const useWorldStore = create<AppState & AppActions & RevealSlice & Intera
     controlsDismissed: false,
     menuOpen: false,
     documentMode: readPersistedDocumentMode(),
-    avatarSnapshot: null,
     pendingPointerLock: false,
     // Avatar lives from page load — small at first (cursor-sized), then grows
     // once the reveal completes. See CursorAvatar.tsx for the scale logic.
@@ -282,10 +233,7 @@ export const useWorldStore = create<AppState & AppActions & RevealSlice & Intera
         return { revealState: next };
       }),
 
-    resetReveal: () =>
-      set({ revealState: 'idle', clickHit: null, controlsDismissed: false, avatarSnapshot: null }),
-
-    setAvatarSnapshot: (snapshot) => set({ avatarSnapshot: snapshot }),
+    resetReveal: () => set({ revealState: 'idle', clickHit: null, controlsDismissed: false }),
 
     setPendingPointerLock: (pending) => set({ pendingPointerLock: pending }),
 
@@ -301,17 +249,7 @@ export const useWorldStore = create<AppState & AppActions & RevealSlice & Intera
 
     setDocumentMode: (mode) => {
       persistDocumentMode(mode);
-      set((state) => {
-        // Entering Simple Experience mid-animation: snap to the
-        // terminal state. The timer-driven refs that drive the swing
-        // and impact animations get destroyed with the Canvas
-        // unmount, so leaving revealState in a transient phase
-        // would strand the user mid-swing on return.
-        if (mode && TRANSIENT_REVEAL_STATES.includes(state.revealState)) {
-          return { documentMode: mode, revealState: 'revealed' };
-        }
-        return { documentMode: mode };
-      });
+      set({ documentMode: mode });
     },
 
     setHoveredInteractable: (id, point = null) =>

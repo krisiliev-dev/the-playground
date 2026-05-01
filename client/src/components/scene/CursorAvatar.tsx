@@ -849,60 +849,22 @@ function AvatarCursor({ refs }: ModeProps): null {
   const leanTarget = useRef(new Vector3());
   const tipWorldBuffer = useRef(new Vector3());
 
-  // Anchor avatar position + reset yaw/pitch the moment AvatarCursor mounts.
-  //
-  // If a snapshot exists in the store (e.g. the user just flipped out
-  // of Simple Experience and back), restore from it so they pick up
-  // exactly where they were. We also write the camera's world
-  // transform directly so the follow-rig lerp doesn't visibly
-  // catch up over the first few frames — without that, the camera
-  // would snap from the Canvas default `[0, 0, -360]` to the
-  // settled follow position even though the avatar position is
-  // already correct.
-  //
-  // No snapshot → original first-mount path, where the avatar
-  // inherits wherever the cube-formation camera was looking from.
-  //
-  // On unmount we capture the latest transform back into the store
-  // so the next mount can restore. Reads + writes go through
-  // `getState()` rather than hook subscriptions — we only want to
-  // act on demand, not re-render when the snapshot changes.
+  // Anchor avatar position + reset yaw/pitch the moment AvatarCursor mounts
+  // (was previously gated on `isAvatar` flipping true; same effect now that
+  // mount IS that transition). The Canvas itself stays mounted across
+  // Simple Experience toggles (App pauses it via `frameloop="never"` +
+  // visibility:hidden), so this effect runs *once* per session — the
+  // transient state in the refs is preserved across mode flips for free.
   useEffect(() => {
-    const snapshot = useWorldStore.getState().avatarSnapshot;
-    if (snapshot) {
-      refs.avatarPos.current.set(...snapshot.position);
-      refs.avatarYaw.current = snapshot.yaw;
-      refs.avatarPitch.current = snapshot.pitch;
-      camera.position.set(...snapshot.cameraPosition);
-      const [qx, qy, qz, qw] = snapshot.cameraQuaternion;
-      camera.quaternion.set(qx, qy, qz, qw);
-    } else {
-      refs.avatarPos.current.set(
-        camera.position.x,
-        camera.position.y - FOLLOW_OFFSET.y,
-        camera.position.z - FOLLOW_OFFSET.z,
-      );
-      refs.avatarYaw.current = 0;
-      refs.avatarPitch.current = 0;
-    }
+    refs.avatarPos.current.set(
+      camera.position.x,
+      camera.position.y - FOLLOW_OFFSET.y,
+      camera.position.z - FOLLOW_OFFSET.z,
+    );
+    refs.avatarYaw.current = 0;
+    refs.avatarPitch.current = 0;
     sfx.unlock();
     void sfx.play('uiClick');
-
-    return () => {
-      const pos = refs.avatarPos.current;
-      useWorldStore.getState().setAvatarSnapshot({
-        position: [pos.x, pos.y, pos.z],
-        yaw: refs.avatarYaw.current,
-        pitch: refs.avatarPitch.current,
-        cameraPosition: [camera.position.x, camera.position.y, camera.position.z],
-        cameraQuaternion: [
-          camera.quaternion.x,
-          camera.quaternion.y,
-          camera.quaternion.z,
-          camera.quaternion.w,
-        ],
-      });
-    };
   }, [camera, refs]);
 
   useFrame((state, delta) => {

@@ -102,20 +102,59 @@ describe('App', () => {
 
   // ── Simple Experience document mode (ADR-003 step 4) ────────────
   describe('documentMode', () => {
-    it('renders the DocumentShell instead of the Canvas when documentMode is true', () => {
+    it('renders the DocumentShell only on the first-load doc-mode path (no Canvas booted yet)', () => {
       useWorldStore.setState({ documentMode: true });
       render(<App />);
-      // The 3D Canvas + boot LoadingScreen are bypassed entirely.
+      // First load with documentMode=true skips the WebGL probe,
+      // boot loader, and Canvas mount entirely — the user gets the
+      // document straight away.
       expect(screen.queryByTestId('r3f-canvas')).toBeNull();
       expect(screen.queryByTestId('loading-screen')).toBeNull();
-      // DocumentShell renders the brand link as the page header.
       expect(screen.getByLabelText(/Home — Kristiyan Iliev/)).toBeInTheDocument();
     });
 
-    it('renders the Canvas (3D shell) when documentMode is false', () => {
+    it('boots the Canvas (3D shell) when documentMode is false', () => {
       useWorldStore.setState({ documentMode: false });
       render(<App />);
       expect(screen.getByTestId('r3f-canvas')).toBeInTheDocument();
+    });
+
+    it('keeps the Canvas mounted across mode toggles once 3D has booted', () => {
+      // Boot 3D first, then capture the Canvas DOM node, then flip
+      // through document mode and back. The same node should be in
+      // the DOM the whole time — the document toggle pauses the
+      // render loop + hides the wrapper rather than tearing down.
+      useWorldStore.setState({ documentMode: false });
+      render(<App />);
+      const canvasNodeAfterBoot = screen.getByTestId('r3f-canvas');
+
+      act(() => {
+        useWorldStore.setState({ documentMode: true });
+      });
+      // Same DOM node, just inside a hidden wrapper.
+      expect(screen.getByTestId('r3f-canvas')).toBe(canvasNodeAfterBoot);
+
+      act(() => {
+        useWorldStore.setState({ documentMode: false });
+      });
+      expect(screen.getByTestId('r3f-canvas')).toBe(canvasNodeAfterBoot);
+    });
+
+    it('hides the Canvas wrapper via visibility (not display:none) when in document mode', () => {
+      // visibility:hidden preserves the canvas's layout dimensions
+      // — display:none would report 0×0 and trigger a wasteful
+      // ResizeObserver round-trip on every toggle.
+      useWorldStore.setState({ documentMode: false });
+      render(<App />);
+      const wrapper = screen.getByTestId('r3f-canvas').parentElement;
+      expect(wrapper).not.toBeNull();
+      expect(wrapper!.style.visibility).toBe('visible');
+
+      act(() => {
+        useWorldStore.setState({ documentMode: true });
+      });
+      expect(wrapper!.style.visibility).toBe('hidden');
+      expect(wrapper!.style.pointerEvents).toBe('none');
     });
 
     describe('pointer-lock auto-acquire on doc → 3D return', () => {
@@ -123,8 +162,6 @@ describe('App', () => {
       let requestPointerLockSpy: ReturnType<typeof vi.fn>;
 
       beforeEach(() => {
-        // Patch the prototype so the Canvas mock's <canvas> element
-        // reports a `requestPointerLock` method to `acquirePointerLock`.
         // eslint-disable-next-line @typescript-eslint/unbound-method
         originalRequestPointerLock = HTMLCanvasElement.prototype.requestPointerLock;
         requestPointerLockSpy = vi.fn();
@@ -136,9 +173,7 @@ describe('App', () => {
         useWorldStore.setState({ controlsDismissed: false, pendingPointerLock: false });
       });
 
-      it('does not request pointer-lock on the initial 3D mount', () => {
-        // Initial mount with no pending signal — App should boot
-        // through to the Canvas without grabbing pointer-lock.
+      it('does not request pointer-lock on the initial 3D mount when no signal is pending', () => {
         useWorldStore.setState({
           documentMode: false,
           controlsDismissed: true,
@@ -148,11 +183,33 @@ describe('App', () => {
         expect(requestPointerLockSpy).not.toHaveBeenCalled();
       });
 
-      it('consumes the pendingPointerLock signal on Canvas mount and acquires the lock', () => {
-        // Mirror what DocumentShell's "Switch to 3D experience"
-        // click handler does: pre-set the pending signal, flip
-        // documentMode to false. handleCreated should acquire the
-        // lock and clear the flag.
+      it('consumes the pendingPointerLock signal when toggling back from document mode', () => {
+        // Boot 3D first so Canvas is in the DOM. Flip into document
+        // mode (Canvas is paused but still mounted), pre-set the
+        // pending signal as DocumentShell would, then flip back.
+        useWorldStore.setState({ documentMode: false, controlsDismissed: true });
+        render(<App />);
+
+        act(() => {
+          useWorldStore.setState({ documentMode: true });
+        });
+        expect(requestPointerLockSpy).not.toHaveBeenCalled();
+
+        useWorldStore.setState({ pendingPointerLock: true });
+        act(() => {
+          useWorldStore.setState({ documentMode: false });
+        });
+
+        expect(requestPointerLockSpy).toHaveBeenCalledTimes(1);
+        expect(useWorldStore.getState().pendingPointerLock).toBe(false);
+      });
+
+      it('also consumes the signal on the first-load doc-mode → 3D boot path', () => {
+        // User starts in document mode (Canvas never mounted), clicks
+        // "Switch to 3D experience" (DocumentShell sets the flag),
+        // and the Canvas mounts after LoadingScreen completes. The
+        // flag should be honored when bootState becomes 'ready' even
+        // though documentMode flipped earlier.
         useWorldStore.setState({
           documentMode: true,
           controlsDismissed: true,
@@ -164,18 +221,23 @@ describe('App', () => {
           useWorldStore.setState({ documentMode: false });
         });
 
+        // LoadingScreen mock fires onReady synchronously → bootState
+        // → 'ready' → Canvas mounts → useEffect picks up the flag.
         expect(requestPointerLockSpy).toHaveBeenCalledTimes(1);
         expect(useWorldStore.getState().pendingPointerLock).toBe(false);
       });
 
       it('does not acquire when pendingPointerLock is false (e.g. user was not in avatar mode)', () => {
         useWorldStore.setState({
-          documentMode: true,
+          documentMode: false,
           controlsDismissed: false,
           pendingPointerLock: false,
         });
         render(<App />);
 
+        act(() => {
+          useWorldStore.setState({ documentMode: true });
+        });
         act(() => {
           useWorldStore.setState({ documentMode: false });
         });

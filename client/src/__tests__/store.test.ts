@@ -225,41 +225,6 @@ describe('useWorldStore', () => {
     });
   });
 
-  describe('avatarSnapshot', () => {
-    const sampleSnapshot = {
-      position: [4, -3, 12] as [number, number, number],
-      yaw: 1.2,
-      pitch: -0.4,
-      cameraPosition: [4, -3, 18] as [number, number, number],
-      cameraQuaternion: [0.1, 0.2, 0.3, 0.9239] as [number, number, number, number],
-    };
-
-    beforeEach(() => {
-      useWorldStore.getState().setAvatarSnapshot(null);
-    });
-
-    it('defaults to null', () => {
-      expect(useWorldStore.getState().avatarSnapshot).toBeNull();
-    });
-
-    it('setAvatarSnapshot stores all fields (position + look angles + camera transform)', () => {
-      useWorldStore.getState().setAvatarSnapshot(sampleSnapshot);
-      expect(useWorldStore.getState().avatarSnapshot).toEqual(sampleSnapshot);
-    });
-
-    it('setAvatarSnapshot(null) clears it back', () => {
-      useWorldStore.getState().setAvatarSnapshot(sampleSnapshot);
-      useWorldStore.getState().setAvatarSnapshot(null);
-      expect(useWorldStore.getState().avatarSnapshot).toBeNull();
-    });
-
-    it('resetReveal clears the snapshot (full reset returns to spawn)', () => {
-      useWorldStore.getState().setAvatarSnapshot(sampleSnapshot);
-      useWorldStore.getState().resetReveal();
-      expect(useWorldStore.getState().avatarSnapshot).toBeNull();
-    });
-  });
-
   describe('pendingPointerLock', () => {
     beforeEach(() => {
       useWorldStore.getState().setPendingPointerLock(false);
@@ -306,43 +271,16 @@ describe('useWorldStore', () => {
       expect(window.localStorage.getItem('documentMode')).toBe('false');
     });
 
-    describe('mid-reveal fast-forward when entering doc mode', () => {
-      // Each transient phase has timer-driven refs that get
-      // destroyed on Canvas unmount. Snapping straight to
-      // `revealed` is the "end the animation now" escape hatch
-      // so the user comes back to a stable scene.
-      const TRANSIENT: Array<'armed' | 'swinging' | 'impact'> = ['armed', 'swinging', 'impact'];
-      for (const phase of TRANSIENT) {
-        it(`fast-forwards revealState='${phase}' to 'revealed'`, () => {
-          useWorldStore.setState({ revealState: phase });
-          useWorldStore.getState().setDocumentMode(true);
-          expect(useWorldStore.getState().revealState).toBe('revealed');
-          expect(useWorldStore.getState().documentMode).toBe(true);
-        });
-      }
-
-      it("leaves revealState='idle' alone (user never clicked the cube)", () => {
-        useWorldStore.setState({ revealState: 'idle' });
-        useWorldStore.getState().setDocumentMode(true);
-        expect(useWorldStore.getState().revealState).toBe('idle');
-      });
-
-      it("leaves revealState='revealed' alone (already settled)", () => {
-        useWorldStore.setState({ revealState: 'revealed' });
-        useWorldStore.getState().setDocumentMode(true);
-        expect(useWorldStore.getState().revealState).toBe('revealed');
-      });
-
-      it('does NOT fast-forward when exiting doc mode (mode === false)', () => {
-        // Mid-reveal exit shouldn't happen in practice (DocumentShell
-        // is the only thing that calls setDocumentMode(false), and
-        // by then revealState is whatever it was when entering doc
-        // mode — already snapped). Still, document the contract:
-        // the fast-forward only fires on entry.
-        useWorldStore.setState({ revealState: 'swinging', documentMode: true });
-        useWorldStore.getState().setDocumentMode(false);
-        expect(useWorldStore.getState().revealState).toBe('swinging');
-      });
+    it('does not mutate revealState (Canvas pauses cleanly across mode toggles)', () => {
+      // The Canvas now stays mounted with `frameloop="never"`
+      // when documentMode is true, so animation refs and timers
+      // are preserved as-is — there's nothing to "fast-forward".
+      // Toggling modes is a pure visibility + render-loop change.
+      useWorldStore.setState({ revealState: 'swinging' });
+      useWorldStore.getState().setDocumentMode(true);
+      expect(useWorldStore.getState().revealState).toBe('swinging');
+      useWorldStore.getState().setDocumentMode(false);
+      expect(useWorldStore.getState().revealState).toBe('swinging');
     });
   });
 });
