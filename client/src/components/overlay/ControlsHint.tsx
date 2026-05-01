@@ -105,11 +105,15 @@ export function ControlsHint(): JSX.Element | null {
           <span style={styles.key}>{isTouch ? '1 finger' : 'mouse'}</span>
           <span style={styles.label}>{isTouch ? 'swipe to look' : 'look around'}</span>
         </div>
+        <div style={staggerRow('0.45s')}>
+          <span style={styles.key}>{isTouch ? 'tap / hold' : 'click / hold'}</span>
+          <span style={styles.label}>interact</span>
+        </div>
         <div
           style={{
             ...styles.hint,
             opacity: active ? 0.55 : 0,
-            transition: `opacity 0.5s ${FADE_EASE} 0.5s`,
+            transition: `opacity 0.5s ${FADE_EASE} 0.6s`,
           }}
         >
           {isTouch ? 'tap anywhere to dismiss' : 'click anywhere to dismiss'}
