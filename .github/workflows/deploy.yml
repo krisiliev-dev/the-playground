@@ -44,7 +44,12 @@ env:
 jobs:
   deploy-server:
     name: "Build & Deploy Server"
-    runs-on: ubuntu-latest
+    # Native arm64 runner so the Docker image builds for the same
+    # architecture the EC2 box runs on (t4g = Graviton/arm64).
+    # Building on ubuntu-latest (amd64) would force QEMU emulation on
+    # EC2 at runtime, which is 5–50× slower than native execution and
+    # was a hidden contributor to the previous deploy slowness.
+    runs-on: ubuntu-24.04-arm
     permissions:
       # checkout
       contents: read
