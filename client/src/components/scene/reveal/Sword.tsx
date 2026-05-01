@@ -37,6 +37,15 @@ import { triggerImpactShake } from '../cameraShake';
 import { FORMATION_SCALE, type SwordSlot } from './vibeFormation';
 import { sfx, type PositionalLoopHandle } from '../../audio/SfxManager';
 import { useSwordKinematics } from './useSwordKinematics';
+import {
+  MID_FORWARD,
+  SWING_DURATION,
+  SWING_DURATION_MS,
+  SWING_MID,
+  SWING_POST,
+  SWING_PRE,
+} from './constants';
+import { computeSpawnPoint } from './spawnGeometry';
 
 const SWORD_URL = '/models/sword/scene.gltf';
 
@@ -47,26 +56,10 @@ const SWORD_URL = '/models/sword/scene.gltf';
  *  blade length shrink together. */
 const TARGET_FULL_HEIGHT = 10 * FORMATION_SCALE;
 
-/** Spawn-position offsets. Lateral is computed dynamically (ray-cast
- *  to the right side wall of the cube minus an inset), so the spawn
- *  always lands AT the side wall regardless of where the camera was
- *  when the user clicked. Forward + up are small fixed offsets. */
-const SPAWN_FIXED_FWD = 80;
-const SPAWN_FIXED_UP = 20;
-/** Inset from the cube wall — sword spawns this many units inside the
- *  side wall surface so it's not embedded in the wall. */
-const SPAWN_WALL_INSET = 30;
-
-/** Letter-plane forward distance from the click camera. Mid pose is in
- *  this plane (camera-relative), so the formation reads at a fixed
- *  visual size regardless of where the click hit on the wall. */
-const MID_FORWARD = 22;
-
 /** End ring radius around the click point on the wall. Each sword lands
- *  on the ring at angle `slot.endAngle`. */
-/** Radius of the end-circle around the click point on the wall.
- *  Scaled with the formation so that on narrow aspects the swords
- *  land in a tighter ring proportional to the letter size. */
+ *  on the ring at angle `slot.endAngle`. Scaled with the formation so
+ *  that on narrow aspects the swords land in a tighter ring
+ *  proportional to the letter size. */
 const END_RADIUS = 10 * FORMATION_SCALE;
 /** Visual scale at spawn — disabled (set to 1.0). Apparent "incoming"
  *  growth now comes from real depth (spawn at ~320 lateral / 80 forward
@@ -81,16 +74,6 @@ const SPAWN_VISUAL_SCALE = 1.0;
  *  modest magnitude — just enough to feel like gravity-assisted motion. */
 const BOW_LEG1_VERTICAL = 5;
 const BOW_LEG2_VERTICAL = 7;
-
-/** Explicit swing phases — pre extended for the slow sword approach.
- *  Pre: 3.5s deliberate approach (rocket-flight from far spawn → formation).
- *  Mid: 1.2s formation hold (bullet-time camera orbit).
- *  Post: 0.8s slam into the wall ring.
- *  Total per-sword 5.5s. */
-const SWING_PRE = 3.5;
-const SWING_MID = 1.2;
-const SWING_POST = 0.8;
-const SWING_DURATION = SWING_PRE + SWING_MID + SWING_POST;
 
 /** Time spent rotating between sideways (tip along trajectory) and the
  *  upright letter-stroke pose. With longer pre, bumped to 0.5s — gives
@@ -453,60 +436,12 @@ export function Sword({ slot, staggerIndex = 0 }: SwordProps): JSX.Element {
     wallRight.crossVectors(wallUp, hitNormal).normalize();
 
     // ------- positions -------
-    // Spawn: at the right side wall of the cube. Compute the lateral
-    // distance to the wall by ray-casting camRight from clickCamPos
-    // to the cube boundary, then offset slightly inward (SPAWN_WALL_INSET)
-    // so the sword isn't embedded in the wall surface.
-    let tWall = Infinity;
-    if (Math.abs(camRight.x) > 1e-6) {
-      const t1 = (cubeHalf.x - clickCamPos.x) / camRight.x;
-      const t2 = (-cubeHalf.x - clickCamPos.x) / camRight.x;
-      if (t1 > 0 && t1 < tWall) {
-        tWall = t1;
-      }
-      if (t2 > 0 && t2 < tWall) {
-        tWall = t2;
-      }
-    }
-    if (Math.abs(camRight.y) > 1e-6) {
-      const t1 = (cubeHalf.y - clickCamPos.y) / camRight.y;
-      const t2 = (-cubeHalf.y - clickCamPos.y) / camRight.y;
-      if (t1 > 0 && t1 < tWall) {
-        tWall = t1;
-      }
-      if (t2 > 0 && t2 < tWall) {
-        tWall = t2;
-      }
-    }
-    if (Math.abs(camRight.z) > 1e-6) {
-      const t1 = (cubeHalf.z - clickCamPos.z) / camRight.z;
-      const t2 = (-cubeHalf.z - clickCamPos.z) / camRight.z;
-      if (t1 > 0 && t1 < tWall) {
-        tWall = t1;
-      }
-      if (t2 > 0 && t2 < tWall) {
-        tWall = t2;
-      }
-    }
-    const lateralDist = Math.max(0, tWall - SPAWN_WALL_INSET);
-    spawnPos
-      .copy(clickCamPos)
-      .addScaledVector(camRight, lateralDist)
-      .addScaledVector(camFwd, SPAWN_FIXED_FWD)
-      .addScaledVector(camUp, SPAWN_FIXED_UP);
-    // Clamp to cube interior. The camFwd/camUp offsets can push the
-    // final position past a non-camRight wall (e.g. when the camera is
-    // rotated so camRight has significant Z component, the +Z wall is
-    // closer than the +X wall). Per-axis clamp guarantees inside-cube
-    // regardless of camera orientation.
-    {
-      const limX = cubeHalf.x - SPAWN_WALL_INSET;
-      const limY = cubeHalf.y - SPAWN_WALL_INSET;
-      const limZ = cubeHalf.z - SPAWN_WALL_INSET;
-      spawnPos.x = Math.max(-limX, Math.min(limX, spawnPos.x));
-      spawnPos.y = Math.max(-limY, Math.min(limY, spawnPos.y));
-      spawnPos.z = Math.max(-limZ, Math.min(limZ, spawnPos.z));
-    }
+    // Spawn: ray-cast camRight from the click camera to the nearest
+    // cube wall, back off by SPAWN_WALL_INSET, then offset forward + up
+    // by the fixed camera-relative offsets. Per-axis clamp keeps the
+    // spawn inside the cube regardless of camera orientation. See
+    // ./spawnGeometry for the full math + tests.
+    computeSpawnPoint(spawnPos, clickCamPos, camRight, camFwd, camUp, cubeHalf);
     // Mid: stroke centre in the click-cam-relative letter plane (formation
     // hovers in the air close to camera).
     midPos
@@ -872,5 +807,5 @@ useGLTF.preload(SWORD_URL);
 
 export const SWORD_CONSTANTS = {
   TARGET_FULL_HEIGHT,
-  SWING_DURATION_MS: SWING_DURATION * 1000,
+  SWING_DURATION_MS,
 } as const;

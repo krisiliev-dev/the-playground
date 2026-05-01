@@ -34,6 +34,7 @@ import { useWorldStore } from '@/store';
 import { useIsTouchPrimary } from '@/utils';
 import { sfx } from '../audio/SfxManager';
 import { interactableHandlers, setTouchInProgress } from './Interactable';
+import { SWING_PRE } from './reveal/constants';
 
 const MODEL_URL = '/models/3d_icon_cursor.glb';
 
@@ -43,11 +44,6 @@ const POINTER_DEPTH = 3;
 const POINTER_SCALE = 0.001;
 const AVATAR_SCALE = 0.03;
 const SCALE_LERP_RATE = 5.0;
-
-/** Reveal-phase boundary inside the 'swinging' state. Cursor stays
- *  world-frozen for `t < SWING_PRE` (the chase), then anchors to camera
- *  for the mid + post phases. Must match Sword.tsx's SWING_PRE. */
-const SWING_PRE = 3.5;
 
 /** Avatar movement (world units / sec). */
 const WALK_SPEED = 60;

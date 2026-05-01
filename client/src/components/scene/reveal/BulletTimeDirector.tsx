@@ -24,16 +24,15 @@ import { useFrame } from '@react-three/fiber';
 import { Vector3 } from 'three';
 import { useWorldStore } from '@/store';
 import { WORD_CENTERING_FUDGE } from './vibeFormation';
-
-const ARMED_DURATION = 0.8;
-const SWING_PRE = 3.5;
-const SWING_MID = 1.2;
-const SWING_POST = 0.8;
-const SWING_DURATION = SWING_PRE + SWING_MID + SWING_POST;
-
-/** Distance from camera to formation centre at the *initial* (front)
- *  view — must match Sword.tsx's MID_FORWARD. */
-const MID_FORWARD = 22;
+import {
+  ARMED_DURATION,
+  MID_FORWARD,
+  SWING_DURATION,
+  SWING_MID,
+  SWING_POST,
+  SWING_PRE,
+} from './constants';
+import { computeSpawnPoint } from './spawnGeometry';
 /** Lateral drift during mid. Camera pans from MID_LATERAL_DRIFT units
  *  RIGHT of initial to MID_LATERAL_DRIFT units LEFT of initial — small
  *  movement, close to the original viewing position, while the swords
@@ -60,12 +59,6 @@ const CHASE_AHEAD_DISTANCE = 60;
  *  After this, camera DIRECTLY tracks chasePoint (no ease-out lag) so
  *  it stays consistently ahead of the row throughout the chase. */
 const CHASE_RAMP_DURATION = 0.5;
-/** Spawn position offsets (must match Sword.tsx). Lateral is computed
- *  dynamically via ray-cast to the cube wall — see capture block. */
-const SPAWN_FIXED_FWD = 80;
-const SPAWN_FIXED_UP = 20;
-const SPAWN_WALL_INSET = 30;
-
 function smoothstep(t: number): number {
   return t * t * (3 - 2 * t);
 }
@@ -152,57 +145,17 @@ export function BulletTimeDirector(): null {
       wordCenter.current
         .copy(formationCenter.current)
         .addScaledVector(camRight.current, WORD_CENTERING_FUDGE);
-      // Spawn lateral: ray-cast camRight from initialCamPos to the
-      // nearest cube wall, minus a small inset. Same math as Sword.tsx
-      // so the director's lookAt target tracks where swords actually are.
-      const cR = camRight.current;
-      let tWall = Infinity;
-      if (Math.abs(cR.x) > 1e-6) {
-        const t1 = (cubeHalf.x - initialCamPos.current.x) / cR.x;
-        const t2 = (-cubeHalf.x - initialCamPos.current.x) / cR.x;
-        if (t1 > 0 && t1 < tWall) {
-          tWall = t1;
-        }
-        if (t2 > 0 && t2 < tWall) {
-          tWall = t2;
-        }
-      }
-      if (Math.abs(cR.y) > 1e-6) {
-        const t1 = (cubeHalf.y - initialCamPos.current.y) / cR.y;
-        const t2 = (-cubeHalf.y - initialCamPos.current.y) / cR.y;
-        if (t1 > 0 && t1 < tWall) {
-          tWall = t1;
-        }
-        if (t2 > 0 && t2 < tWall) {
-          tWall = t2;
-        }
-      }
-      if (Math.abs(cR.z) > 1e-6) {
-        const t1 = (cubeHalf.z - initialCamPos.current.z) / cR.z;
-        const t2 = (-cubeHalf.z - initialCamPos.current.z) / cR.z;
-        if (t1 > 0 && t1 < tWall) {
-          tWall = t1;
-        }
-        if (t2 > 0 && t2 < tWall) {
-          tWall = t2;
-        }
-      }
-      const lateralDist = Math.max(0, tWall - SPAWN_WALL_INSET);
-      spawnPoint.current
-        .copy(initialCamPos.current)
-        .addScaledVector(camRight.current, lateralDist)
-        .addScaledVector(camFwd.current, SPAWN_FIXED_FWD)
-        .addScaledVector(camUp.current, SPAWN_FIXED_UP);
-      // Clamp to cube interior — same as Sword.tsx so the director's
-      // lookAt target matches the actual sword spawn position.
-      {
-        const limX = cubeHalf.x - SPAWN_WALL_INSET;
-        const limY = cubeHalf.y - SPAWN_WALL_INSET;
-        const limZ = cubeHalf.z - SPAWN_WALL_INSET;
-        spawnPoint.current.x = Math.max(-limX, Math.min(limX, spawnPoint.current.x));
-        spawnPoint.current.y = Math.max(-limY, Math.min(limY, spawnPoint.current.y));
-        spawnPoint.current.z = Math.max(-limZ, Math.min(limZ, spawnPoint.current.z));
-      }
+      // Spawn point: same math as Sword.tsx — see ./spawnGeometry. The
+      // director's lookAt target tracks where the swords actually are
+      // because both call sites share this helper.
+      computeSpawnPoint(
+        spawnPoint.current,
+        initialCamPos.current,
+        camRight.current,
+        camFwd.current,
+        camUp.current,
+        cubeHalf,
+      );
       // sideA and sideB are positions slightly to the right / left of
       // the camera's INITIAL pose (not at the formation). Mid phase
       // pans the camera between them — a subtle right-to-left drift
