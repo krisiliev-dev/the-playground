@@ -57,6 +57,25 @@ const MIN_PRESS_HOLD_MS = 130;
  *  determines the press target). */
 export const interactableHandlers = new Map<string, () => void>();
 
+/** Timestamp (performance.now ms) until which synthesised mouse
+ *  events from iOS Safari's touch-to-mouse compatibility layer
+ *  should be ignored. iOS dispatches mousedown/mouseup/click after
+ *  every touchend; without this gate, our touch-path press would
+ *  fire once on touchend and *again* on the synthetic mouseup,
+ *  causing double interactions + double audio cues. CursorAvatar
+ *  bumps this forward by ~400 ms after handling a touch press,
+ *  and the InteractionController + global mouseDown/Up listeners
+ *  consult `isInteractionSynthSuppressed` before reacting. */
+let synthSuppressUntil = 0;
+
+export function suppressInteractionSynth(durationMs: number): void {
+  synthSuppressUntil = performance.now() + durationMs;
+}
+
+export function isInteractionSynthSuppressed(): boolean {
+  return performance.now() < synthSuppressUntil;
+}
+
 interface UseInteractableOpts {
   /** Stable identifier — used as the key both in the registry and in
    *  the world store's `hoveredInteractableId`. Must be unique across
@@ -185,6 +204,12 @@ export function InteractionController(): null {
     let pendingReleaseTimer: ReturnType<typeof setTimeout> | null = null;
 
     const onMouseDown = (): void => {
+      // Mobile's touch path already fired the press logic by the
+      // time iOS dispatches its synthetic mousedown — bail so we
+      // don't fire a second crosshair-driven press on top.
+      if (isInteractionSynthSuppressed()) {
+        return;
+      }
       const state = useWorldStore.getState();
       if (!state.controlsDismissed) {
         return;
@@ -204,6 +229,12 @@ export function InteractionController(): null {
       beginInteractPress(hit.id, [hit.point.x, hit.point.y, hit.point.z]);
     };
     const onMouseUp = (): void => {
+      // Same gate as mousedown — skip if a touch interaction just
+      // committed. Without this, the synthetic mouseup would fire
+      // the handler a second time.
+      if (isInteractionSynthSuppressed()) {
+        return;
+      }
       const state = useWorldStore.getState();
       const pressedId = state.pressedInteractableId;
       // Commit: only if the press still targets the currently-hovered

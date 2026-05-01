@@ -33,7 +33,7 @@ import {
 import { useWorldStore } from '@/store';
 import { useIsTouchPrimary } from '@/utils';
 import { sfx } from '../audio/SfxManager';
-import { interactableHandlers } from './Interactable';
+import { interactableHandlers, suppressInteractionSynth } from './Interactable';
 
 const MODEL_URL = '/models/3d_icon_cursor.glb';
 
@@ -119,7 +119,7 @@ const OUTLINE_SCALE = 1.06;
  *  pre-fix asymmetric outline the user liked, but as a deliberate
  *  authored choice instead of a pivot accident. */
 const OUTLINE_SHIFT_X_FRACTION = 0.012;
-const OUTLINE_SHIFT_Y_FRACTION = -0.05;
+const OUTLINE_SHIFT_Y_FRACTION = 0.05;
 
 useGLTF.preload(MODEL_URL);
 
@@ -692,6 +692,12 @@ function ActiveCursor(): JSX.Element {
         }
         void sfx.play('mouseUp');
         state.endInteractPress();
+        // Suppress the iOS synthetic mousedown/mouseup that fires
+        // immediately after touchend — without this, they'd reach
+        // the InteractionController + the global App.tsx audio
+        // listeners and produce a duplicate handler call + extra
+        // mouseDown/Up cues.
+        suppressInteractionSynth(400);
         return;
       }
 
@@ -706,14 +712,18 @@ function ActiveCursor(): JSX.Element {
       if (elapsed > TOUCH_TAP_TIME_THRESHOLD_MS) {
         return;
       }
-      // Tap on empty space: synthesise a mousedown + mouseup so the
-      // global mouseDown/Up cues fire (matches desktop tap feel).
-      // The InteractionController gates its press logic on
-      // hoveredInteractableId, so a tap here is purely audio
-      // feedback — no interaction misfires.
-      const init = { bubbles: true, clientX: touchStartX, clientY: touchStartY } as const;
-      window.dispatchEvent(new MouseEvent('mousedown', init));
-      window.dispatchEvent(new MouseEvent('mouseup', init));
+      // Tap on empty space: play the global mouseDown/Up cues
+      // directly (mirrors desktop tap audio feedback). We avoid
+      // dispatching synthetic mouse events here because iOS Safari
+      // *also* fires its own synthetic mousedown/mouseup right after
+      // touchend — dispatching ours would double them up. Pure
+      // direct sfx.play calls give the same audio without the
+      // duplicate-fire risk.
+      void sfx.play('mouseDown');
+      void sfx.play('mouseUp');
+      // Suppress iOS's synthetic mouse events from re-firing the
+      // global audio cues for the next 400 ms.
+      suppressInteractionSynth(400);
     };
 
     document.addEventListener('mousemove', onMove);
