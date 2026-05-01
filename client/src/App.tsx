@@ -154,6 +154,23 @@ function useAudioMute(): void {
   }, [documentMode, muted]);
 }
 
+/**
+ * Diagnostic — counts component mounts so we can see whether the
+ * 3D shell is remounting on documentMode toggles. To remove once
+ * we've proven the architecture is stable.
+ */
+function SceneRootTracker(): null {
+  useEffect(() => {
+    // eslint-disable-next-line no-console
+    console.log('[diag] SceneRoot inside Canvas — MOUNT', new Date().toISOString());
+    return () => {
+      // eslint-disable-next-line no-console
+      console.log('[diag] SceneRoot inside Canvas — UNMOUNT', new Date().toISOString());
+    };
+  }, []);
+  return null;
+}
+
 export function App(): JSX.Element {
   useGlobalMouseFeedback();
   useAvatarDevHotkey();
@@ -204,6 +221,8 @@ export function App(): JSX.Element {
   const handleBootFailed = useCallback(() => setBootState('failed'), []);
 
   const handleCreated = useCallback((state: RootState): void => {
+    // eslint-disable-next-line no-console
+    console.log('[diag] Canvas onCreated fired', new Date().toISOString());
     const canvas = state.gl.domElement;
     const glContext = state.gl.getContext() as
       | (WebGLRenderingContext & { isContextLost?: () => boolean })
@@ -290,6 +309,7 @@ export function App(): JSX.Element {
             style={styles.canvas}
             onCreated={handleCreated}
           >
+            <SceneRootTracker />
             <color attach="background" args={['#0a0a12']} />
             <Suspense fallback={null}>
               <ShakeGroup>
