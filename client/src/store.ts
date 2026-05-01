@@ -65,6 +65,10 @@ interface AppActions {
    *  the lock on the next render. App clears it back to false
    *  after consuming. */
   setPendingPointerLock: (pending: boolean) => void;
+  /** Set the one-shot navigation request — a route path that an
+   *  in-world Portal wants App's NavigationConsumer to navigate to.
+   *  Pass `null` to clear after consumption. */
+  setPendingNavigation: (path: string | null) => void;
   /** Toggle the explicit user mute. Combined with documentMode by
    *  App's audio-mute effect to set the live master volume. */
   setMuted: (muted: boolean) => void;
@@ -117,6 +121,13 @@ interface RevealSlice {
    *  so the user resumes mouselook without a second confirming
    *  click. */
   pendingPointerLock: boolean;
+  /** One-shot signal set by an in-world Portal (or other Canvas
+   *  child) when the user activates a section portal. App's
+   *  NavigationConsumer (which lives inside BrowserRouter, where
+   *  react-router hooks are usable) reads + clears it and calls
+   *  `navigate()`. The store mediates because react-router's
+   *  context doesn't reliably bridge across R3F's reconciler. */
+  pendingNavigation: string | null;
   /** Explicit user mute toggled from PauseMenu's audio control. The
    *  effective master volume is `documentMode || muted ? 0 : 1`,
    *  so document mode silences audio independently of the user's
@@ -205,6 +216,7 @@ export const useWorldStore = create<AppState & AppActions & RevealSlice & Intera
     menuOpen: false,
     documentMode: readPersistedDocumentMode(),
     pendingPointerLock: false,
+    pendingNavigation: null,
     muted: false,
     // Avatar lives from page load — small at first (cursor-sized), then grows
     // once the reveal completes. See CursorAvatar.tsx for the scale logic.
@@ -247,6 +259,8 @@ export const useWorldStore = create<AppState & AppActions & RevealSlice & Intera
     resetReveal: () => set({ revealState: 'idle', clickHit: null, controlsDismissed: false }),
 
     setPendingPointerLock: (pending) => set({ pendingPointerLock: pending }),
+
+    setPendingNavigation: (path) => set({ pendingNavigation: path }),
 
     setMuted: (muted) => set({ muted }),
 

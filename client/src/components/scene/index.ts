@@ -8,6 +8,7 @@ export { DevTools } from './DevTools';
 export { ShakeGroup } from './ShakeGroup';
 export { useInteractable, InteractionController, INTERACTION_CONSTANTS } from './Interactable';
 export { InteractableTestCube } from './InteractableTestCube';
+export { Portals } from './Portals';
 export {
   Portal,
   Sword,

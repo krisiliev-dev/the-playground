@@ -1,6 +1,6 @@
 import { Suspense, lazy, useCallback, useEffect, useState } from 'react';
 import { Canvas, useFrame, useThree, type RootState } from '@react-three/fiber';
-import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Route, Routes, useNavigate } from 'react-router-dom';
 import { World, PostFx, DevTools, ShakeGroup, CursorAvatar } from '@/components/scene';
 import {
   CursorText,
@@ -186,6 +186,27 @@ function useAudioMute(): void {
  * exactly what we want: every timestamp ref is now well past its
  * animation duration, so panProgress=1 and the steady-state holds.
  */
+/**
+ * Bridges in-world Portal clicks → react-router navigation. Portals
+ * live inside the R3F Canvas where react-router's context doesn't
+ * reliably propagate, so they signal navigation by writing a path
+ * to the store; this consumer (mounted inside BrowserRouter where
+ * `useNavigate` is usable) picks it up and dispatches.
+ */
+function NavigationConsumer(): null {
+  const pendingNavigation = useWorldStore((s) => s.pendingNavigation);
+  const setPendingNavigation = useWorldStore((s) => s.setPendingNavigation);
+  const navigate = useNavigate();
+  useEffect(() => {
+    if (pendingNavigation === null) {
+      return;
+    }
+    setPendingNavigation(null);
+    void navigate(pendingNavigation);
+  }, [pendingNavigation, navigate, setPendingNavigation]);
+  return null;
+}
+
 function FrameLoopController(): null {
   const documentMode = useWorldStore((s) => s.documentMode);
   const invalidate = useThree((state) => state.invalidate);
@@ -316,6 +337,7 @@ export function App(): JSX.Element {
   const hide3DShell = documentMode || bootState !== 'ready';
   return (
     <BrowserRouter>
+      <NavigationConsumer />
       <div
         style={{
           ...styles.root,

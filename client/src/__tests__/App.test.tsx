@@ -263,6 +263,33 @@ describe('App', () => {
     });
   });
 
+  // ── In-world Portal navigation bridge (ADR-003 step 5) ──────────
+  describe('NavigationConsumer', () => {
+    beforeEach(() => {
+      useWorldStore.setState({ pendingNavigation: null, documentMode: false });
+    });
+
+    it('consumes a pendingNavigation set from inside the Canvas', () => {
+      // Portals (in-world Canvas children) signal navigation by writing
+      // a path to the store. The NavigationConsumer mounted inside
+      // BrowserRouter picks it up, dispatches navigate(), and clears
+      // the flag. We verify the clear here — that's the architectural
+      // contract; whether react-router actually changed the URL is
+      // its own well-tested behaviour and not interesting to assert.
+      render(<App />);
+      act(() => {
+        useWorldStore.setState({ pendingNavigation: '/about' });
+      });
+      expect(useWorldStore.getState().pendingNavigation).toBeNull();
+    });
+
+    it('does nothing when pendingNavigation is null', () => {
+      render(<App />);
+      // Just rendering shouldn't trigger spurious clears or anything.
+      expect(useWorldStore.getState().pendingNavigation).toBeNull();
+    });
+  });
+
   // ── Audio mute coordination ────────────────────────────────────
   describe('audio mute', () => {
     let setMasterVolumeSpy: ReturnType<typeof vi.spyOn>;

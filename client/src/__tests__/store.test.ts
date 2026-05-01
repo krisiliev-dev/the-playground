@@ -259,6 +259,23 @@ describe('useWorldStore', () => {
     });
   });
 
+  describe('pendingNavigation', () => {
+    beforeEach(() => {
+      useWorldStore.getState().setPendingNavigation(null);
+    });
+
+    it('defaults to null', () => {
+      expect(useWorldStore.getState().pendingNavigation).toBeNull();
+    });
+
+    it('setPendingNavigation stores a path and clears it back to null', () => {
+      useWorldStore.getState().setPendingNavigation('/about');
+      expect(useWorldStore.getState().pendingNavigation).toBe('/about');
+      useWorldStore.getState().setPendingNavigation(null);
+      expect(useWorldStore.getState().pendingNavigation).toBeNull();
+    });
+  });
+
   describe('documentMode', () => {
     beforeEach(() => {
       // Each test starts from documentMode === false with a clean

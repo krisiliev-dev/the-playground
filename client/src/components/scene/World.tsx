@@ -19,6 +19,7 @@ import { OrbitControls } from '@react-three/drei';
 import { SpatialAudioListener } from '../audio/SpatialAudioListener';
 import { InteractionController } from './Interactable';
 import { InteractableTestCube } from './InteractableTestCube';
+import { Portals } from './Portals';
 
 /** Period in seconds for one full bob cycle (up + down). */
 const FLOAT_PERIOD = 6;
@@ -51,6 +52,7 @@ export function World(): JSX.Element {
       <RevealOrchestrator />
       <InteractionController />
       <InteractableTestCube />
+      <Portals />
       <SkyBackground dimensions={environment.dimensions} />
       {/* Haze sits between scene and cursor: scene < haze < cursor in
           renderOrder. */}
