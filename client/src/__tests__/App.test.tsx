@@ -40,6 +40,10 @@ vi.mock('@/components/overlay', () => ({
   Crosshair: () => <div data-testid="crosshair" />,
   ControlsHint: () => <div data-testid="controls-hint" />,
   HazeOverlay: () => null,
+  // PauseMenu is plain DOM and uses react-router hooks; render as null
+  // here so the App test stays focused on the boot + canvas wiring.
+  // Its real behaviour is covered by overlay/PauseMenu.test.tsx.
+  PauseMenu: () => null,
   LoadingScreen: ({ onReady }: { onReady: () => void; onFailed: (r: string) => void }) => {
     useEffect(() => {
       onReady();

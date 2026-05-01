@@ -2,7 +2,13 @@ import { Suspense, lazy, useCallback, useEffect, useState } from 'react';
 import { Canvas, type RootState } from '@react-three/fiber';
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { World, PostFx, DevTools, ShakeGroup, CursorAvatar } from '@/components/scene';
-import { CursorText, Crosshair, ControlsHint, LoadingScreen } from '@/components/overlay';
+import {
+  CursorText,
+  Crosshair,
+  ControlsHint,
+  LoadingScreen,
+  PauseMenu,
+} from '@/components/overlay';
 import { sfx } from '@/components/audio/SfxManager';
 import { isInteractionSynthSuppressed } from '@/components/scene/Interactable';
 import { About, Projects, Writing } from '@/routes';
@@ -218,6 +224,7 @@ export function App(): JSX.Element {
         <Crosshair />
         <ControlsHint />
         <CursorText />
+        <PauseMenu />
         {/* Section routes — see ADR-003. The 3D experience above
             renders unconditionally; route content overlays on top
             for `/about`, `/projects`, `/writing`. The `/` route
