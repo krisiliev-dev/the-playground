@@ -46,6 +46,13 @@ import {
   computeTrajectoryProgress,
   computeVisualScale,
 } from './swordPhases';
+import {
+  computeImpactFlashFrame,
+  computeSlamPitchJitter,
+  computeSlamVelocityFactor,
+  computeSpawnFlashFrame,
+  jitterAxis,
+} from './swordEffects';
 
 const SWORD_URL = '/models/sword/scene.gltf';
 
@@ -241,12 +248,12 @@ export function Sword({ slot, staggerIndex = 0 }: SwordProps): JSX.Element {
       const fallbackVel = 60;
       void sfx.play('swordSlam', {
         volumeMultiplier: 0.55,
-        pitchJitter: 0.6 + Math.min(0.15, fallbackVel / 400),
-        filterGain: (Math.random() - 0.5) * 20,
+        pitchJitter: computeSlamPitchJitter(fallbackVel),
+        filterGain: jitterAxis(Math.random, 20),
         position: {
-          x: clickHit.point[0] + (Math.random() - 0.5) * SLAM_POS_JITTER,
-          y: clickHit.point[1] + (Math.random() - 0.5) * SLAM_POS_JITTER,
-          z: clickHit.point[2] + (Math.random() - 0.5) * SLAM_POS_JITTER,
+          x: clickHit.point[0] + jitterAxis(Math.random, SLAM_POS_JITTER),
+          y: clickHit.point[1] + jitterAxis(Math.random, SLAM_POS_JITTER),
+          z: clickHit.point[2] + jitterAxis(Math.random, SLAM_POS_JITTER),
         },
       });
     }
@@ -538,26 +545,20 @@ export function Sword({ slot, staggerIndex = 0 }: SwordProps): JSX.Element {
       //     different stereo positions, helping the ear separate
       //     them instead of merging into a single block.
       const v = slamVelocity.current;
-      const velFactor = Math.min(1.6, 0.7 + v / 80);
       // Wide jitter + spatial spread + per-fire EQ for cascade
-      // distinctness:
-      //   - pitchJitter 0.6 + velocity boost: each slam at a
-      //     noticeably different fundamental frequency.
-      //   - position jittered around hit point: each slam pans to a
-      //     different stereo location.
-      //   - filterGain ±10dB: high-shelf boost/cut at 3kHz varies per
-      //     slam — some bright, some dark. Slam.wav is low-end heavy,
-      //     so without per-fire EQ the 12 hits all sit in the same
-      //     frequency band and the ear can't separate them.
+      // distinctness — see ./swordEffects for the velocity → volume
+      // and velocity → pitch envelopes. Math.random for the jittered
+      // values: each slam pans to a different stereo location and
+      // gets a slightly different per-fire high-shelf EQ.
       const SLAM_POS_JITTER = 20;
       void sfx.play('swordSlam', {
-        volumeMultiplier: 0.55 * velFactor,
-        pitchJitter: 0.6 + Math.min(0.15, v / 400),
-        filterGain: (Math.random() - 0.5) * 20,
+        volumeMultiplier: 0.55 * computeSlamVelocityFactor(v),
+        pitchJitter: computeSlamPitchJitter(v),
+        filterGain: jitterAxis(Math.random, 20),
         position: {
-          x: hitPoint.x + (Math.random() - 0.5) * SLAM_POS_JITTER,
-          y: hitPoint.y + (Math.random() - 0.5) * SLAM_POS_JITTER,
-          z: hitPoint.z + (Math.random() - 0.5) * SLAM_POS_JITTER,
+          x: hitPoint.x + jitterAxis(Math.random, SLAM_POS_JITTER),
+          y: hitPoint.y + jitterAxis(Math.random, SLAM_POS_JITTER),
+          z: hitPoint.z + jitterAxis(Math.random, SLAM_POS_JITTER),
         },
       });
     }
@@ -665,19 +666,21 @@ export function Sword({ slot, staggerIndex = 0 }: SwordProps): JSX.Element {
       const flashMat = flashSprite.material;
       const startedAt = flashStartedAt.current;
       if (startedAt >= 0) {
-        const elapsed = state.clock.elapsedTime - startedAt;
-        if (elapsed < FLASH_DURATION) {
-          const p = elapsed / FLASH_DURATION;
-          flashSprite.scale.setScalar(
-            FLASH_INITIAL_SCALE + p * (FLASH_MAX_SCALE - FLASH_INITIAL_SCALE),
-          );
-          flashMat.opacity =
-            p < FLASH_RISE_FRACTION
-              ? p / FLASH_RISE_FRACTION
-              : Math.max(0, 1 - (p - FLASH_RISE_FRACTION) / (1 - FLASH_RISE_FRACTION));
-        } else {
-          flashMat.opacity = 0;
+        const frame = computeSpawnFlashFrame(
+          state.clock.elapsedTime - startedAt,
+          FLASH_DURATION,
+          FLASH_INITIAL_SCALE,
+          FLASH_MAX_SCALE,
+          FLASH_RISE_FRACTION,
+        );
+        // Only update the visible scale while the flash is still
+        // alive — past `duration` the helper returns opacity = 0 and
+        // the sprite hides itself, so leaving stale scale on the
+        // dormant sprite is fine.
+        if (frame.opacity > 0) {
+          flashSprite.scale.setScalar(frame.scale);
         }
+        flashMat.opacity = frame.opacity;
       } else {
         flashMat.opacity = 0;
       }
@@ -690,18 +693,16 @@ export function Sword({ slot, staggerIndex = 0 }: SwordProps): JSX.Element {
       const impactMat = impactSprite.material;
       const startedAt = impactFlashStartedAt.current;
       if (startedAt >= 0) {
-        const elapsed = state.clock.elapsedTime - startedAt;
-        if (elapsed < IMPACT_FLASH_DURATION) {
-          const p = elapsed / IMPACT_FLASH_DURATION;
-          impactSprite.scale.setScalar(
-            IMPACT_FLASH_INITIAL_SCALE + p * (IMPACT_FLASH_MAX_SCALE - IMPACT_FLASH_INITIAL_SCALE),
-          );
-          // Hard pop + linear fade — impact reads as a sharp hit, not
-          // a soft glow.
-          impactMat.opacity = 1 - p;
-        } else {
-          impactMat.opacity = 0;
+        const frame = computeImpactFlashFrame(
+          state.clock.elapsedTime - startedAt,
+          IMPACT_FLASH_DURATION,
+          IMPACT_FLASH_INITIAL_SCALE,
+          IMPACT_FLASH_MAX_SCALE,
+        );
+        if (frame.opacity > 0) {
+          impactSprite.scale.setScalar(frame.scale);
         }
+        impactMat.opacity = frame.opacity;
       } else {
         impactMat.opacity = 0;
       }
