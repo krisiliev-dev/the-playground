@@ -184,10 +184,16 @@ function ClockPreserver(): null {
   const wasDocumentModeRef = useRef(documentMode);
   const { clock } = useThree();
 
+  useEffect(() => {
+    // eslint-disable-next-line no-console
+    console.log('[diag] ClockPreserver MOUNT, initial elapsedTime:', clock.elapsedTime);
+    return () => {
+      // eslint-disable-next-line no-console
+      console.log('[diag] ClockPreserver UNMOUNT');
+    };
+  }, [clock]);
+
   useFrame(() => {
-    // Snapshot every frame the loop runs. When R3F's setFrameloop
-    // pauses on documentMode=true, the loop stops a frame later and
-    // this ref retains the last 3D-mode timestamp.
     if (!useWorldStore.getState().documentMode) {
       elapsedRef.current = clock.elapsedTime;
     }
@@ -196,14 +202,17 @@ function ClockPreserver(): null {
   useEffect(() => {
     const wasPaused = wasDocumentModeRef.current;
     wasDocumentModeRef.current = documentMode;
-    // Only restore on the doc → 3D direction. Effect order:
-    // R3F's setFrameloop (in the Canvas's React-DOM layout effect)
-    // runs *before* this effect fires inside the R3F reconciler, so
-    // by the time we get here clock.elapsedTime has already been
-    // zeroed and clock.start() has set oldTime to performance.now().
-    // Writing elapsedTime back is the entire fix; oldTime is fine.
+    // eslint-disable-next-line no-console
+    console.log('[diag] ClockPreserver effect', {
+      documentMode,
+      wasPaused,
+      'clock.elapsedTime now': clock.elapsedTime,
+      'elapsedRef.current': elapsedRef.current,
+    });
     if (wasPaused && !documentMode && elapsedRef.current > 0) {
       clock.elapsedTime = elapsedRef.current;
+      // eslint-disable-next-line no-console
+      console.log('[diag] ClockPreserver RESTORED clock.elapsedTime →', elapsedRef.current);
     }
   }, [documentMode, clock]);
 
