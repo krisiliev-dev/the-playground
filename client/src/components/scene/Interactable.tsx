@@ -272,6 +272,20 @@ export function InteractionController(): null {
       if (state.menuOpen) {
         return;
       }
+      // Pointer-lock not active: this click is a "re-engage
+      // controls" gesture (the canvas onClick will request
+      // pointer-lock on the same click). Don't *also* fire an
+      // interactable press — the user wants their controls back,
+      // not to grab the first thing their crosshair was over.
+      // Once pointer-lock is active, subsequent clicks fire
+      // presses normally.
+      if (
+        typeof document !== 'undefined' &&
+        document.pointerLockElement === null &&
+        state.controlsDismissed
+      ) {
+        return;
+      }
       const hoveredId = state.hoveredInteractableId;
       const hoveredPoint = state.hoveredInteractablePoint;
       if (!hoveredId || !hoveredPoint) {

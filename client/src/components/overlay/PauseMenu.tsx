@@ -77,22 +77,37 @@ export function PauseMenu(): JSX.Element | null {
   }, []);
 
   // Side effects of opening/closing the menu — propagate to the
-  // store, release pointer-lock, force-end any in-progress
-  // interaction press so the cursor doesn't stay leaned forward
-  // through a menu interaction.
+  // store, release pointer-lock on open, RE-ACQUIRE pointer-lock on
+  // close (when in avatar mode), force-end any in-progress press.
+  //
+  // The re-acquisition matters: without it, the next click after
+  // close would be consumed by the canvas's "click → request
+  // pointer-lock" handler AND would also fire a 3D interactable
+  // press for whatever happens to be under screen-centre. Two
+  // clicks of perceived weirdness instead of one. Re-acquiring
+  // here, on the same user gesture that closed the menu, means
+  // the user is back in 3D mode immediately with no naked click.
   useEffect(() => {
     useWorldStore.getState().setMenuOpen(open);
     if (open) {
-      // Release pointer-lock so the OS cursor returns. Without this
-      // the user sees their cursor only when hovering over a menu
-      // button (the browser doesn't reveal it until interaction).
       if (document.pointerLockElement) {
         document.exitPointerLock?.();
       }
-      // End any in-progress press so the 3D cursor doesn't stay
-      // visually stuck "leaned forward" into a hit point while the
-      // user is in menu mode.
       useWorldStore.getState().endInteractPress();
+    } else {
+      // Only re-acquire when in avatar mode (controlsDismissed).
+      // Outside avatar mode, pointer-lock isn't expected to be
+      // active so re-acquiring would surprise the user.
+      if (useWorldStore.getState().controlsDismissed) {
+        const canvas = document.querySelector('canvas');
+        if (
+          canvas instanceof HTMLCanvasElement &&
+          typeof canvas.requestPointerLock === 'function' &&
+          document.pointerLockElement !== canvas
+        ) {
+          void canvas.requestPointerLock();
+        }
+      }
     }
   }, [open]);
 
