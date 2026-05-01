@@ -41,7 +41,30 @@ const INTERACT_RANGE = 60;
  *  the cursor appears not to move at all. We delay `endInteractPress`
  *  until at least this much time has elapsed since `beginInteractPress`,
  *  so even instant clicks still produce a visible peck animation. */
-const MIN_PRESS_HOLD_MS = 130;
+export const MIN_PRESS_HOLD_MS = 130;
+
+export interface ReleasePlan {
+  /** Release the press synchronously — the user held long enough that
+   *  the lean animation has had time to play. */
+  immediate: boolean;
+  /** When `immediate === false`, schedule the release this many ms in
+   *  the future so the animation has time to read. 0 when `immediate`. */
+  delayMs: number;
+}
+
+/**
+ * Decide whether to release a press immediately or defer. A press
+ * shorter than `minPressMs` defers; longer presses release at once.
+ *
+ * Pure so the timing semantics can be unit-tested without standing up
+ * an InteractionController + R3F scene.
+ */
+export function planRelease(heldMs: number, minPressMs: number): ReleasePlan {
+  if (heldMs >= minPressMs) {
+    return { immediate: true, delayMs: 0 };
+  }
+  return { immediate: false, delayMs: minPressMs - heldMs };
+}
 
 /** Module-scoped registry: id → click handler. Populated by the
  *  `useInteractable` hook, consumed by `InteractionController` when a
@@ -268,20 +291,21 @@ export function InteractionController(): null {
       if (!pressedId) {
         return;
       }
-      // Enforce minimum visible press duration. If the click was
-      // faster than MIN_PRESS_HOLD_MS, defer the actual release so
-      // the lean animation has time to play. Audio has already fired
-      // above, so the user hears the click at the right moment; the
-      // visual just lingers a few extra ms.
+      // Enforce minimum visible press duration. See `planRelease` —
+      // fast clicks defer the release so the lean animation has time
+      // to read; long presses release synchronously. Audio has already
+      // fired above, so the user hears the click at the right moment;
+      // the visual just lingers a few extra ms when needed.
       const heldMs = performance.now() - pressStartTime;
-      if (heldMs >= MIN_PRESS_HOLD_MS) {
+      const plan = planRelease(heldMs, MIN_PRESS_HOLD_MS);
+      if (plan.immediate) {
         endInteractPress();
         return;
       }
       pendingReleaseTimer = setTimeout(() => {
         endInteractPress();
         pendingReleaseTimer = null;
-      }, MIN_PRESS_HOLD_MS - heldMs);
+      }, plan.delayMs);
     };
     window.addEventListener('mousedown', onMouseDown);
     window.addEventListener('mouseup', onMouseUp);
