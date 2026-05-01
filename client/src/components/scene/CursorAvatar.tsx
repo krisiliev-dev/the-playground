@@ -853,20 +853,29 @@ function AvatarCursor({ refs }: ModeProps): null {
   //
   // If a snapshot exists in the store (e.g. the user just flipped out
   // of Simple Experience and back), restore from it so they pick up
-  // exactly where they were. Otherwise initialise from the camera —
-  // that's the original first-mount path, where the avatar inherits
-  // wherever the cube-formation camera was looking from.
+  // exactly where they were. We also write the camera's world
+  // transform directly so the follow-rig lerp doesn't visibly
+  // catch up over the first few frames — without that, the camera
+  // would snap from the Canvas default `[0, 0, -360]` to the
+  // settled follow position even though the avatar position is
+  // already correct.
   //
-  // On unmount we capture the latest transform back into the store so
-  // the next mount can restore. `setAvatarSnapshot` is read with
-  // `getState()` rather than as a hook subscription — we only want to
-  // write, not re-render when the snapshot changes.
+  // No snapshot → original first-mount path, where the avatar
+  // inherits wherever the cube-formation camera was looking from.
+  //
+  // On unmount we capture the latest transform back into the store
+  // so the next mount can restore. Reads + writes go through
+  // `getState()` rather than hook subscriptions — we only want to
+  // act on demand, not re-render when the snapshot changes.
   useEffect(() => {
     const snapshot = useWorldStore.getState().avatarSnapshot;
     if (snapshot) {
       refs.avatarPos.current.set(...snapshot.position);
       refs.avatarYaw.current = snapshot.yaw;
       refs.avatarPitch.current = snapshot.pitch;
+      camera.position.set(...snapshot.cameraPosition);
+      const [qx, qy, qz, qw] = snapshot.cameraQuaternion;
+      camera.quaternion.set(qx, qy, qz, qw);
     } else {
       refs.avatarPos.current.set(
         camera.position.x,
@@ -885,6 +894,13 @@ function AvatarCursor({ refs }: ModeProps): null {
         position: [pos.x, pos.y, pos.z],
         yaw: refs.avatarYaw.current,
         pitch: refs.avatarPitch.current,
+        cameraPosition: [camera.position.x, camera.position.y, camera.position.z],
+        cameraQuaternion: [
+          camera.quaternion.x,
+          camera.quaternion.y,
+          camera.quaternion.z,
+          camera.quaternion.w,
+        ],
       });
     };
   }, [camera, refs]);

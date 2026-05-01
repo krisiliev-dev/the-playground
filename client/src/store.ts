@@ -21,6 +21,16 @@ export type RevealState = 'idle' | 'armed' | 'swinging' | 'impact' | 'revealed';
 const REVEAL_ORDER: readonly RevealState[] = ['idle', 'armed', 'swinging', 'impact', 'revealed'];
 
 /**
+ * Reveal phases that are mid-animation — clicked, but the swing /
+ * impact sequence hasn't finished playing. When the user enters
+ * Simple Experience from one of these (rare but possible),
+ * `setDocumentMode(true)` fast-forwards to `revealed` so they come
+ * back to a stable scene rather than to a frozen mid-swing whose
+ * timer-driven refs were destroyed with the Canvas unmount.
+ */
+const TRANSIENT_REVEAL_STATES: readonly RevealState[] = ['armed', 'swinging', 'impact'];
+
+/**
  * Where the user clicked, projected onto a cube wall. Stored as plain
  * tuples so the store stays JSON-serialisable for future multiplayer sync.
  */
@@ -31,19 +41,29 @@ export interface ClickHit {
 }
 
 /**
- * Snapshot of the avatar's transient mid-experience state — position
- * inside the cube, plus look angles. Captured when the Canvas is
- * about to unmount (e.g. user flips into Simple Experience), restored
- * the next time the avatar mounts so the user picks up exactly where
- * they left off rather than respawning at the cube centre.
+ * Snapshot of the avatar's transient mid-experience state — body
+ * position + look angles, plus the camera's world transform.
+ * Captured when the Canvas is about to unmount (e.g. user flips
+ * into Simple Experience), restored the next time the avatar
+ * mounts so the user picks up exactly where they left off rather
+ * than respawning at the cube centre.
  *
- * Plain tuples so the store stays JSON-serialisable (same convention
- * as `ClickHit`). Yaw + pitch are radians; position is world space.
+ * The camera fields exist so the visible follow-rig lerp ("camera
+ * snaps from the Canvas's default `[0, 0, -360]` to wherever the
+ * avatar is") doesn't fire on every doc → 3D return — without
+ * them, the first few frames after restore would visibly catch up
+ * even though the avatar position is correct.
+ *
+ * Plain tuples so the store stays JSON-serialisable (same
+ * convention as `ClickHit`). Yaw + pitch are radians; position is
+ * world space; quaternion is `[x, y, z, w]`.
  */
 export interface AvatarSnapshot {
   position: [number, number, number];
   yaw: number;
   pitch: number;
+  cameraPosition: [number, number, number];
+  cameraQuaternion: [number, number, number, number];
 }
 
 // ─── Store Actions ───────────────────────────────────────────────────
@@ -281,7 +301,17 @@ export const useWorldStore = create<AppState & AppActions & RevealSlice & Intera
 
     setDocumentMode: (mode) => {
       persistDocumentMode(mode);
-      set({ documentMode: mode });
+      set((state) => {
+        // Entering Simple Experience mid-animation: snap to the
+        // terminal state. The timer-driven refs that drive the swing
+        // and impact animations get destroyed with the Canvas
+        // unmount, so leaving revealState in a transient phase
+        // would strand the user mid-swing on return.
+        if (mode && TRANSIENT_REVEAL_STATES.includes(state.revealState)) {
+          return { documentMode: mode, revealState: 'revealed' };
+        }
+        return { documentMode: mode };
+      });
     },
 
     setHoveredInteractable: (id, point = null) =>
