@@ -94,8 +94,15 @@ const CAMERA_LERP_RATE = 12;
  *  lerp for ongoing follow. */
 const INITIAL_PAN_DURATION = 1.5;
 
-const EMISSIVE_HEX = '#00ffcc';
-const EMISSIVE_INTENSITY = 1.0;
+/** Magenta is the complement of the scene's cyan accent (`#00ffcc`),
+ *  so the cursor stays visually distinct even when its mesh is
+ *  touching cyan-glowing interactables — the eye separates them as
+ *  different objects rather than reading one merged glow. Bumped
+ *  intensity vs the previous cyan because magenta also reads slightly
+ *  darker at equal luminance, so we lift it to compensate. */
+const EMISSIVE_HEX = '#ff00cc';
+const EMISSIVE_INTENSITY = 1.6;
+const BODY_COLOR_HEX = '#1a0a18';
 
 useGLTF.preload(MODEL_URL);
 
@@ -190,7 +197,7 @@ function ActiveCursor(): JSX.Element {
         return;
       }
       mesh.material = new MeshStandardMaterial({
-        color: new Color('#0a1a18'),
+        color: new Color(BODY_COLOR_HEX),
         emissive: new Color(EMISSIVE_HEX),
         emissiveIntensity: EMISSIVE_INTENSITY,
         metalness: 0.4,
