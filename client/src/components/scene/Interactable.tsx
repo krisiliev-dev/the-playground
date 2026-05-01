@@ -57,23 +57,39 @@ const MIN_PRESS_HOLD_MS = 130;
  *  determines the press target). */
 export const interactableHandlers = new Map<string, () => void>();
 
-/** Timestamp (performance.now ms) until which synthesised mouse
- *  events from iOS Safari's touch-to-mouse compatibility layer
- *  should be ignored. iOS dispatches mousedown/mouseup/click after
- *  every touchend; without this gate, our touch-path press would
- *  fire once on touchend and *again* on the synthetic mouseup,
- *  causing double interactions + double audio cues. CursorAvatar
- *  bumps this forward by ~400 ms after handling a touch press,
- *  and the InteractionController + global mouseDown/Up listeners
- *  consult `isInteractionSynthSuppressed` before reacting. */
-let synthSuppressUntil = 0;
+/** Synthetic-mouse-event suppression for iOS Safari's touch-to-mouse
+ *  compatibility layer. iOS fires mousedown/mouseup/click after every
+ *  touchend; without this gate, the InteractionController's
+ *  crosshair-driven mouse handlers + the global App.tsx audio
+ *  listeners would re-fire on those synthetic events, double-firing
+ *  what the touch path already handled.
+ *
+ *  Two pieces:
+ *    - A boolean "touch in progress" flag — true from the first
+ *      finger landing to the last finger lifting. Suppression is
+ *      active for the entire duration of any touch, no matter how
+ *      long the hold.
+ *    - A timestamp buffer set on touchend so the synthetic events
+ *      that fire *after* the last touch lifts are also suppressed.
+ *
+ *  An earlier duration-only API (`suppressInteractionSynth(ms)`)
+ *  worked for short taps but a long press would let the suppression
+ *  expire mid-hold, so the synthetic events at the end of the press
+ *  reached the controller anyway. */
+let touchInProgress = false;
+let suppressUntil = 0;
 
-export function suppressInteractionSynth(durationMs: number): void {
-  synthSuppressUntil = performance.now() + durationMs;
+export function setTouchInProgress(active: boolean): void {
+  touchInProgress = active;
+  if (!active) {
+    // Touch just ended — buffer the post-touchend synthetic event
+    // burst (typically a few ms, but give it 400 to be safe).
+    suppressUntil = performance.now() + 400;
+  }
 }
 
 export function isInteractionSynthSuppressed(): boolean {
-  return performance.now() < synthSuppressUntil;
+  return touchInProgress || performance.now() < suppressUntil;
 }
 
 interface UseInteractableOpts {

@@ -33,7 +33,7 @@ import {
 import { useWorldStore } from '@/store';
 import { useIsTouchPrimary } from '@/utils';
 import { sfx } from '../audio/SfxManager';
-import { interactableHandlers, suppressInteractionSynth } from './Interactable';
+import { interactableHandlers, setTouchInProgress } from './Interactable';
 
 const MODEL_URL = '/models/3d_icon_cursor.glb';
 
@@ -119,7 +119,7 @@ const OUTLINE_SCALE = 1.06;
  *  pre-fix asymmetric outline the user liked, but as a deliberate
  *  authored choice instead of a pivot accident. */
 const OUTLINE_SHIFT_X_FRACTION = 0.012;
-const OUTLINE_SHIFT_Y_FRACTION = 0.025;
+const OUTLINE_SHIFT_Y_FRACTION = 0.012;
 
 useGLTF.preload(MODEL_URL);
 
@@ -549,16 +549,12 @@ function ActiveCursor(): JSX.Element {
       // the AudioContext on every touchstart so any path through the
       // app reaches a real `source.start()` with a running ctx.
       sfx.unlock();
-      // Suppress the InteractionController's mouse handlers for every
-      // touch, not just successful press-on-interactable touches. iOS
-      // Safari fires synthetic mousedown/mouseup after every touchend
-      // — without blanket suppression, even a tap *off* an interactable
-      // would still trigger the controller's crosshair-driven press
-      // (it raycasts through screen centre and fires if the crosshair
-      // happens to be on a cube). The touch path in this file is
-      // authoritative for mobile; the controller should only operate
-      // on real desktop mouse events.
-      suppressInteractionSynth(400);
+      // Block the InteractionController + global mouseDown/Up audio
+      // for the *entire duration* of the touch (any hold, any
+      // length). iOS fires synthetic mouse events on touchend; the
+      // suppression is refreshed with a 400 ms buffer when the touch
+      // ends, covering the synthetic burst.
+      setTouchInProgress(true);
 
       if (e.touches.length === 2) {
         // Second finger landed: switch into pinch mode. Cancel any
@@ -683,6 +679,14 @@ function ActiveCursor(): JSX.Element {
         pinchActive = false;
         touchWalkVelocity.current = 0;
       }
+      // Once the last finger is up, mark the touch ended. The
+      // press-on-interactable + tap-on-empty branches below also
+      // call setTouchInProgress(false) on their commit paths; this
+      // catches every other terminal case (drag-to-look ending,
+      // pinch ending, multi-finger weirdness, etc.).
+      if (e.touches.length === 0) {
+        setTouchInProgress(false);
+      }
 
       // Press-on-interactable: commit the interaction by reading
       // the pressed id from the store, firing its registered
@@ -702,12 +706,9 @@ function ActiveCursor(): JSX.Element {
         }
         void sfx.play('mouseUp');
         state.endInteractPress();
-        // Suppress the iOS synthetic mousedown/mouseup that fires
-        // immediately after touchend — without this, they'd reach
-        // the InteractionController + the global App.tsx audio
-        // listeners and produce a duplicate handler call + extra
-        // mouseDown/Up cues.
-        suppressInteractionSynth(400);
+        // Mark touch ended — the suppression utility starts its
+        // 400 ms buffer for iOS's synthetic mouse events.
+        setTouchInProgress(false);
         return;
       }
 
@@ -731,9 +732,9 @@ function ActiveCursor(): JSX.Element {
       // duplicate-fire risk.
       void sfx.play('mouseDown');
       void sfx.play('mouseUp');
-      // Suppress iOS's synthetic mouse events from re-firing the
-      // global audio cues for the next 400 ms.
-      suppressInteractionSynth(400);
+      // Mark touch ended — the suppression utility starts its
+      // 400 ms buffer for iOS's synthetic mouse events.
+      setTouchInProgress(false);
     };
 
     document.addEventListener('mousemove', onMove);
