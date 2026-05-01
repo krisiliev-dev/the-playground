@@ -1,5 +1,5 @@
-import { Suspense, lazy, useCallback, useEffect, useState } from 'react';
-import { Canvas, type RootState } from '@react-three/fiber';
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
+import { Canvas, useFrame, useThree, type RootState } from '@react-three/fiber';
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { World, PostFx, DevTools, ShakeGroup, CursorAvatar } from '@/components/scene';
 import {
@@ -152,6 +152,62 @@ function useAudioMute(): void {
   useEffect(() => {
     sfx.setMasterVolume(documentMode || muted ? 0 : 1);
   }, [documentMode, muted]);
+}
+
+/**
+ * Restore `state.clock.elapsedTime` across `frameloop` transitions.
+ *
+ * R3F's `setFrameloop` *resets* `clock.elapsedTime` to 0 every time
+ * the prop changes (https://github.com/pmndrs/react-three-fiber —
+ * see `setFrameloop` in createStore). That breaks any animation
+ * that timestamps with `state.clock.elapsedTime`:
+ *
+ *   - AvatarCursor's `initialPanStart` was set to (e.g.) 14.5 when
+ *     the user first dismissed the controls hint. After the reset,
+ *     `clock.elapsedTime === 0`, so `elapsed = 0 - 14.5 = -14.5`,
+ *     `panProgress` clamps to 0, the camera snaps to `initialCamPos`,
+ *     `renderedScale` collapses to POINTER_SCALE — and the user sees
+ *     the entire intro pan replay over 1.5s as if entering avatar
+ *     mode for the first time. The exact symptom of the bug.
+ *   - Haze3D's `fadeStart` and a few other ref timestamps suffer
+ *     the same way.
+ *
+ * Fix: continuously snapshot `clock.elapsedTime` while in 3D mode,
+ * and write the snapshot back into the clock the moment we transition
+ * out of document mode (after R3F's setFrameloop has zeroed it). All
+ * timestamp-based animations then see the same time-axis they had
+ * before the pause and stay at their settled state.
+ */
+function ClockPreserver(): null {
+  const documentMode = useWorldStore((s) => s.documentMode);
+  const elapsedRef = useRef(0);
+  const wasDocumentModeRef = useRef(documentMode);
+  const { clock } = useThree();
+
+  useFrame(() => {
+    // Snapshot every frame the loop runs. When R3F's setFrameloop
+    // pauses on documentMode=true, the loop stops a frame later and
+    // this ref retains the last 3D-mode timestamp.
+    if (!useWorldStore.getState().documentMode) {
+      elapsedRef.current = clock.elapsedTime;
+    }
+  });
+
+  useEffect(() => {
+    const wasPaused = wasDocumentModeRef.current;
+    wasDocumentModeRef.current = documentMode;
+    // Only restore on the doc → 3D direction. Effect order:
+    // R3F's setFrameloop (in the Canvas's React-DOM layout effect)
+    // runs *before* this effect fires inside the R3F reconciler, so
+    // by the time we get here clock.elapsedTime has already been
+    // zeroed and clock.start() has set oldTime to performance.now().
+    // Writing elapsedTime back is the entire fix; oldTime is fine.
+    if (wasPaused && !documentMode && elapsedRef.current > 0) {
+      clock.elapsedTime = elapsedRef.current;
+    }
+  }, [documentMode, clock]);
+
+  return null;
 }
 
 /**
@@ -337,6 +393,7 @@ export function App(): JSX.Element {
             onCreated={handleCreated}
           >
             <SceneRootTracker />
+            <ClockPreserver />
             <color attach="background" args={['#0a0a12']} />
             <Suspense fallback={null}>
               <ShakeGroup>
