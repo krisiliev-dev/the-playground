@@ -1,9 +1,11 @@
 import { Suspense, lazy, useCallback, useEffect, useState } from 'react';
 import { Canvas, type RootState } from '@react-three/fiber';
+import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { World, PostFx, DevTools, ShakeGroup, CursorAvatar } from '@/components/scene';
 import { CursorText, Crosshair, ControlsHint, LoadingScreen } from '@/components/overlay';
 import { sfx } from '@/components/audio/SfxManager';
 import { isInteractionSynthSuppressed } from '@/components/scene/Interactable';
+import { About, Projects, Writing } from '@/routes';
 import { useWorldStore } from '@/store';
 
 type BootState = 'loading' | 'ready' | 'failed';
@@ -177,51 +179,70 @@ export function App(): JSX.Element {
   }
 
   return (
-    <div style={styles.root}>
-      <Canvas
-        camera={{ fov: 60, near: 0.1, far: 1500, position: [0, 0, -360] }}
-        dpr={[1, 2]}
-        // Explicitly set `powerPreference: 'default'` — R3F's default
-        // `WebGLRenderer` constructor passes 'high-performance' itself
-        // unless we override here, and Safari treats that as a hard
-        // demand to switch to the discrete GPU. If it can't honor the
-        // request, the WebGL context is created and immediately lost,
-        // so `getShaderPrecisionFormat()` returns null and Three.js
-        // bails before any scene mounts (blank page).
-        // `failIfMajorPerformanceCaveat: false` lets the browser fall
-        // back to a software/low-power renderer rather than refusing
-        // the context outright.
-        gl={{
-          antialias: true,
-          alpha: false,
-          powerPreference: 'default',
-          failIfMajorPerformanceCaveat: false,
-        }}
-        style={styles.canvas}
-        onCreated={handleCreated}
-      >
-        <color attach="background" args={['#0a0a12']} />
-        <Suspense fallback={null}>
-          <ShakeGroup>
-            <World />
-          </ShakeGroup>
-        </Suspense>
-        {/* Cursor lives outside ShakeGroup so it doesn't jitter with the
-            camera-shake on sword impacts. */}
-        <CursorAvatar />
-        <PostFx />
-        <DevTools />
-      </Canvas>
-      <Crosshair />
-      <ControlsHint />
-      <CursorText />
-      {contextLost && (
-        <ContextLostOverlay
-          title="Display crashed"
-          body="The 3D renderer lost its GPU context. This is rare; reloading restores the scene."
-        />
-      )}
-    </div>
+    <BrowserRouter>
+      <div style={styles.root}>
+        <Canvas
+          camera={{ fov: 60, near: 0.1, far: 1500, position: [0, 0, -360] }}
+          dpr={[1, 2]}
+          // Explicitly set `powerPreference: 'default'` — R3F's default
+          // `WebGLRenderer` constructor passes 'high-performance' itself
+          // unless we override here, and Safari treats that as a hard
+          // demand to switch to the discrete GPU. If it can't honor the
+          // request, the WebGL context is created and immediately lost,
+          // so `getShaderPrecisionFormat()` returns null and Three.js
+          // bails before any scene mounts (blank page).
+          // `failIfMajorPerformanceCaveat: false` lets the browser fall
+          // back to a software/low-power renderer rather than refusing
+          // the context outright.
+          gl={{
+            antialias: true,
+            alpha: false,
+            powerPreference: 'default',
+            failIfMajorPerformanceCaveat: false,
+          }}
+          style={styles.canvas}
+          onCreated={handleCreated}
+        >
+          <color attach="background" args={['#0a0a12']} />
+          <Suspense fallback={null}>
+            <ShakeGroup>
+              <World />
+            </ShakeGroup>
+          </Suspense>
+          {/* Cursor lives outside ShakeGroup so it doesn't jitter with the
+              camera-shake on sword impacts. */}
+          <CursorAvatar />
+          <PostFx />
+          <DevTools />
+        </Canvas>
+        <Crosshair />
+        <ControlsHint />
+        <CursorText />
+        {/* Section routes — see ADR-003. The 3D experience above
+            renders unconditionally; route content overlays on top
+            for `/about`, `/projects`, `/writing`. The `/` route
+            renders nothing (the formation alone is the home view).
+            Per-slug subroutes (`/projects/:slug`, `/writing/:slug`)
+            currently fall through to the section page; they'll
+            split out into individual case study / article pages
+            when content lands in step 6 of the build order. */}
+        <Routes>
+          <Route path="/" element={null} />
+          <Route path="/about" element={<About />} />
+          <Route path="/projects" element={<Projects />} />
+          <Route path="/projects/:slug" element={<Projects />} />
+          <Route path="/writing" element={<Writing />} />
+          <Route path="/writing/:slug" element={<Writing />} />
+          <Route path="*" element={null} />
+        </Routes>
+        {contextLost && (
+          <ContextLostOverlay
+            title="Display crashed"
+            body="The 3D renderer lost its GPU context. This is rare; reloading restores the scene."
+          />
+        )}
+      </div>
+    </BrowserRouter>
   );
 }
 
