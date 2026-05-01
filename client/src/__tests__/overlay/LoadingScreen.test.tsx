@@ -72,16 +72,23 @@ describe('LoadingScreen', () => {
     }
   });
 
-  it('renders the loading UI with a status role + animated stage text', () => {
+  it('renders the loading UI with a status role + animated stage text', async () => {
     // The stub probe never actually runs in this test (no
     // stubGetContext call) — useEffect's first synchronous setStage
     // bumps text to "Verifying GPU context…" before we query DOM,
     // so check for *either* the initial or the verifying text.
-    const { getByRole } = render(
-      <LoadingScreen onReady={() => undefined} onFailed={() => undefined} />,
-    );
+    //
+    // We MUST await the boot sequence to terminal state (onFailed
+    // here, because jsdom's mocked getContext lacks
+    // getShaderPrecisionFormat). Otherwise the retry loop is still
+    // running when the next test stubs getContext to pass, and the
+    // leaked boot sequence calls preloadSpy alongside that test's
+    // own — making the next assertion's call count flaky.
+    const onFailed = vi.fn();
+    const { getByRole } = render(<LoadingScreen onReady={() => undefined} onFailed={onFailed} />);
     const status = getByRole('status');
     expect(status.textContent).toMatch(/Initialising renderer|Verifying GPU context/);
+    await waitFor(() => expect(onFailed).toHaveBeenCalled(), { timeout: 2000 });
   });
 
   it('calls onReady after probe success and preload resolution', async () => {
