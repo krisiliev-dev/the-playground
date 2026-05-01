@@ -119,7 +119,7 @@ const OUTLINE_SCALE = 1.06;
  *  pre-fix asymmetric outline the user liked, but as a deliberate
  *  authored choice instead of a pivot accident. */
 const OUTLINE_SHIFT_X_FRACTION = 0.012;
-const OUTLINE_SHIFT_Y_FRACTION = 0.05;
+const OUTLINE_SHIFT_Y_FRACTION = 0.025;
 
 useGLTF.preload(MODEL_URL);
 
@@ -549,6 +549,16 @@ function ActiveCursor(): JSX.Element {
       // the AudioContext on every touchstart so any path through the
       // app reaches a real `source.start()` with a running ctx.
       sfx.unlock();
+      // Suppress the InteractionController's mouse handlers for every
+      // touch, not just successful press-on-interactable touches. iOS
+      // Safari fires synthetic mousedown/mouseup after every touchend
+      // — without blanket suppression, even a tap *off* an interactable
+      // would still trigger the controller's crosshair-driven press
+      // (it raycasts through screen centre and fires if the crosshair
+      // happens to be on a cube). The touch path in this file is
+      // authoritative for mobile; the controller should only operate
+      // on real desktop mouse events.
+      suppressInteractionSynth(400);
 
       if (e.touches.length === 2) {
         // Second finger landed: switch into pinch mode. Cancel any
