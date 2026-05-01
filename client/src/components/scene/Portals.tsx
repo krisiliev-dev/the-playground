@@ -29,9 +29,16 @@
  * walk-through detection, and per-section 3D rooms come in
  * subsequent phases.
  */
-import { useEffect, useMemo, useRef } from 'react';
+import { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { Quaternion, Vector3, type Group, type MeshStandardMaterial } from 'three';
+import {
+  Euler,
+  Quaternion,
+  Vector3,
+  type Group,
+  type MeshStandardMaterial,
+  type Vector3Tuple,
+} from 'three';
 import { useInteractable } from './Interactable';
 import { useWorldStore } from '@/store';
 
@@ -54,6 +61,26 @@ const SPOKE_TUBE = 0.12;
 /** Slight z-offset for rim + spokes vs. the pie interior, to keep
  *  them visually on top without z-fighting. */
 const RIM_Z_OFFSET = 0.04;
+/** Per-pie rim emissive levels. The rim glows steadily at
+ *  RIM_IDLE_EMISSIVE; hover/press push it brighter so the user gets
+ *  a frame-level affordance in addition to the interior glow. */
+const RIM_IDLE_EMISSIVE = 2.2;
+const RIM_HOVER_EMISSIVE = 3.4;
+const RIM_PRESS_EMISSIVE = 4.6;
+/** Particle count per pie. ~20 reads as digital sparse rather than
+ *  dense haze; tune up if it looks too quiet against the rim. */
+const PARTICLES_PER_PIE = 20;
+/** Pixel size for the rim particles. sizeAttenuation:false +
+ *  small pixel size keeps them crisp regardless of distance —
+ *  reads as digital pixels rather than soft fireflies. */
+const PARTICLE_PIXEL_SIZE = 3;
+/** Radial jitter applied to each particle's distance from center.
+ *  Particles sit at PORTAL_RADIUS ± this; small enough that they
+ *  cluster on the rim, large enough that they don't all line up. */
+const PARTICLE_RADIAL_JITTER = 0.55;
+/** Particle orbit speed (radians/sec). The whole particle ring
+ *  slowly rotates around the disc center. */
+const PARTICLE_ORBIT_SPEED = 0.18;
 
 const HOVER_SCALE = 1.05;
 const PRESS_SCALE = 0.97;
@@ -77,16 +104,16 @@ interface PieConfig {
   color: string;
 }
 
-const SECTION_PIES: ReadonlyArray<PieConfig & { path: string }> = [
-  // NE quadrant (top-right): About.
-  { id: 'portal-about', path: '/about', thetaStart: 0, color: '#00ffcc' },
+export const SECTION_PIES: ReadonlyArray<PieConfig & { path: string }> = [
+  // NE quadrant (top-right): About — deep royal blue.
+  { id: 'portal-about', path: '/about', thetaStart: 0, color: '#4169e1' },
   // NW quadrant (top-left): Projects.
   { id: 'portal-projects', path: '/projects', thetaStart: QUARTER, color: '#ff6ec7' },
   // SW quadrant (bottom-left): Writing.
   { id: 'portal-writing', path: '/writing', thetaStart: 2 * QUARTER, color: '#ffcc66' },
 ];
 
-const SE_PIE: PieConfig = {
+export const SE_PIE: PieConfig = {
   id: 'portal-simple-experience',
   // SE quadrant (bottom-right) — picks up the layout's compass
   // mnemonic at the same time as the Simple Experience name. Neutral
@@ -117,33 +144,29 @@ interface PortalsDiscProps {
 
 function PortalsDisc({ clickHit }: PortalsDiscProps): JSX.Element {
   // Position + orientation derive deterministically from clickHit.
-  // We apply them imperatively via a ref instead of declarative props
-  // because R3F's `quaternion` prop trips the eslint
-  // `react/no-unknown-property` rule, and converting to Euler angles
-  // every render is more code than just copying into the Group.
-  const groupRef = useRef<Group>(null);
+  // We pass them as declarative props instead of imperatively via
+  // ref so the component renders correctly outside of an R3F runtime
+  // (e.g. in jsdom tests, where `<group>` is a plain DOM element
+  // without `.position.copy`). The eslint complaint we hit earlier
+  // was specifically about the `quaternion` prop — converting the
+  // quaternion to Euler angles sidesteps that while keeping the
+  // math at the same numerical fidelity.
   const transform = useMemo(() => {
-    const point = new Vector3(...clickHit.point);
     const normal = new Vector3(...clickHit.normal);
     // Float the disc a hair inward from the wall to dodge z-fighting.
-    const pos = point.clone().addScaledVector(normal, PORTAL_NORMAL_OFFSET);
+    const pos = new Vector3(...clickHit.point).addScaledVector(normal, PORTAL_NORMAL_OFFSET);
     // CircleGeometry's surface normal is +Z; rotate to point along
     // the wall's inward normal so the disc sits flat on the wall.
     const quat = new Quaternion().setFromUnitVectors(new Vector3(0, 0, 1), normal);
-    return { position: pos, quaternion: quat };
+    const euler = new Euler().setFromQuaternion(quat);
+    return {
+      position: [pos.x, pos.y, pos.z] as Vector3Tuple,
+      rotation: [euler.x, euler.y, euler.z] as Vector3Tuple,
+    };
   }, [clickHit.point, clickHit.normal]);
 
-  useEffect(() => {
-    const g = groupRef.current;
-    if (!g) {
-      return;
-    }
-    g.position.copy(transform.position);
-    g.quaternion.copy(transform.quaternion);
-  }, [transform]);
-
   return (
-    <group ref={groupRef}>
+    <group position={transform.position} rotation={transform.rotation}>
       {SECTION_PIES.map((pie) => (
         <SectionPortalPie
           key={pie.id}
@@ -161,6 +184,13 @@ function PortalsDisc({ clickHit }: PortalsDiscProps): JSX.Element {
         <RadialSpoke key={`spoke-${i}`} angle={i * QUARTER} />
       ))}
       <CenterHub />
+      {/* Per-pie digital particle rings. Each pie carries its own
+          color-matched dust along its arc; the whole ring slowly
+          orbits the disc center. */}
+      {SECTION_PIES.map((pie) => (
+        <RimParticles key={`particles-${pie.id}`} thetaStart={pie.thetaStart} color={pie.color} />
+      ))}
+      <RimParticles thetaStart={SE_PIE.thetaStart} color={SE_PIE.color} />
     </group>
   );
 }
@@ -266,7 +296,8 @@ function PortalPieMesh({
   hoverEmissive,
   pressEmissive,
 }: PortalPieMeshProps): JSX.Element {
-  const matRef = useRef<MeshStandardMaterial>(null);
+  const interiorMatRef = useRef<MeshStandardMaterial>(null);
+  const rimMatRef = useRef<MeshStandardMaterial>(null);
   const renderedScale = useRef(1);
 
   useFrame((_state, delta) => {
@@ -279,9 +310,26 @@ function PortalPieMesh({
     renderedScale.current += (targetScale - renderedScale.current) * k;
     mesh.scale.setScalar(renderedScale.current);
 
-    const mat = matRef.current;
-    if (mat) {
-      mat.emissiveIntensity = isPressed ? pressEmissive : isHovered ? hoverEmissive : idleEmissive;
+    // Interior emissive (the "room" glow seeping through the window).
+    const interiorMat = interiorMatRef.current;
+    if (interiorMat) {
+      interiorMat.emissiveIntensity = isPressed
+        ? pressEmissive
+        : isHovered
+          ? hoverEmissive
+          : idleEmissive;
+    }
+    // Rim emissive — frame brightens with the user's gaze so the
+    // affordance still reads when the interior is dim. Modulated
+    // independently of the interior because the two carry different
+    // visual roles (frame vs. window).
+    const rimMat = rimMatRef.current;
+    if (rimMat) {
+      rimMat.emissiveIntensity = isPressed
+        ? RIM_PRESS_EMISSIVE
+        : isHovered
+          ? RIM_HOVER_EMISSIVE
+          : RIM_IDLE_EMISSIVE;
     }
   });
 
@@ -294,7 +342,7 @@ function PortalPieMesh({
       <mesh ref={meshRef}>
         <circleGeometry args={[PORTAL_RADIUS, PORTAL_SEGMENTS, thetaStart, QUARTER]} />
         <meshStandardMaterial
-          ref={matRef}
+          ref={interiorMatRef}
           color="#0a0a12"
           emissive={emissive}
           emissiveIntensity={idleEmissive}
@@ -306,25 +354,16 @@ function PortalPieMesh({
       {/* Outer arc rim — the per-pie colored glowing edge. Floats
           slightly forward of the interior so it visually crowns the
           pie without z-fighting. */}
-      <RimArc thetaStart={thetaStart} color={color} />
+      <mesh position={[0, 0, RIM_Z_OFFSET]} rotation={[0, 0, thetaStart]}>
+        <torusGeometry args={[PORTAL_RADIUS, RIM_TUBE, 8, 24, QUARTER]} />
+        <meshStandardMaterial
+          ref={rimMatRef}
+          color={color}
+          emissive={color}
+          emissiveIntensity={RIM_IDLE_EMISSIVE}
+        />
+      </mesh>
     </group>
-  );
-}
-
-interface RimArcProps {
-  thetaStart: number;
-  color: string;
-}
-
-/** A single quarter-arc tube hugging the outer edge of one pie.
- *  Default torusGeometry starts its arc at angle 0; we rotate the
- *  whole mesh by `thetaStart` to align the arc with the pie below. */
-function RimArc({ thetaStart, color }: RimArcProps): JSX.Element {
-  return (
-    <mesh position={[0, 0, RIM_Z_OFFSET]} rotation={[0, 0, thetaStart]}>
-      <torusGeometry args={[PORTAL_RADIUS, RIM_TUBE, 8, 24, QUARTER]} />
-      <meshStandardMaterial color={color} emissive={color} emissiveIntensity={2.2} />
-    </mesh>
   );
 }
 
@@ -350,5 +389,65 @@ function RadialSpoke({ angle }: RadialSpokeProps): JSX.Element {
       <cylinderGeometry args={[SPOKE_TUBE, SPOKE_TUBE, PORTAL_RADIUS, 8]} />
       <meshStandardMaterial color="#ffffff" emissive="#ffffff" emissiveIntensity={1.8} />
     </mesh>
+  );
+}
+
+interface RimParticlesProps {
+  thetaStart: number;
+  color: string;
+}
+
+/**
+ * Per-pie ring of "digital" particles hugging the outer rim. Each
+ * particle is rendered as a small fixed-pixel point (sizeAttenuation
+ * off, ~3px) so it reads as a crisp dot regardless of viewing
+ * distance — the digital pixel feel the user described, not soft
+ * fireflies.
+ *
+ * Particles are distributed within the pie's 90° arc with random
+ * angular position and a small radial jitter, then the whole point
+ * cloud orbits slowly around the disc center. Color matches the
+ * pie's rim so each quadrant carries its own particle palette.
+ */
+function RimParticles({ thetaStart, color }: RimParticlesProps): JSX.Element {
+  const groupRef = useRef<Group>(null);
+  // Pre-compute particle positions once per mount — they're random
+  // within the pie's arc but otherwise stable; per-frame motion
+  // happens via group rotation, not by re-randomizing positions.
+  const positions = useMemo(() => {
+    const arr = new Float32Array(PARTICLES_PER_PIE * 3);
+    for (let i = 0; i < PARTICLES_PER_PIE; i++) {
+      const theta = thetaStart + Math.random() * QUARTER;
+      const r = PORTAL_RADIUS + (Math.random() * 2 - 1) * PARTICLE_RADIAL_JITTER;
+      arr[i * 3] = Math.cos(theta) * r;
+      arr[i * 3 + 1] = Math.sin(theta) * r;
+      arr[i * 3 + 2] = RIM_Z_OFFSET;
+    }
+    return arr;
+  }, [thetaStart]);
+
+  useFrame((_state, delta) => {
+    const g = groupRef.current;
+    if (!g) {
+      return;
+    }
+    g.rotation.z += PARTICLE_ORBIT_SPEED * delta;
+  });
+
+  return (
+    <group ref={groupRef}>
+      <points>
+        <bufferGeometry>
+          <bufferAttribute attach="attributes-position" args={[positions, 3]} />
+        </bufferGeometry>
+        <pointsMaterial
+          color={color}
+          size={PARTICLE_PIXEL_SIZE}
+          // eslint-disable-next-line react/no-unknown-property
+          sizeAttenuation={false}
+          transparent
+        />
+      </points>
+    </group>
   );
 }

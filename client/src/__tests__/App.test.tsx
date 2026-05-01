@@ -260,6 +260,37 @@ describe('App', () => {
 
         expect(requestPointerLockSpy).not.toHaveBeenCalled();
       });
+
+      it('releases pointer-lock when entering document mode', () => {
+        // Simulate the canvas owning pointer-lock at the moment the
+        // user clicks the SE portal. Without the release, the OS
+        // cursor stays hidden over the document.
+        useWorldStore.setState({ documentMode: false, controlsDismissed: true });
+        render(<App />);
+
+        const canvas = screen.getByTestId('r3f-canvas').querySelector('canvas');
+        Object.defineProperty(document, 'pointerLockElement', {
+          configurable: true,
+          value: canvas,
+        });
+        const exitSpy = vi.fn();
+        Object.defineProperty(document, 'exitPointerLock', {
+          configurable: true,
+          value: exitSpy,
+        });
+
+        act(() => {
+          useWorldStore.setState({ documentMode: true });
+        });
+
+        expect(exitSpy).toHaveBeenCalled();
+
+        // Cleanup — clear the patched properties so they don't leak.
+        Object.defineProperty(document, 'pointerLockElement', {
+          configurable: true,
+          value: null,
+        });
+      });
     });
   });
 
