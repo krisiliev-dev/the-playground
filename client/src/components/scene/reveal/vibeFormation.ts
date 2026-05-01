@@ -156,7 +156,7 @@ export const VIBE_SWORD_COUNT = ALL_STROKES.length;
  *  formation so it fits horizontally without changing the camera
  *  choreography. Linear from `MIN_SCALE` at very narrow aspects to
  *  `1.0` at `1.5` aspect-ratio and above. */
-const FORMATION_MIN_SCALE = 0.55;
+const FORMATION_MIN_SCALE = 0.35;
 const FORMATION_FULL_SCALE_ASPECT = 1.5;
 function computeFormationScale(): number {
   if (typeof window === 'undefined') {
