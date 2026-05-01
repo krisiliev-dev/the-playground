@@ -188,70 +188,15 @@ class SfxManager {
     this.loaded = true;
   }
 
-  /** Synthesize an impulse response that models a cube room of the given
-   *  edge length. Comprises:
-   *   - A direct-sound spike at t=0
-   *   - First-order wall reflections clustered around 2L/c (sound's
-   *     round-trip time across the cube), with small per-tap jitter so
-   *     the cluster reads as a "wash" rather than a ringing comb filter
-   *   - Second-order reflections at twice that delay
-   *   - A diffuse decaying-noise tail
-   *  Stereo channels get independent randomisation for natural width.
-   *  `sideLength` is clamped to `MAX_AUDIO_ROOM_SIZE` so the world's
-   *  visual scale doesn't translate into multi-second echo delays.
-   *
-   *  RNG is seeded from `sideLength + sampleRate + channel` (mulberry32)
-   *  so the same room always yields the same IR — reverb stays stable
-   *  reload-to-reload, and tests can pin sample values. The two
-   *  channels still get independent seeds for natural stereo width. */
+  /** Synthesize an impulse response that models a cube room. Wraps
+   *  the pure `generateCubeImpulse` so the AudioContext stays at the
+   *  edge of the system; the math + sample data lives in a pure
+   *  function that's testable without Web Audio. */
   private makeCubeImpulseResponse(ctx: AudioContext, sideLength: number): AudioBuffer {
-    const sr = ctx.sampleRate;
-    const audioSize = Math.min(sideLength, MAX_AUDIO_ROOM_SIZE);
-    const firstReflectDelay = (2 * audioSize) / SOUND_SPEED;
-    // Total IR length: long enough to capture two wall round-trips plus
-    // a ~1.5s diffuse tail.
-    const decayTime = Math.max(2.0, firstReflectDelay * 2 + 1.5);
-    const length = Math.floor(sr * decayTime);
-    const buf = ctx.createBuffer(2, length, sr);
-
-    for (let ch = 0; ch < 2; ch++) {
-      const data = buf.getChannelData(ch);
-      // Per-channel seed: `sideLength * 1000` quantises sub-unit room
-      // changes, sampleRate disambiguates 44.1k vs 48k contexts, channel
-      // index gives left/right independent decorrelation.
-      const rand = mulberry32((Math.floor(sideLength * 1000) ^ sr) + ch * 2654435761);
-
-      // Direct sound (impulse at t=0).
-      data[0] = 1.0;
-
-      // First-order: 6 wall reflections with small time/amplitude jitter.
-      for (let i = 0; i < 6; i++) {
-        const jitter = (rand() - 0.5) * 0.04;
-        const idx = Math.floor((firstReflectDelay + jitter) * sr);
-        if (idx >= 0 && idx < length) {
-          data[idx] = (data[idx] ?? 0) + 0.45 * (0.8 + rand() * 0.4);
-        }
-      }
-
-      // Second-order: more taps, lower amplitude, wider time spread.
-      for (let i = 0; i < 18; i++) {
-        const jitter = (rand() - 0.5) * 0.08;
-        const idx = Math.floor((2 * firstReflectDelay + jitter) * sr);
-        if (idx >= 0 && idx < length) {
-          data[idx] = (data[idx] ?? 0) + 0.18 * (0.8 + rand() * 0.4);
-        }
-      }
-
-      // Diffuse tail from first reflection onward — exponential decay
-      // on white noise. Decay constant tuned so the tail is mostly gone
-      // by `decayTime`.
-      const diffuseStart = Math.floor(firstReflectDelay * sr);
-      for (let i = diffuseStart; i < length; i++) {
-        const tSec = (i - diffuseStart) / sr;
-        const env = Math.exp(-tSec * 1.5);
-        data[i] = (data[i] ?? 0) + (rand() * 2 - 1) * env * 0.15;
-      }
-    }
+    const impulse = generateCubeImpulse(ctx.sampleRate, sideLength);
+    const buf = ctx.createBuffer(2, impulse.left.length, ctx.sampleRate);
+    buf.copyToChannel(impulse.left, 0);
+    buf.copyToChannel(impulse.right, 1);
     return buf;
   }
 
@@ -795,9 +740,85 @@ class SfxManager {
 
 export const sfx = new SfxManager();
 
+export interface CubeImpulse {
+  /** Left channel — Float32Array of length `Math.floor(sampleRate × decayTime)`.
+   *  Backed by an explicit ArrayBuffer so the type satisfies
+   *  AudioBuffer.copyToChannel's `Float32Array<ArrayBuffer>` parameter. */
+  left: Float32Array<ArrayBuffer>;
+  /** Right channel, decorrelated from left for stereo width. */
+  right: Float32Array<ArrayBuffer>;
+}
+
+/**
+ * Pure cube-room impulse-response generator. No Web Audio; returns
+ * raw Float32Array channel data the caller can pour into an
+ * AudioBuffer (or compare in a test). Comprises:
+ *   - A direct-sound spike at t=0 (sample 0 = 1.0).
+ *   - First-order wall reflections clustered around 2L/c (sound's
+ *     round-trip time across the cube), with small per-tap jitter so
+ *     the cluster reads as a "wash" rather than a ringing comb.
+ *   - Second-order reflections at twice that delay.
+ *   - A diffuse decaying-noise tail.
+ *
+ * Stereo channels get independent decorrelated seeds for natural
+ * width. `sideLength` is clamped to `MAX_AUDIO_ROOM_SIZE` so the
+ * world's visual scale doesn't translate into multi-second echo
+ * delays.
+ *
+ * RNG is mulberry32 seeded from `(floor(sideLength × 1000) ^ sampleRate)
+ * + channel × 0x9e3779b1`, so the same room/channel always yields the
+ * same samples — tests can snapshot specific values and stay stable.
+ */
+export function generateCubeImpulse(sampleRate: number, sideLength: number): CubeImpulse {
+  const audioSize = Math.min(sideLength, MAX_AUDIO_ROOM_SIZE);
+  const firstReflectDelay = (2 * audioSize) / SOUND_SPEED;
+  const decayTime = Math.max(2.0, firstReflectDelay * 2 + 1.5);
+  const length = Math.floor(sampleRate * decayTime);
+
+  const channels: Array<Float32Array<ArrayBuffer>> = [];
+  for (let ch = 0; ch < 2; ch++) {
+    // Allocate via an explicit ArrayBuffer so the type narrows to
+    // `Float32Array<ArrayBuffer>`, which is what AudioBuffer's
+    // copyToChannel expects in current lib.dom.
+    const data = new Float32Array(new ArrayBuffer(length * 4));
+    const rand = mulberry32((Math.floor(sideLength * 1000) ^ sampleRate) + ch * 2654435761);
+
+    // Direct sound.
+    data[0] = 1.0;
+
+    // First-order wall reflections.
+    for (let i = 0; i < 6; i++) {
+      const jitter = (rand() - 0.5) * 0.04;
+      const idx = Math.floor((firstReflectDelay + jitter) * sampleRate);
+      if (idx >= 0 && idx < length) {
+        data[idx] = (data[idx] ?? 0) + 0.45 * (0.8 + rand() * 0.4);
+      }
+    }
+
+    // Second-order reflections.
+    for (let i = 0; i < 18; i++) {
+      const jitter = (rand() - 0.5) * 0.08;
+      const idx = Math.floor((2 * firstReflectDelay + jitter) * sampleRate);
+      if (idx >= 0 && idx < length) {
+        data[idx] = (data[idx] ?? 0) + 0.18 * (0.8 + rand() * 0.4);
+      }
+    }
+
+    // Diffuse tail.
+    const diffuseStart = Math.floor(firstReflectDelay * sampleRate);
+    for (let i = diffuseStart; i < length; i++) {
+      const tSec = (i - diffuseStart) / sampleRate;
+      const env = Math.exp(-tSec * 1.5);
+      data[i] = (data[i] ?? 0) + (rand() * 2 - 1) * env * 0.15;
+    }
+    channels.push(data);
+  }
+  return { left: channels[0]!, right: channels[1]! };
+}
+
 /** Tiny seedable PRNG (mulberry32). Returns values in [0, 1). Used by
- *  `makeCubeImpulseResponse` so reverb is reproducible per session and
- *  test snapshots stay stable. Exported for the IR test. */
+ *  `generateCubeImpulse` so reverb is reproducible per session and
+ *  test snapshots stay stable. Exported for tests. */
 export function mulberry32(seed: number): () => number {
   let s = seed >>> 0;
   return () => {
