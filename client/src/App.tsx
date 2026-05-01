@@ -171,10 +171,37 @@ function SceneRootTracker(): null {
   return null;
 }
 
+/** Diagnostic — log every change to documentMode, controlsDismissed,
+ *  revealState, menuOpen so we can see exactly what state mutates
+ *  around the doc → 3D toggle. */
+function useStateChangeDiag(): void {
+  const documentMode = useWorldStore((s) => s.documentMode);
+  const controlsDismissed = useWorldStore((s) => s.controlsDismissed);
+  const revealState = useWorldStore((s) => s.revealState);
+  const menuOpen = useWorldStore((s) => s.menuOpen);
+  useEffect(() => {
+    // eslint-disable-next-line no-console
+    console.log('[diag] documentMode →', documentMode);
+  }, [documentMode]);
+  useEffect(() => {
+    // eslint-disable-next-line no-console
+    console.log('[diag] controlsDismissed →', controlsDismissed);
+  }, [controlsDismissed]);
+  useEffect(() => {
+    // eslint-disable-next-line no-console
+    console.log('[diag] revealState →', revealState);
+  }, [revealState]);
+  useEffect(() => {
+    // eslint-disable-next-line no-console
+    console.log('[diag] menuOpen →', menuOpen);
+  }, [menuOpen]);
+}
+
 export function App(): JSX.Element {
   useGlobalMouseFeedback();
   useAvatarDevHotkey();
   useAudioMute();
+  useStateChangeDiag();
   // Simple Experience document mode. When true, the 3D scene
   // (Canvas + cursor + animations) is *paused and hidden* rather
   // than torn down: `frameloop="never"` stops the GPU work, and a
