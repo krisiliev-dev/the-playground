@@ -16,11 +16,13 @@ import { useEffect, useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { useGLTF } from '@react-three/drei';
 import {
+  BackSide,
   Box3,
   Color,
   Euler,
   Group,
   Mesh,
+  MeshBasicMaterial,
   MeshStandardMaterial,
   PerspectiveCamera,
   Quaternion,
@@ -92,15 +94,19 @@ const CAMERA_LERP_RATE = 12;
  *  lerp for ongoing follow. */
 const INITIAL_PAN_DURATION = 1.5;
 
-/** Magenta is the complement of the scene's cyan accent (`#00ffcc`),
- *  so the cursor stays visually distinct even when its mesh is
- *  touching cyan-glowing interactables — the eye separates them as
- *  different objects rather than reading one merged glow. Bumped
- *  intensity vs the previous cyan because magenta also reads slightly
- *  darker at equal luminance, so we lift it to compensate. */
-const EMISSIVE_HEX = '#ff00cc';
-const EMISSIVE_INTENSITY = 1.6;
-const BODY_COLOR_HEX = '#1a0a18';
+const EMISSIVE_HEX = '#00ffcc';
+const EMISSIVE_INTENSITY = 1.0;
+const BODY_COLOR_HEX = '#0a1a18';
+/** Outline shell rendered as a back-faced, slightly-enlarged copy of
+ *  each cursor mesh. Front faces are culled (BackSide) so only the
+ *  back faces of the larger shell are visible — they appear as a
+ *  halo at the cursor's silhouette. Main cursor renderOrder = 999;
+ *  outline = 998 so the inside of the halo gets covered by the
+ *  cursor and only the rim remains. The outline shares the cursor's
+ *  `depthTest: false` so it stays on top of haze/geometry like the
+ *  cursor itself. */
+const OUTLINE_COLOR_HEX = '#ffffff';
+const OUTLINE_SCALE = 1.08;
 
 useGLTF.preload(MODEL_URL);
 
@@ -189,11 +195,23 @@ function ActiveCursor(): JSX.Element {
   const avatarTargetQuat = useMemo(() => new Quaternion(), []);
 
   useEffect(() => {
+    // Collect target meshes first — adding outline children inside
+    // the traverse callback would cause traverse to visit the new
+    // children too (and potentially loop or double-add).
+    const targetMeshes: Mesh[] = [];
     gltf.scene.traverse((obj) => {
       const mesh = obj as Mesh;
-      if (!mesh.isMesh) {
-        return;
+      if (mesh.isMesh) {
+        targetMeshes.push(mesh);
       }
+    });
+
+    /** Outline meshes added in this effect, tracked so we can
+     *  remove them on cleanup (HMR / unmount). Without this, a hot
+     *  reload would stack outlines on top of outlines. */
+    const outlineMeshes: Mesh[] = [];
+
+    targetMeshes.forEach((mesh) => {
       mesh.material = new MeshStandardMaterial({
         color: new Color(BODY_COLOR_HEX),
         emissive: new Color(EMISSIVE_HEX),
@@ -206,7 +224,23 @@ function ActiveCursor(): JSX.Element {
         transparent: true,
       });
       mesh.renderOrder = 999;
+
+      // Outline shell — see OUTLINE_* constants for the rationale.
+      const outlineMesh = new Mesh(
+        mesh.geometry,
+        new MeshBasicMaterial({
+          color: new Color(OUTLINE_COLOR_HEX),
+          side: BackSide,
+          depthTest: false,
+          transparent: true,
+        }),
+      );
+      outlineMesh.scale.setScalar(OUTLINE_SCALE);
+      outlineMesh.renderOrder = 998;
+      mesh.add(outlineMesh);
+      outlineMeshes.push(outlineMesh);
     });
+
     // Measure where the cursor's visible tip is relative to the model
     // pivot. For OS-arrow-cursor models the tip is at the upper-left
     // of the bbox (min X, max Y). Stored in the model's local frame,
@@ -215,9 +249,33 @@ function ActiveCursor(): JSX.Element {
     // subtract from the hit point to place the group origin such that
     // the visible tip lands on the hit. updateMatrixWorld() runs
     // first so Box3.setFromObject sees the correct geometry positions.
+    // Done AFTER outline meshes are added so they don't bias the bbox
+    // (they're at scale 1.08, slightly larger than the visible tip).
     gltf.scene.updateMatrixWorld(true);
-    const bbox = new Box3().setFromObject(gltf.scene);
+    const bbox = new Box3();
+    targetMeshes.forEach((mesh) => {
+      // Use the geometry's bounding box transformed into scene space
+      // — exclude outline meshes by only iterating originals.
+      mesh.geometry.computeBoundingBox();
+      if (mesh.geometry.boundingBox) {
+        const meshBbox = mesh.geometry.boundingBox.clone();
+        meshBbox.applyMatrix4(mesh.matrixWorld);
+        bbox.union(meshBbox);
+      }
+    });
     tipLocalOffset.current.set(bbox.min.x, bbox.max.y, (bbox.min.z + bbox.max.z) / 2);
+
+    return () => {
+      outlineMeshes.forEach((m) => {
+        m.parent?.remove(m);
+        // We constructed each outline mesh's material as a single
+        // MeshBasicMaterial, but Mesh.material's static type is
+        // `Material | Material[]`. Narrow before dispose.
+        if (m.material instanceof MeshBasicMaterial) {
+          m.material.dispose();
+        }
+      });
+    };
   }, [gltf.scene]);
 
   useEffect(() => {
