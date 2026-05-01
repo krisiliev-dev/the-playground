@@ -60,12 +60,20 @@ const AVATAR_WALL_MARGIN = 8;
  *  interactable, the cursor lerps from its follow-rig position to a
  *  point just behind the target's surface (so the cursor's tip
  *  visually touches the object). On mouse-up it lerps back. Lerp rate
- *  is high so the lean feels snappy and physical, not floaty. */
+ *  is high so the lean feels snappy and physical, not floaty. The
+ *  same rate drives the orientation slerp (camera-aligned + forward
+ *  tilt while pressed; back to yaw-only on release). */
 const LEAN_LERP_RATE = 32;
 /** Distance the cursor pulls back from the actual surface point so
- *  the visible mesh doesn't intersect the object. Tuned for the
- *  cursor model + AVATAR_SCALE — adjust if either changes. */
-const CURSOR_TIP_OFFSET = 1.0;
+ *  the visible tip lands at the surface instead of clipping through.
+ *  Tuned for the cursor model + AVATAR_SCALE = 0.03 — the model's
+ *  visible tip sits roughly this far from its group origin in world
+ *  units once scaled. Adjust by eye if the cursor changes. */
+const CURSOR_TIP_OFFSET = 1.8;
+/** Extra forward pitch applied to the cursor's orientation while
+ *  pressed — beyond camera-alignment — so the cursor visibly *leans
+ *  into* the target rather than just pointing rigidly at it. */
+const LEAN_TILT_RAD = -0.28;
 /** How close (in world units) the avatar has to be to a wall before
  *  the wall-ambient drone becomes audible. Outside this band the
  *  ambient is silent; at distance 0 it's at the manifest base volume. */
@@ -248,11 +256,25 @@ function ActiveCursor(): JSX.Element {
   /** World-space target the cursor leans toward while a press is
    *  active. Read each frame from the store; a non-null value pulls
    *  the cursor away from its follow-rig position toward the
-   *  interactable's surface. Stored in a ref so the useFrame loop
-   *  doesn't re-render on every store update. */
+   *  interactable's surface. */
   const pressedTargetPoint = useWorldStore((s) => s.pressedTargetPoint);
   const leanForward = useRef(new Vector3());
   const leanTarget = useRef(new Vector3());
+  /** Working buffer for the press-state target quaternion (camera
+   *  orientation × forward-tilt). */
+  const leanRotQuat = useMemo(() => new Quaternion(), []);
+  /** Constant forward-tilt quaternion in cursor-local frame. Composed
+   *  onto camera.quaternion to get the press-state cursor orientation. */
+  const leanTiltQuat = useMemo(
+    () => new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), LEAN_TILT_RAD),
+    [],
+  );
+  /** The cursor's *rendered* world position, persisted across frames.
+   *  The follow-rig and lean logic compute a *target* each frame; this
+   *  ref lerps toward that target so motion accumulates instead of
+   *  resetting from the follow point every frame (which is what made
+   *  the lean feel jittery + "stuck at 40% of the way"). */
+  const renderedCursorPos = useRef(new Vector3());
 
   // Desktop: mouselook via pointer lock. Mobile: swipe-to-look via
   // touch events + synthesized mousedown/mouseup on tap. Both paths
@@ -693,33 +715,49 @@ function ActiveCursor(): JSX.Element {
         eased,
       );
       renderedScale.current = initialScale.current + (AVATAR_SCALE - initialScale.current) * eased;
+      // Seed renderedCursorPos so the steady-state lerp picks up
+      // exactly where the initial pan left off (instead of starting
+      // at origin and snapping in on the first steady frame).
+      renderedCursorPos.current.copy(groupRef.current.position);
     } else {
-      // Steady-state: per-frame lerp. Pull-in on wall approach, smooth
-      // restore on retreat. Same rate either way for a coherent feel.
+      // Steady-state. Camera lerps as before; cursor position +
+      // orientation lerp toward press-aware targets so the lean
+      // motion accumulates frame-to-frame instead of resetting from
+      // the follow rig each frame (the previous bug — caused the
+      // jitter the user reported).
       const camK = 1 - Math.exp(-CAMERA_LERP_RATE * delta);
       camera.position.lerp(tmpCamTarget.current, camK);
       camera.quaternion.copy(targetCamQuat);
-      groupRef.current.position.copy(avatarPos.current);
-      groupRef.current.quaternion.copy(avatarTargetQuat);
+
+      let cursorPosTarget: Vector3;
+      let cursorQuatTarget: Quaternion;
+      if (pressedTargetPoint) {
+        // Position: hit point pulled back along camera-forward by
+        // CURSOR_TIP_OFFSET so the visible tip ends up at the surface,
+        // not clipping through it.
+        leanForward.current.set(0, 0, -1).applyQuaternion(camera.quaternion);
+        leanTarget.current
+          .set(pressedTargetPoint[0], pressedTargetPoint[1], pressedTargetPoint[2])
+          .addScaledVector(leanForward.current, -CURSOR_TIP_OFFSET);
+        cursorPosTarget = leanTarget.current;
+        // Orientation: camera-aligned (so the cursor's tip points
+        // along the crosshair direction toward the hit) plus a small
+        // forward tilt (so it visibly leans into the object).
+        leanRotQuat.copy(camera.quaternion).multiply(leanTiltQuat);
+        cursorQuatTarget = leanRotQuat;
+      } else {
+        cursorPosTarget = avatarPos.current;
+        cursorQuatTarget = avatarTargetQuat;
+      }
+
+      const leanK = 1 - Math.exp(-LEAN_LERP_RATE * delta);
+      renderedCursorPos.current.lerp(cursorPosTarget, leanK);
+      groupRef.current.position.copy(renderedCursorPos.current);
+      groupRef.current.quaternion.slerp(cursorQuatTarget, leanK);
+
       renderedScale.current += (AVATAR_SCALE - renderedScale.current) * k;
     }
     groupRef.current.scale.setScalar(renderedScale.current);
-
-    // Lean animation. While `pressedTargetPoint` is set, lerp the
-    // cursor from its follow-rig position toward the world-space
-    // target (pulled back along camera-forward by CURSOR_TIP_OFFSET
-    // so the cursor's geometry doesn't intersect the surface). On
-    // release, the same lerp pulls it back to the follow rig. Both
-    // directions use the same LEAN_LERP_RATE so the press and release
-    // feel symmetric.
-    if (pressedTargetPoint) {
-      leanForward.current.set(0, 0, -1).applyQuaternion(camera.quaternion);
-      leanTarget.current
-        .set(pressedTargetPoint[0], pressedTargetPoint[1], pressedTargetPoint[2])
-        .addScaledVector(leanForward.current, -CURSOR_TIP_OFFSET);
-      const leanK = 1 - Math.exp(-LEAN_LERP_RATE * delta);
-      groupRef.current.position.lerp(leanTarget.current, leanK);
-    }
   }, 2);
 
   return (
