@@ -108,6 +108,15 @@ const BODY_COLOR_HEX = '#0a1a18';
  *  cursor itself. */
 const OUTLINE_COLOR_HEX = '#ffffff';
 const OUTLINE_SCALE = 1.06;
+/** Asymmetric shift applied to the outline mesh, expressed as
+ *  fractions of the cursor model's bbox size. After the geometry is
+ *  re-centred for symmetric scaling, this offset pushes the outline
+ *  slightly south + east (cursor-local -Y, +X) so the silhouette
+ *  reads with weight toward the lower-right — same character as the
+ *  pre-fix asymmetric outline the user liked, but as a deliberate
+ *  authored choice instead of a pivot accident. */
+const OUTLINE_SHIFT_X_FRACTION = 0.06;
+const OUTLINE_SHIFT_Y_FRACTION = -0.06;
 
 useGLTF.preload(MODEL_URL);
 
@@ -248,12 +257,14 @@ function ActiveCursor(): JSX.Element {
       // the tip on this cursor) would make the outline thick on the
       // side opposite the pivot and basically invisible on the
       // pivot's side. After centering, we offset the outline mesh
-      // back to the bbox centre so it visually sits where the
-      // original geometry was.
+      // back to the bbox centre + a small authored south-east shift
+      // for visual weight at the lower-right.
       const outlineGeom = mesh.geometry.clone();
       outlineGeom.computeBoundingBox();
       const outlineCenter = new Vector3();
+      const outlineSize = new Vector3();
       outlineGeom.boundingBox?.getCenter(outlineCenter);
+      outlineGeom.boundingBox?.getSize(outlineSize);
       outlineGeom.center();
       const outlineMesh = new Mesh(
         outlineGeom,
@@ -264,7 +275,15 @@ function ActiveCursor(): JSX.Element {
           transparent: true,
         }),
       );
-      outlineMesh.position.copy(outlineCenter);
+      outlineMesh.position
+        .copy(outlineCenter)
+        .add(
+          new Vector3(
+            outlineSize.x * OUTLINE_SHIFT_X_FRACTION,
+            outlineSize.y * OUTLINE_SHIFT_Y_FRACTION,
+            0,
+          ),
+        );
       outlineMesh.scale.setScalar(OUTLINE_SCALE);
       outlineMesh.renderOrder = 998;
       mesh.add(outlineMesh);
