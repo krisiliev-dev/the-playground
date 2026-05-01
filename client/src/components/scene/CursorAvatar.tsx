@@ -852,7 +852,7 @@ function AvatarCursor({ refs }: ModeProps): null {
   // Anchor avatar position + reset yaw/pitch the moment AvatarCursor mounts
   // (was previously gated on `isAvatar` flipping true; same effect now that
   // mount IS that transition). The Canvas itself stays mounted across
-  // Simple Experience toggles (App pauses it via `frameloop="never"` +
+  // Simple Experience toggles (App pauses the render loop +
   // visibility:hidden), so this effect runs *once* per session — the
   // transient state in the refs is preserved across mode flips for free.
   useEffect(() => {

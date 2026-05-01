@@ -120,8 +120,9 @@ interface RevealSlice {
   /** Explicit user mute toggled from PauseMenu's audio control. The
    *  effective master volume is `documentMode || muted ? 0 : 1`,
    *  so document mode silences audio independently of the user's
-   *  preference (looped sounds keep playing past `frameloop="never"`
-   *  otherwise) but restores it on the way back. */
+   *  preference (the AudioContext is independent of the render
+   *  loop, so wallAmbient and friends would keep playing into the
+   *  document otherwise) and restores it on the way back. */
   muted: boolean;
 }
 

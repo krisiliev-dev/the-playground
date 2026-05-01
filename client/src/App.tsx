@@ -218,15 +218,16 @@ export function App(): JSX.Element {
   useAudioMute();
   // Simple Experience document mode. When true, the 3D scene
   // (Canvas + cursor + animations) is *paused and hidden* rather
-  // than torn down: `frameloop="never"` stops the GPU work, and a
-  // wrapping div with visibility:hidden + pointer-events:none takes
-  // it visually + interactively offline. That preserves every
-  // ref, every Three.js object, every animation timer across the
-  // toggle, so flipping back is a one-frame redraw of the exact
-  // scene the user left — no respawn, no fly-in, no rehydration
-  // logic. The trade is ~tens of MB of held WebGL memory; an
-  // explicit "free 3D resources" mode can be added later for
-  // genuinely memory-constrained devices.
+  // than torn down: FrameLoopController stops calling invalidate so
+  // R3F's render loop drains naturally, and a wrapping div with
+  // visibility:hidden + pointer-events:none takes the scene
+  // visually + interactively offline. Every ref, every Three.js
+  // object, every animation timer is preserved across the toggle,
+  // so flipping back is a one-frame redraw of the exact scene the
+  // user left — no respawn, no fly-in, no rehydration logic. The
+  // trade is ~tens of MB of held WebGL memory; an explicit "free
+  // 3D resources" mode can be added later for genuinely memory-
+  // constrained devices.
   const documentMode = useWorldStore((s) => s.documentMode);
   // Boot gate: LoadingScreen probes WebGL + preloads audio before we
   // mount the real Canvas. Once `bootState === 'ready'` the Canvas
@@ -304,19 +305,15 @@ export function App(): JSX.Element {
   // Single, stable render tree. Every interactive state — initial
   // doc mode, first-time 3D boot, subsequent toggles — flows through
   // this same JSX shape, so React reconciles in place rather than
-  // unmounting and remounting on each transition. The previous code
-  // had four separate early returns; switching between them tore
-  // down the BrowserRouter + Canvas + scene each time, which is what
-  // the user kept seeing as "the landing sequence playing again".
-  //
-  // The Canvas wrapper renders unconditionally (so it mounts once
-  // on the very first render), and the boot probe runs in the
-  // background even in document mode — by the time the user clicks
-  // "Switch to 3D experience", `bootState === 'ready'` and the toggle
-  // is just a visibility flip. Cost: doc-mode-only users pay the
-  // ~500ms WebGL probe + persistent context memory; gain: zero-frame
-  // toggle, no replay of any intro animation, no respawn.
-  const dim = documentMode || bootState !== 'ready';
+  // unmounting and remounting on each transition. The Canvas wrapper
+  // renders unconditionally (mounts once on the very first render),
+  // and the boot probe runs in the background even in document mode
+  // — by the time the user clicks "Switch to 3D experience",
+  // `bootState === 'ready'` and the toggle is a pure visibility flip.
+  // Cost: doc-mode-only users pay the ~500ms WebGL probe + persistent
+  // context memory; gain: zero-frame toggle, no replay of any intro
+  // animation, no respawn.
+  const hide3DShell = documentMode || bootState !== 'ready';
   return (
     <BrowserRouter>
       <div
@@ -327,10 +324,10 @@ export function App(): JSX.Element {
           // resize the framebuffer down, then back up on toggle.
           // visibility:hidden preserves layout dimensions; the canvas
           // pixels stay valid and reappear instantly when toggled.
-          visibility: dim ? 'hidden' : 'visible',
-          pointerEvents: dim ? 'none' : 'auto',
+          visibility: hide3DShell ? 'hidden' : 'visible',
+          pointerEvents: hide3DShell ? 'none' : 'auto',
         }}
-        aria-hidden={dim ? true : undefined}
+        aria-hidden={hide3DShell || undefined}
       >
         {bootState === 'loading' && (
           <LoadingScreen onReady={handleBootReady} onFailed={handleBootFailed} />

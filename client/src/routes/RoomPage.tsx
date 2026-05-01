@@ -31,7 +31,7 @@ export function RoomPage({ title, children }: RoomPageProps): JSX.Element {
     return (
       <article aria-live="polite">
         <h1 style={styles.documentTitle}>{title}</h1>
-        <div style={styles.documentContent}>{children}</div>
+        <div style={styles.content}>{children}</div>
         <p style={styles.documentPlaceholder}>
           Placeholder — real content lands in a future session.
         </p>
@@ -129,11 +129,8 @@ const styles: Record<string, CSSProperties> = {
     letterSpacing: '0.02em',
     color: '#e0fffa',
   },
-  documentContent: {
-    fontSize: 16,
-    lineHeight: 1.65,
-    color: 'rgba(224, 255, 250, 0.85)',
-  },
+  // Same as `placeholder` but standalone (no surrounding footer)
+  // — needs an explicit top margin to space away from `content`.
   documentPlaceholder: {
     marginTop: 40,
     fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace',

@@ -46,9 +46,9 @@ export function PauseMenu(): JSX.Element | null {
   const [open, setOpen] = useState(false);
   const [contactOpen, setContactOpen] = useState(false);
   // The mute preference lives in the store so App's audio-mute
-  // effect can combine it with documentMode (looped sounds keep
-  // playing past `frameloop="never"` otherwise — the AudioContext
-  // is independent of the render loop).
+  // effect can combine it with documentMode (the AudioContext is
+  // independent of the render loop, so wallAmbient and other
+  // looped sounds would keep playing into the document otherwise).
   const muted = useWorldStore((s) => s.muted);
   const setMuted = useWorldStore((s) => s.setMuted);
   const navigate = useNavigate();
