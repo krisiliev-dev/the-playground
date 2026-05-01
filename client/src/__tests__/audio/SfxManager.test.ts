@@ -115,9 +115,7 @@ describe('SfxManager (jsdom: no AudioContext)', () => {
 
   describe('setListenerPose()', () => {
     it('does not throw without an AudioContext', () => {
-      expect(() =>
-        sfx.setListenerPose(0, 0, 0, 0, 0, -1, 0, 1, 0),
-      ).not.toThrow();
+      expect(() => sfx.setListenerPose(0, 0, 0, 0, 0, -1, 0, 1, 0)).not.toThrow();
     });
 
     it('accepts non-trivial camera pose values', () => {

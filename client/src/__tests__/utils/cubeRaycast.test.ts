@@ -40,11 +40,7 @@ describe('intersectInsideCube', () => {
 
   it('returns the nearest wall when the ray hits multiple', () => {
     // Direction (3, 0, -4): Z reaches first because 40/4 < 40/3.
-    const hit = intersectInsideCube(
-      new Vector3(0, 0, 0),
-      new Vector3(3, 0, -4).normalize(),
-      half,
-    );
+    const hit = intersectInsideCube(new Vector3(0, 0, 0), new Vector3(3, 0, -4).normalize(), half);
     expect(hit).not.toBeNull();
     expect(Math.abs(hit!.point.z)).toBeCloseTo(40);
     // X has not yet reached its wall.
@@ -65,19 +61,13 @@ describe('intersectInsideCube', () => {
   });
 
   it('returns null for a degenerate (zero-length) direction', () => {
-    expect(
-      intersectInsideCube(new Vector3(0, 0, 0), new Vector3(0, 0, 0), half),
-    ).toBeNull();
+    expect(intersectInsideCube(new Vector3(0, 0, 0), new Vector3(0, 0, 0), half)).toBeNull();
   });
 
   it('handles a ray exactly parallel to one axis', () => {
     // X-direction only, Y-component zero — the Y-axis branch must skip
     // (avoid div-by-zero) and the X-axis branch must produce the hit.
-    const hit = intersectInsideCube(
-      new Vector3(0, 30, 0),
-      new Vector3(1, 0, 0),
-      half,
-    );
+    const hit = intersectInsideCube(new Vector3(0, 30, 0), new Vector3(1, 0, 0), half);
     expect(hit).not.toBeNull();
     expect(hit!.point.x).toBeCloseTo(40);
     expect(hit!.point.y).toBeCloseTo(30);

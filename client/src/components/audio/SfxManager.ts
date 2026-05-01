@@ -741,9 +741,7 @@ class SfxManager {
         urls.add(url);
       }
     }
-    await Promise.allSettled(
-      Array.from(urls).map((url) => fetch(url).catch(() => undefined)),
-    );
+    await Promise.allSettled(Array.from(urls).map((url) => fetch(url).catch(() => undefined)));
   }
 }
 

@@ -78,7 +78,8 @@ describe('useSwordKinematics', () => {
     const handle = makeHandle();
     update(new Vector3(0, 0, 0), new Quaternion(0, 0, 0, 1), 1 / 60, handle);
     update(new Vector3(0, 0, 0), new Quaternion(0, 0, 0, 1), 1 / 60, handle);
-    const lastCall = handle.setPlaybackRate.mock.calls[handle.setPlaybackRate.mock.calls.length - 1]!;
+    const lastCall =
+      handle.setPlaybackRate.mock.calls[handle.setPlaybackRate.mock.calls.length - 1]!;
     // Jerk component random, but jerkAmount = min(0.15, 0/50000) = 0 → no dither.
     // Speed pitch = 0, spin pitch = 0 → exactly 0.95.
     expect(lastCall[0]).toBe(0.95);
@@ -109,7 +110,8 @@ describe('useSwordKinematics', () => {
     // Speed is 0 (no translation), but spin should contribute to pitch.
     // angSpeed = (PI/4) / 0.1 ≈ 7.85 rad/s. spinPitch = min(0.2, 7.85/18) ≈ 0.436 → capped at 0.2.
     // setPlaybackRate = 0.95 + 0 + 0.2 + ~0 = 1.15.
-    const lastCall = handle.setPlaybackRate.mock.calls[handle.setPlaybackRate.mock.calls.length - 1]!;
+    const lastCall =
+      handle.setPlaybackRate.mock.calls[handle.setPlaybackRate.mock.calls.length - 1]!;
     expect(lastCall[0]).toBeGreaterThan(0.95);
     expect(lastCall[0]).toBeLessThanOrEqual(1.15);
   });

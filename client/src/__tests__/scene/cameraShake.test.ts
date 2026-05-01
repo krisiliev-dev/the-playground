@@ -5,11 +5,7 @@
  * "now" explicitly rather than relying on real time.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
-import {
-  triggerImpactShake,
-  computeShakeOffset,
-  clearShake,
-} from '@/components/scene/cameraShake';
+import { triggerImpactShake, computeShakeOffset, clearShake } from '@/components/scene/cameraShake';
 
 describe('cameraShake', () => {
   beforeEach(() => {

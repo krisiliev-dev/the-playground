@@ -63,10 +63,7 @@ describe('LoadingScreen', () => {
   beforeEach(() => {
     mocks.preloadSpy.mockClear();
     mocks.preloadSpy.mockImplementation(() => Promise.resolve());
-    originalDescriptor = Object.getOwnPropertyDescriptor(
-      HTMLCanvasElement.prototype,
-      'getContext',
-    );
+    originalDescriptor = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, 'getContext');
   });
 
   afterEach(() => {
@@ -88,9 +85,7 @@ describe('LoadingScreen', () => {
   });
 
   it('calls onReady after probe success and preload resolution', async () => {
-    stubGetContext((type) =>
-      type === 'webgl' || type === 'webgl2' ? makePassingGL() : null,
-    );
+    stubGetContext((type) => (type === 'webgl' || type === 'webgl2' ? makePassingGL() : null));
 
     const onReady = vi.fn();
     const onFailed = vi.fn();
@@ -129,12 +124,8 @@ describe('LoadingScreen', () => {
   });
 
   it('treats audio preload failure as non-fatal (still calls onReady)', async () => {
-    stubGetContext((type) =>
-      type === 'webgl' || type === 'webgl2' ? makePassingGL() : null,
-    );
-    mocks.preloadSpy.mockImplementationOnce(() =>
-      Promise.reject(new Error('decode failed')),
-    );
+    stubGetContext((type) => (type === 'webgl' || type === 'webgl2' ? makePassingGL() : null));
+    mocks.preloadSpy.mockImplementationOnce(() => Promise.reject(new Error('decode failed')));
 
     const onReady = vi.fn();
     const onFailed = vi.fn();
