@@ -189,16 +189,16 @@ export function InteractionController(): null {
   /** NDC of the crosshair — always (0, 0) since the crosshair is
    *  fixed at screen centre. */
   const screenCentre = useMemo(() => new Vector2(0, 0), []);
-  /** Cached hit point of the most recent crosshair-on-interactable
-   *  raycast — captured each frame so mousedown can read it without
-   *  re-raycasting. */
-  const latestHit = useRef<{ id: string; point: Vector3 } | null>(null);
 
   // Per-frame raycast. Skipped while avatar mode is inactive so we
-  // don't pay the cost during idle/reveal phases.
+  // don't pay the cost during idle/reveal phases. Hover state is
+  // written to the store (id + world hit point) so click handlers +
+  // tests can read the same value the raycaster wrote.
   useFrame(() => {
     if (!isAvatarActive) {
-      latestHit.current = null;
+      if (useWorldStore.getState().hoveredInteractableId !== null) {
+        setHoveredInteractable(null, null);
+      }
       return;
     }
     raycaster.setFromCamera(screenCentre, camera);
@@ -220,12 +220,22 @@ export function InteractionController(): null {
       hitPoint = hit.point;
       break;
     }
-    latestHit.current = hoveredId && hitPoint ? { id: hoveredId, point: hitPoint } : null;
-    // Only call setHoveredInteractable if the value actually changed —
+    // Only call setHoveredInteractable if the id actually changed —
     // Zustand bails on equal updates anyway, but skipping the call
-    // avoids subscriber re-render churn.
+    // avoids subscriber re-render churn. Note: we *don't* skip when
+    // only the point changed within the same id; the per-frame point
+    // freshness matters less than the id-change render coalescing.
     if (useWorldStore.getState().hoveredInteractableId !== hoveredId) {
-      setHoveredInteractable(hoveredId);
+      const pointTuple: [number, number, number] | null =
+        hoveredId && hitPoint ? [hitPoint.x, hitPoint.y, hitPoint.z] : null;
+      setHoveredInteractable(hoveredId, pointTuple);
+    } else if (hoveredId && hitPoint) {
+      // Same id, fresh point — write the new point so press handlers
+      // see the latest hit position. This is a direct setState (not
+      // through the action) to avoid the id-change render path.
+      useWorldStore.setState({
+        hoveredInteractablePoint: [hitPoint.x, hitPoint.y, hitPoint.z],
+      });
     }
   });
 
@@ -253,8 +263,9 @@ export function InteractionController(): null {
       if (!state.controlsDismissed) {
         return;
       }
-      const hit = latestHit.current;
-      if (!hit) {
+      const hoveredId = state.hoveredInteractableId;
+      const hoveredPoint = state.hoveredInteractablePoint;
+      if (!hoveredId || !hoveredPoint) {
         return;
       }
       // If a previous release was still pending its minimum hold,
@@ -265,7 +276,7 @@ export function InteractionController(): null {
         pendingReleaseTimer = null;
       }
       pressStartTime = performance.now();
-      beginInteractPress(hit.id, [hit.point.x, hit.point.y, hit.point.z]);
+      beginInteractPress(hoveredId, hoveredPoint);
     };
     const onMouseUp = (): void => {
       // Same gate as mousedown — skip if a touch interaction just

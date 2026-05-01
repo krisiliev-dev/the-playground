@@ -54,8 +54,12 @@ interface AppActions {
   /** Set which interactable the crosshair is currently aimed at, or
    *  null if nothing is in range. The InteractionController updates
    *  this each frame; individual `useInteractable` consumers read it
-   *  to drive their own highlight visuals. */
-  setHoveredInteractable: (id: string | null) => void;
+   *  to drive their own highlight visuals. The `point` is the
+   *  raycast hit position in world space — captured here (not in a
+   *  controller-private ref) so click handlers + tests can read the
+   *  same value the raycaster wrote. Pass `null` for both when
+   *  nothing is hovered. */
+  setHoveredInteractable: (id: string | null, point?: [number, number, number] | null) => void;
   /** Mark mouse-down over an interactable. CursorAvatar reads this to
    *  lean the cursor forward to *touch* the target while held. The
    *  point is the world-space hit position from the crosshair raycast,
@@ -90,6 +94,14 @@ interface InteractionSlice {
    *  each frame; consumed by individual `useInteractable` callers for
    *  their highlight visuals. */
   hoveredInteractableId: string | null;
+  /** World-space hit point on the hovered interactable's surface,
+   *  paired with `hoveredInteractableId`. The InteractionController
+   *  writes this each frame alongside the id; click handlers read
+   *  it on mousedown to seed the press's target point. Lives in the
+   *  store (not a controller-private ref) so the click → press
+   *  pipeline is observable from outside, and tests can inject a
+   *  hit directly. Null whenever `hoveredInteractableId` is null. */
+  hoveredInteractablePoint: [number, number, number] | null;
   /** Id of the interactable currently being pressed (mouse-down landed
    *  on it, mouse-up hasn't fired yet). Decoupled from `hovered…` so
    *  callers can detect "press started here, cursor since wandered" —
@@ -115,6 +127,7 @@ export const useWorldStore = create<AppState & AppActions & RevealSlice & Intera
     // once the reveal completes. See CursorAvatar.tsx for the scale logic.
     cursorAvatarActive: true,
     hoveredInteractableId: null,
+    hoveredInteractablePoint: null,
     pressedInteractableId: null,
     pressedTargetPoint: null,
 
@@ -158,7 +171,12 @@ export const useWorldStore = create<AppState & AppActions & RevealSlice & Intera
 
     setControlsDismissed: (dismissed) => set({ controlsDismissed: dismissed }),
 
-    setHoveredInteractable: (id) => set({ hoveredInteractableId: id }),
+    setHoveredInteractable: (id, point = null) =>
+      // Always pair id + point: when id is null, point should also be
+      // null (no hover, no surface). When id is non-null, callers
+      // SHOULD pass a point — but if they don't (legacy call sites),
+      // we clear the point so it can't go stale relative to the id.
+      set({ hoveredInteractableId: id, hoveredInteractablePoint: id ? point : null }),
 
     beginInteractPress: (id, point) =>
       set({ pressedInteractableId: id, pressedTargetPoint: point }),

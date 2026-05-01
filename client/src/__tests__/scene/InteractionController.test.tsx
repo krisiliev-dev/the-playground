@@ -16,7 +16,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render } from '@testing-library/react';
-import { Group, Vector3 } from 'three';
+import { Group } from 'three';
 
 vi.mock('@react-three/fiber', () => ({
   useFrame: vi.fn(),
@@ -142,6 +142,7 @@ describe('InteractionController click commit path', () => {
     interactableHandlers.set('cube-A', handler);
     useWorldStore.setState({
       hoveredInteractableId: 'cube-A',
+      hoveredInteractablePoint: [0, 0, 0],
     });
     useWorldStore.getState().beginInteractPress('cube-A', [0, 0, 0]);
 
@@ -149,6 +150,140 @@ describe('InteractionController click commit path', () => {
 
     window.dispatchEvent(new MouseEvent('mouseup'));
     expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it('mousedown begins a press from the store-resident hover state', () => {
+    useWorldStore.setState({
+      hoveredInteractableId: 'cube-A',
+      hoveredInteractablePoint: [10, 20, 30],
+    });
+
+    render(<InteractionController />);
+    window.dispatchEvent(new MouseEvent('mousedown'));
+
+    const state = useWorldStore.getState();
+    expect(state.pressedInteractableId).toBe('cube-A');
+    expect(state.pressedTargetPoint).toEqual([10, 20, 30]);
+  });
+
+  it('mousedown is a no-op when nothing is hovered', () => {
+    useWorldStore.setState({
+      hoveredInteractableId: null,
+      hoveredInteractablePoint: null,
+    });
+
+    render(<InteractionController />);
+    window.dispatchEvent(new MouseEvent('mousedown'));
+
+    expect(useWorldStore.getState().pressedInteractableId).toBeNull();
+  });
+
+  it('mousedown is a no-op while controlsDismissed=false (avatar mode not yet active)', () => {
+    useWorldStore.setState({
+      controlsDismissed: false,
+      hoveredInteractableId: 'cube-A',
+      hoveredInteractablePoint: [0, 0, 0],
+    });
+
+    render(<InteractionController />);
+    window.dispatchEvent(new MouseEvent('mousedown'));
+
+    expect(useWorldStore.getState().pressedInteractableId).toBeNull();
+  });
+
+  it('mousedown is suppressed during a touch (synth-event gate)', () => {
+    setTouchInProgress(true);
+    useWorldStore.setState({
+      hoveredInteractableId: 'cube-A',
+      hoveredInteractablePoint: [0, 0, 0],
+    });
+
+    render(<InteractionController />);
+    window.dispatchEvent(new MouseEvent('mousedown'));
+
+    expect(useWorldStore.getState().pressedInteractableId).toBeNull();
+    setTouchInProgress(false);
+  });
+
+  it('full mousedown → mouseup flow: short hold defers release until MIN_PRESS_HOLD_MS elapses', () => {
+    const handler = vi.fn();
+    interactableHandlers.set('cube-A', handler);
+    useWorldStore.setState({
+      hoveredInteractableId: 'cube-A',
+      hoveredInteractablePoint: [1, 2, 3],
+    });
+
+    render(<InteractionController />);
+
+    // Press starts.
+    window.dispatchEvent(new MouseEvent('mousedown'));
+    expect(useWorldStore.getState().pressedInteractableId).toBe('cube-A');
+    expect(useWorldStore.getState().pressedTargetPoint).toEqual([1, 2, 3]);
+
+    // Release after 50ms — less than MIN_PRESS_HOLD_MS = 130 → defer.
+    vi.advanceTimersByTime(50);
+    window.dispatchEvent(new MouseEvent('mouseup'));
+
+    // Handler fires immediately on mouseup (audio + click cue).
+    expect(handler).toHaveBeenCalledTimes(1);
+    // Press is NOT yet released — visible animation window is preserved.
+    expect(useWorldStore.getState().pressedInteractableId).toBe('cube-A');
+
+    // Advance the deferred release timer.
+    vi.advanceTimersByTime(MIN_PRESS_HOLD_MS - 50);
+    expect(useWorldStore.getState().pressedInteractableId).toBeNull();
+    expect(useWorldStore.getState().pressedTargetPoint).toBeNull();
+  });
+
+  it('full mousedown → mouseup flow: long hold releases synchronously', () => {
+    useWorldStore.setState({
+      hoveredInteractableId: 'cube-A',
+      hoveredInteractablePoint: [1, 2, 3],
+    });
+
+    render(<InteractionController />);
+
+    window.dispatchEvent(new MouseEvent('mousedown'));
+    // Hold past MIN_PRESS_HOLD_MS so planRelease returns immediate.
+    vi.advanceTimersByTime(MIN_PRESS_HOLD_MS + 50);
+    window.dispatchEvent(new MouseEvent('mouseup'));
+
+    expect(useWorldStore.getState().pressedInteractableId).toBeNull();
+  });
+
+  it('a fresh mousedown supersedes any pending deferred release', () => {
+    useWorldStore.setState({
+      hoveredInteractableId: 'cube-A',
+      hoveredInteractablePoint: [1, 2, 3],
+    });
+
+    render(<InteractionController />);
+
+    // Press 1 — short hold, deferred release is armed.
+    window.dispatchEvent(new MouseEvent('mousedown'));
+    vi.advanceTimersByTime(20);
+    window.dispatchEvent(new MouseEvent('mouseup'));
+    expect(useWorldStore.getState().pressedInteractableId).toBe('cube-A');
+
+    // Press 2 lands BEFORE press 1's deferred release would fire.
+    vi.advanceTimersByTime(50);
+    useWorldStore.setState({
+      hoveredInteractableId: 'cube-B',
+      hoveredInteractablePoint: [4, 5, 6],
+    });
+    window.dispatchEvent(new MouseEvent('mousedown'));
+
+    // Press 1's pending release was cancelled — pressed id reflects
+    // press 2 cleanly, no surprise null in the middle.
+    expect(useWorldStore.getState().pressedInteractableId).toBe('cube-B');
+    expect(useWorldStore.getState().pressedTargetPoint).toEqual([4, 5, 6]);
+
+    // Advance enough that press 1's old timer would have fired (had
+    // it not been cancelled). pressed id still reflects press 2.
+    vi.advanceTimersByTime(200);
+    // Press 2 hasn't been released — only mousedown has happened. The
+    // pressedInteractableId should still be 'cube-B'.
+    expect(useWorldStore.getState().pressedInteractableId).toBe('cube-B');
   });
 
   it('mouseup does NOT fire handler if cursor wandered off (pressed !== hovered)', () => {
@@ -211,7 +346,3 @@ describe('InteractionController click commit path', () => {
     expect(useWorldStore.getState().pressedTargetPoint).toBeNull();
   });
 });
-
-// Use Vector3 once so the import isn't dead — keeps three's tree-shake
-// from accidentally complaining when more elaborate scene mocks land.
-void new Vector3();
