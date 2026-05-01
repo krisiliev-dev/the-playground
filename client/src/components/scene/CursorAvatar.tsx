@@ -35,6 +35,14 @@ import { useIsTouchPrimary } from '@/utils';
 import { sfx } from '../audio/SfxManager';
 import { interactableHandlers, setTouchInProgress } from './Interactable';
 import { SWING_PRE } from './reveal/constants';
+import {
+  clampToBoxInterior,
+  computeCameraCollisionRatio,
+  computeLeanTarget,
+  computeWalkVector,
+  computeWallProximity,
+  projectNDCToWorld,
+} from './cursorAvatarMath';
 
 const MODEL_URL = '/models/3d_icon_cursor.glb';
 
@@ -179,6 +187,10 @@ function ActiveCursor(): JSX.Element {
   const tmpVec = useRef(new Vector3());
   const tmpEuler = useRef(new Euler());
   const tmpCamTarget = useRef(new Vector3());
+  /** Cube half-extents reused per frame for clamp + collision —
+   *  written from the live `dimensions` so it tracks any future
+   *  resize of the environment. */
+  const tmpCubeHalf = useRef(new Vector3());
   /** Camera-basis buffers — we reproject the cursor each frame from
    *  camera.quaternion + camera.position directly, instead of going through
    *  unproject(). Skipping the matrix inversion removes a small floating-
@@ -850,13 +862,9 @@ function ActiveCursor(): JSX.Element {
       } else {
         // Camera-anchored OR live-pointer mode: project an NDC pointer to
         // a world-space cursor pose using the camera's basis vectors (no
-        // matrix inversion → no per-frame floating-point drift). Cursor
-        // sits POINTER_DEPTH in front of the camera, with NDC offsets
-        // along the screen-plane right/up axes.
+        // matrix inversion → no per-frame floating-point drift).
         const cam = camera as PerspectiveCamera;
         const fovY = (cam.fov * Math.PI) / 180;
-        const halfH = POINTER_DEPTH * Math.tan(fovY / 2);
-        const halfW = halfH * cam.aspect;
         tmpCamFwd.current.set(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
         tmpCamRight.current.set(1, 0, 0).applyQuaternion(camera.quaternion).normalize();
         tmpCamUp.current.set(0, 1, 0).applyQuaternion(camera.quaternion).normalize();
@@ -882,11 +890,18 @@ function ActiveCursor(): JSX.Element {
           py = pointer.y;
         }
 
-        groupRef.current.position
-          .copy(camera.position)
-          .addScaledVector(tmpCamFwd.current, POINTER_DEPTH)
-          .addScaledVector(tmpCamRight.current, px * halfW)
-          .addScaledVector(tmpCamUp.current, py * halfH);
+        projectNDCToWorld(
+          groupRef.current.position,
+          camera.position,
+          tmpCamFwd.current,
+          tmpCamRight.current,
+          tmpCamUp.current,
+          fovY,
+          cam.aspect,
+          POINTER_DEPTH,
+          px,
+          py,
+        );
         groupRef.current.quaternion.copy(camera.quaternion);
       }
 
@@ -909,89 +924,49 @@ function ActiveCursor(): JSX.Element {
     }
 
     const yaw = avatarYaw.current;
-    const pitch = avatarPitch.current;
-    const cy = Math.cos(yaw);
-    const sy = Math.sin(yaw);
-    const cp = Math.cos(pitch);
-    const sp = Math.sin(pitch);
 
-    // Forward = (0, 0, -1) rotated by Euler(pitch, yaw, 0, 'YXZ') — same
-    // direction the camera is looking. W/S (and 2-finger pinch on
-    // mobile) move along this so the avatar flies up/down when the
-    // camera is pitched. Strafe (A/D) drops pitch so left/right stays
-    // horizontal (FPS feel). Mobile has no strafe yet — 2-finger
-    // pinch is forward/back only, A/D is desktop-only.
-    let mx = 0;
-    let my = 0;
-    let mz = 0;
-    // Forward axis contribution: keys are binary (±1), the touch
-    // throttle is continuous (-1..+1).
-    const fwdInput =
-      (keys.current.w ? 1 : 0) - (keys.current.s ? 1 : 0) + touchWalkVelocity.current;
-    if (fwdInput !== 0) {
-      mx += fwdInput * -sy * cp;
-      my += fwdInput * sp;
-      mz += fwdInput * -cy * cp;
-    }
-    if (keys.current.d) {
-      mx += cy;
-      mz += -sy;
-    }
-    if (keys.current.a) {
-      mx -= cy;
-      mz -= -sy;
-    }
-
-    const len = Math.hypot(mx, my, mz);
-    if (len > 0) {
+    // Walk vector from WASD + touch throttle, rotated by camera
+    // yaw/pitch. See ./cursorAvatarMath.computeWalkVector — A/D strafe
+    // ignores pitch (horizontal), W/S follows pitch (FPS-style flying).
+    const walk = computeWalkVector(
+      keys.current,
+      yaw,
+      avatarPitch.current,
+      touchWalkVelocity.current,
+    );
+    if (walk.len > 0) {
       // Cap normalisation at 1 so partial throttles (e.g. touch pinch
       // at half spread) move at half speed instead of being scaled
       // back up to full. Diagonals (W+D = len √2) still get the
       // anti-faster-diagonals normalisation.
-      const cappedLen = Math.max(1, len);
+      const cappedLen = Math.max(1, walk.len);
       const step = (WALK_SPEED * delta) / cappedLen;
-      avatarPos.current.x += mx * step;
-      avatarPos.current.y += my * step;
-      avatarPos.current.z += mz * step;
+      avatarPos.current.x += walk.mx * step;
+      avatarPos.current.y += walk.my * step;
+      avatarPos.current.z += walk.mz * step;
     }
+
+    // Cube half-extents from the live environment dimensions. Reused
+    // for both the avatar clamp and the camera collision check below.
+    tmpCubeHalf.current.set(dimensions[0] * 0.5, dimensions[1] * 0.5, dimensions[2] * 0.5);
 
     // Avatar collision: clamp to cube interior so the body never pokes
     // through a wall.
-    const aMaxX = dimensions[0] * 0.5 - AVATAR_WALL_MARGIN;
-    const aMaxY = dimensions[1] * 0.5 - AVATAR_WALL_MARGIN;
-    const aMaxZ = dimensions[2] * 0.5 - AVATAR_WALL_MARGIN;
-    if (avatarPos.current.x < -aMaxX) {
-      avatarPos.current.x = -aMaxX;
-    } else if (avatarPos.current.x > aMaxX) {
-      avatarPos.current.x = aMaxX;
-    }
-    if (avatarPos.current.y < -aMaxY) {
-      avatarPos.current.y = -aMaxY;
-    } else if (avatarPos.current.y > aMaxY) {
-      avatarPos.current.y = aMaxY;
-    }
-    // Proximity ambient: the cube hums louder as the avatar drifts
-    // toward an edge, silent at the centre. Compute distance to the
-    // *nearest* wall (any axis), map to a 0..1 factor over the fade
-    // band, and drive the loop's gain. Loop is started lazily the
-    // first frame the avatar enters the band.
+    clampToBoxInterior(avatarPos.current, tmpCubeHalf.current, AVATAR_WALL_MARGIN);
+
+    // Proximity ambient: cube hum scales with the avatar's distance to
+    // the nearest wall (any axis) — silent at centre, full at touching.
     {
-      const cx = dimensions[0] * 0.5 - Math.abs(avatarPos.current.x);
-      const cy = dimensions[1] * 0.5 - Math.abs(avatarPos.current.y);
-      const cz = dimensions[2] * 0.5 - Math.abs(avatarPos.current.z);
-      const distNearest = Math.min(cx, cy, cz);
-      const proximity = Math.max(0, 1 - distNearest / WALL_AMBIENT_FADE_DISTANCE);
+      const proximity = computeWallProximity(
+        avatarPos.current,
+        tmpCubeHalf.current,
+        WALL_AMBIENT_FADE_DISTANCE,
+      );
       if (proximity > 0 && !sfx.isLoopActive('wallAmbient')) {
         // Start silent; the next setLoopVolume below ramps it in.
         void sfx.play('wallAmbient', { volumeMultiplier: 0 });
       }
       sfx.setLoopVolume('wallAmbient', WALL_AMBIENT_BASE_VOLUME * proximity);
-    }
-
-    if (avatarPos.current.z < -aMaxZ) {
-      avatarPos.current.z = -aMaxZ;
-    } else if (avatarPos.current.z > aMaxZ) {
-      avatarPos.current.z = aMaxZ;
     }
 
     // Avatar's target rotation as a quaternion (Y-axis yaw rotation).
@@ -1004,38 +979,13 @@ function ActiveCursor(): JSX.Element {
     tmpVec.current.copy(FOLLOW_OFFSET).applyEuler(tmpEuler.current);
 
     // Camera collision: shorten the offset so the camera stays inside
-    // the cube. Solve for the smallest positive t along the offset
-    // direction at which (avatarPos + dir·t) hits the wall the offset
-    // points toward, on each axis.
-    const offsetLen = FOLLOW_OFFSET.length();
-    const cMaxX = dimensions[0] * 0.5 - CAMERA_WALL_MARGIN;
-    const cMaxY = dimensions[1] * 0.5 - CAMERA_WALL_MARGIN;
-    const cMaxZ = dimensions[2] * 0.5 - CAMERA_WALL_MARGIN;
-    let maxT = offsetLen;
-    const dx = tmpVec.current.x / offsetLen;
-    const dy = tmpVec.current.y / offsetLen;
-    const dz = tmpVec.current.z / offsetLen;
-    if (Math.abs(dx) > 1e-6) {
-      const t = ((dx > 0 ? cMaxX : -cMaxX) - avatarPos.current.x) / dx;
-      if (t > 0 && t < maxT) {
-        maxT = t;
-      }
-    }
-    if (Math.abs(dy) > 1e-6) {
-      const t = ((dy > 0 ? cMaxY : -cMaxY) - avatarPos.current.y) / dy;
-      if (t > 0 && t < maxT) {
-        maxT = t;
-      }
-    }
-    if (Math.abs(dz) > 1e-6) {
-      const t = ((dz > 0 ? cMaxZ : -cMaxZ) - avatarPos.current.z) / dz;
-      if (t > 0 && t < maxT) {
-        maxT = t;
-      }
-    }
-
-    // Target camera position with the (possibly shortened) offset.
-    const ratio = Math.max(0, maxT) / offsetLen;
+    // the cube. See ./cursorAvatarMath.computeCameraCollisionRatio.
+    const ratio = computeCameraCollisionRatio(
+      avatarPos.current,
+      tmpVec.current,
+      tmpCubeHalf.current,
+      CAMERA_WALL_MARGIN,
+    );
     tmpCamTarget.current.copy(avatarPos.current).addScaledVector(tmpVec.current, ratio);
 
     // Compute target camera rotation via a temp Object3D so we can
@@ -1085,18 +1035,19 @@ function ActiveCursor(): JSX.Element {
       if (pressedTargetPoint) {
         // Position the group such that the visible tip — measured
         // once from the model's bbox — lands exactly on the raycast
-        // hit. tipWorldBuffer = tipLocal rotated by press-time quat,
-        // scaled by AVATAR_SCALE. groupOrigin = hit - tipWorldBuffer
-        // so groupOrigin + tipWorldBuffer = hit. Press-time captured
-        // values (not live camera) keep the cursor world-anchored
-        // while the user rotates the camera during a held press.
-        tipWorldBuffer.current
-          .copy(tipLocalOffset.current)
-          .applyQuaternion(pressAnchorQuat)
-          .multiplyScalar(AVATAR_SCALE);
-        leanTarget.current
-          .set(pressedTargetPoint[0], pressedTargetPoint[1], pressedTargetPoint[2])
-          .sub(tipWorldBuffer.current);
+        // hit. See ./cursorAvatarMath.computeLeanTarget. Press-time
+        // captured `pressAnchorQuat` (not live camera) keeps the
+        // cursor world-anchored while the user rotates the camera
+        // during a held press.
+        tmpVec.current.set(pressedTargetPoint[0], pressedTargetPoint[1], pressedTargetPoint[2]);
+        computeLeanTarget(
+          leanTarget.current,
+          tmpVec.current,
+          tipLocalOffset.current,
+          pressAnchorQuat,
+          AVATAR_SCALE,
+          tipWorldBuffer.current,
+        );
         cursorPosTarget = leanTarget.current;
         cursorQuatTarget = pressAnchorQuat;
       } else {
