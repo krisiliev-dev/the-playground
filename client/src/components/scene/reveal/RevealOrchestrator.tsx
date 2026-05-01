@@ -15,16 +15,19 @@ import { Portal } from './Portal';
 import { Sword } from './Sword';
 import { BulletTimeDirector } from './BulletTimeDirector';
 import { VIBE_SLOTS } from './vibeFormation';
-import { useRevealAudio } from './useRevealAudio';
+import { sfx } from '../../audio/SfxManager';
 
 /** Armed phase doubles as the camera-pan window — 800ms gives enough
  *  time for the camera to swing toward the spawn direction so the user
  *  registers what's about to happen. */
 const ARMED_TO_SWINGING_MS = 800;
 /** Sword swing duration: 5.5s per-sword (3.5 pre + 1.2 mid + 0.8 post) +
- *  cascade tail (12 × 50ms = 0.6s). Total ≈ 6.1s; round to 6300ms with
- *  a small buffer. */
-const SWINGING_TO_IMPACT_MS = 6300;
+ *  cascade tail (12 × 50ms stagger = 0.6s). Total ≈ 6.1s; padded to
+ *  6800ms so every sword has time to cross its `t >= SWING_DURATION`
+ *  threshold inside the swinging state (otherwise the per-frame slam
+ *  fire is skipped and the catch-up path runs at default volume,
+ *  losing the velocity-driven dynamics for most slams in the cascade). */
+const SWINGING_TO_IMPACT_MS = 6800;
 const IMPACT_TO_REVEALED_MS = 1450;
 
 export function RevealOrchestrator(): JSX.Element {
@@ -32,8 +35,7 @@ export function RevealOrchestrator(): JSX.Element {
   const advanceReveal = useWorldStore((s) => s.advanceReveal);
   const setClickHit = useWorldStore((s) => s.setClickHit);
   const dimensions = useWorldStore((s) => s.environment.dimensions);
-
-  useRevealAudio();
+  const clickHit = useWorldStore((s) => s.clickHit);
 
   const { camera } = useThree();
 
@@ -50,6 +52,13 @@ export function RevealOrchestrator(): JSX.Element {
     }
 
     const onClick = (e: MouseEvent): void => {
+      // Synchronous Safari audio unlock — MUST be the first thing in
+      // the click handler. Creates the AudioContext + plays the silent
+      // unlock buffer + resume() on this exact call stack, all before
+      // any await. Without this, Safari keeps the context locked even
+      // after later resume() calls succeed, and every cue is silent.
+      sfx.unlock();
+
       if (useWorldStore.getState().revealState !== 'idle') {
         return;
       }
@@ -67,6 +76,9 @@ export function RevealOrchestrator(): JSX.Element {
 
       // eslint-disable-next-line no-console
       console.log('[Reveal] click registered at', hit.point);
+      // Audio for the click itself is handled by the global mouse
+      // feedback in App.tsx (mouseDown + mouseUp cues). The reveal
+      // click handler just advances state.
       setClickHit({
         point: [hit.point.x, hit.point.y, hit.point.z],
         normal: [hit.normal.x, hit.normal.y, hit.normal.z],
@@ -81,7 +93,15 @@ export function RevealOrchestrator(): JSX.Element {
   useEffect(() => {
     // eslint-disable-next-line no-console
     console.log('[Reveal] state →', revealState);
-  }, [revealState]);
+    // Spatial low-frequency boom emitted at the wall hit point on the
+    // moment of impact. The per-sword slams provide the higher-
+    // frequency punch; this rumble adds weight to the wall itself.
+    if (revealState === 'impact' && clickHit) {
+      void sfx.play('impactRumble', {
+        position: { x: clickHit.point[0], y: clickHit.point[1], z: clickHit.point[2] },
+      });
+    }
+  }, [revealState, clickHit]);
 
   // Auto-advance the rest of the beats with timers.
   useEffect(() => {

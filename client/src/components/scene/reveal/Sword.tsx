@@ -35,6 +35,8 @@ import {
 import { useWorldStore } from '@/store';
 import { triggerImpactShake } from '../cameraShake';
 import { type SwordSlot } from './vibeFormation';
+import { sfx, type PositionalLoopHandle } from '../../audio/SfxManager';
+import { useSwordKinematics } from './useSwordKinematics';
 
 const SWORD_URL = '/models/sword/scene.gltf';
 
@@ -212,6 +214,60 @@ export function Sword({ slot, staggerIndex = 0 }: SwordProps): JSX.Element {
 
   const stateEnteredAt = useRef(0);
   const previousState = useRef(revealState);
+  /** Per-sword flying-audio loop handle. Created when this sword's
+   *  swing begins, position-updated each frame to track the mesh,
+   *  stopped on impact. Ref so it survives re-renders. */
+  const flyingHandleRef = useRef<PositionalLoopHandle | null>(null);
+  /** Per-frame motion → audio binding (speed/spin/jerk → volume +
+   *  pitch + dither on the flying loop). Returns the linear speed
+   *  each frame so we can capture velocity AT impact for the
+   *  swordSlam fire's velocity-scaled volume + pitch jitter. */
+  const updateKinematics = useSwordKinematics();
+  /** Velocity magnitude at the moment of slam fire — captured to
+   *  scale the swordSlam cue's volume + pitch jitter, so harder hits
+   *  (faster impact velocity) feel heavier. */
+  const slamVelocity = useRef(0);
+  // Stop the flying loop if the sword unmounts mid-flight (e.g. test
+  // teardown or hot-reload) so it doesn't keep humming.
+  useEffect(
+    () => () => {
+      flyingHandleRef.current?.stop();
+      flyingHandleRef.current = null;
+    },
+    [],
+  );
+  // Stop the flying loop whenever the reveal leaves the swinging
+  // state. The per-frame slam check only fires while `revealState ===
+  // 'swinging'`, so if the orchestrator advances to `impact` before
+  // a sword's swing arc completes (timer-driven, not slam-driven),
+  // the slam path is skipped and the loop would otherwise keep
+  // humming forever. This effect catches every state-exit path AND
+  // fires a catch-up slam for any sword that hasn't fired one yet,
+  // so all 11 slams are guaranteed audible regardless of timer race.
+  useEffect(() => {
+    if (revealState === 'swinging') {
+      return;
+    }
+    flyingHandleRef.current?.stop(80);
+    flyingHandleRef.current = null;
+    if (revealState === 'impact' && !impactFired.current && clickHit) {
+      impactFired.current = true;
+      const SLAM_POS_JITTER = 20;
+      // Use a moderate default velocity for catch-up slams since the
+      // sword may not have completed its arc to peak speed.
+      const fallbackVel = 60;
+      void sfx.play('swordSlam', {
+        volumeMultiplier: 0.55,
+        pitchJitter: 0.6 + Math.min(0.15, fallbackVel / 400),
+        filterGain: (Math.random() - 0.5) * 20,
+        position: {
+          x: clickHit.point[0] + (Math.random() - 0.5) * SLAM_POS_JITTER,
+          y: clickHit.point[1] + (Math.random() - 0.5) * SLAM_POS_JITTER,
+          z: clickHit.point[2] + (Math.random() - 0.5) * SLAM_POS_JITTER,
+        },
+      });
+    }
+  }, [revealState, clickHit]);
   useEffect(() => {
     if (previousState.current !== revealState) {
       stateEnteredAt.current = performance.now() / 1000;
@@ -512,6 +568,19 @@ export function Sword({ slot, staggerIndex = 0 }: SwordProps): JSX.Element {
     // Fire this sword's flash exactly when its effective swing begins.
     if (revealState === 'swinging' && flashStartedAt.current < 0 && t >= 0) {
       flashStartedAt.current = state.clock.elapsedTime;
+      // Spawn punch: per-sword cue at the spawn point. Reverb is set
+      // in the manifest so the cube room "rings" each spawn.
+      const spawnAt = { x: spawnPos.x, y: spawnPos.y, z: spawnPos.z };
+      void sfx.play('spawnFlash', { volumeMultiplier: 0.5, position: spawnAt });
+      // Per-sword flying loop: starts at spawn, position is updated
+      // each frame below to track the sword's mesh. Distance falloff
+      // is handled by the panner so close-passing swords swell while
+      // far ones stay quiet — the "dynamicness" the user wanted from
+      // the cascade.
+      flyingHandleRef.current = sfx.playPositionalLoop('swordFlying', spawnAt, {
+        pitchJitter: 0.12,
+        volumeMultiplier: 0.7,
+      });
     }
     // Fire this sword's IMPACT flash + shake when it reaches the end of
     // its swing (slams into the wall ring after the post leg).
@@ -519,6 +588,43 @@ export function Sword({ slot, staggerIndex = 0 }: SwordProps): JSX.Element {
       impactFlashStartedAt.current = state.clock.elapsedTime;
       impactFired.current = true;
       triggerImpactShake(state.clock.elapsedTime);
+      // Stop this sword's flying loop with a short fade so the cut
+      // isn't an audible click — the slam's transient and the room's
+      // wet tail cover the silence.
+      flyingHandleRef.current?.stop(60);
+      flyingHandleRef.current = null;
+      // Velocity-driven slam + spatial jitter. Each slam:
+      //   - Volume scaled by impact velocity (harder hit → louder).
+      //   - Pitch jitter widened to ±40% (was ±25%) for distinctness
+      //     across the 12-cascade.
+      //   - Position offset by a small random vector around the wall
+      //     hit point so each slam emits from a slightly different
+      //     spatial location — the panner gives them slightly
+      //     different stereo positions, helping the ear separate
+      //     them instead of merging into a single block.
+      const v = slamVelocity.current;
+      const velFactor = Math.min(1.6, 0.7 + v / 80);
+      // Wide jitter + spatial spread + per-fire EQ for cascade
+      // distinctness:
+      //   - pitchJitter 0.6 + velocity boost: each slam at a
+      //     noticeably different fundamental frequency.
+      //   - position jittered around hit point: each slam pans to a
+      //     different stereo location.
+      //   - filterGain ±10dB: high-shelf boost/cut at 3kHz varies per
+      //     slam — some bright, some dark. Slam.wav is low-end heavy,
+      //     so without per-fire EQ the 12 hits all sit in the same
+      //     frequency band and the ear can't separate them.
+      const SLAM_POS_JITTER = 20;
+      void sfx.play('swordSlam', {
+        volumeMultiplier: 0.55 * velFactor,
+        pitchJitter: 0.6 + Math.min(0.15, v / 400),
+        filterGain: (Math.random() - 0.5) * 20,
+        position: {
+          x: hitPoint.x + (Math.random() - 0.5) * SLAM_POS_JITTER,
+          y: hitPoint.y + (Math.random() - 0.5) * SLAM_POS_JITTER,
+          z: hitPoint.z + (Math.random() - 0.5) * SLAM_POS_JITTER,
+        },
+      });
     }
 
     let opacityTarget = 0;
@@ -660,6 +766,12 @@ export function Sword({ slot, staggerIndex = 0 }: SwordProps): JSX.Element {
     obj.position.copy(targetPos);
     obj.quaternion.copy(targetQuat);
     obj.scale.setScalar(calibratedScale.current * visualScale);
+
+    // Drive the flying loop's volume/pitch/dither from per-frame
+    // motion derivatives, and stash the linear speed so the next-frame
+    // slam check sees the velocity AT impact.
+    const dt = Math.max(delta, 1 / 240);
+    slamVelocity.current = updateKinematics(targetPos, targetQuat, dt, flyingHandleRef.current);
 
     const lerpT = 1 - Math.exp(-LERP_RATE * delta);
     scene.traverse((o: Object3D) => {

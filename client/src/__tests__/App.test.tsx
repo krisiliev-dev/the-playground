@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { useEffect } from 'react';
 import { act, render, screen } from '@testing-library/react';
 import { App } from '@/App';
 import { useWorldStore } from '@/store';
@@ -31,12 +32,20 @@ vi.mock('@/components/scene', () => ({
 }));
 
 // CursorText/Crosshair/ControlsHint read window APIs on mount; stub them
-// so the App test stays focused on the keyboard listener wiring.
+// so the App test stays focused on the keyboard listener wiring. The
+// LoadingScreen mock fires `onReady` synchronously on mount so the boot
+// gate doesn't block tests on the WebGL probe (jsdom has no real GL).
 vi.mock('@/components/overlay', () => ({
   CursorText: () => <div data-testid="cursor-text" />,
   Crosshair: () => <div data-testid="crosshair" />,
   ControlsHint: () => <div data-testid="controls-hint" />,
   HazeOverlay: () => null,
+  LoadingScreen: ({ onReady }: { onReady: () => void; onFailed: (r: string) => void }) => {
+    useEffect(() => {
+      onReady();
+    }, [onReady]);
+    return <div data-testid="loading-screen" />;
+  },
 }));
 
 describe('App', () => {

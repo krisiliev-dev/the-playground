@@ -1,11 +1,14 @@
 /**
  * DevTools — performance overlay for development.
  *
- * Mounts `r3f-perf` inside the Canvas. Renders nothing in production, and
- * accepts a `?perf=1` query param to opt out in dev (so you can see the
- * scene without the panel covering the corner). The panel reports GPU/CPU
- * frame time, draw calls, triangle count, texture memory — useful for
- * catching the kind of regression that crashed the browser earlier.
+ * Mounts `r3f-perf` inside the Canvas, but only when explicitly opted
+ * in via `?perf=1`. Default-off because `r3f-perf` mounts its own
+ * WebGL canvas alongside the real one, contributing to Safari's
+ * per-page WebGL context budget (typically 8–16 contexts). Hitting that
+ * budget shows up as the rare "born-lost" context bug — the real Canvas
+ * is created in CONTEXT_LOST state, the renderer fails its
+ * `getShaderPrecisionFormat()` call, and the scene mounts visually
+ * broken. Keeping the perf overlay opt-in avoids that contribution.
  */
 import { Perf } from 'r3f-perf';
 
@@ -17,10 +20,7 @@ function shouldShowPerf(): boolean {
     return false;
   }
   const params = new URLSearchParams(window.location.search);
-  if (params.get('perf') === '0') {
-    return false;
-  }
-  return true;
+  return params.get('perf') === '1';
 }
 
 export function DevTools(): JSX.Element | null {

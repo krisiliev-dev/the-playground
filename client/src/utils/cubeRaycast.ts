@@ -21,20 +21,20 @@ export function intersectInsideCube(
   half: Vector3,
 ): CubeHit | null {
   let bestT = Infinity;
-  let axis: 0 | 1 | 2 = 0;
+  let axis = 0;
   let sign: 1 | -1 = 1;
 
-  const o: [number, number, number] = [origin.x, origin.y, origin.z];
-  const d: [number, number, number] = [direction.x, direction.y, direction.z];
-  const h: [number, number, number] = [half.x, half.y, half.z];
-
-  for (let i = 0 as 0 | 1 | 2; i < 3; i = (i + 1) as 0 | 1 | 2) {
-    const oi = o[i] ?? 0;
-    const di = d[i] ?? 0;
-    const hi = h[i] ?? 0;
+  // Slab method: for each axis, compute t at +half and -half walls,
+  // keep the smallest positive t (first wall the ray exits through).
+  // Read components directly off Vector3 fields to avoid per-call
+  // tuple allocations on the click hot path.
+  for (let i = 0; i < 3; i++) {
+    const di = i === 0 ? direction.x : i === 1 ? direction.y : direction.z;
     if (Math.abs(di) < 1e-8) {
       continue;
     }
+    const oi = i === 0 ? origin.x : i === 1 ? origin.y : origin.z;
+    const hi = i === 0 ? half.x : i === 1 ? half.y : half.z;
     const t1 = (hi - oi) / di;
     const t2 = (-hi - oi) / di;
     if (t1 > 0 && t1 < bestT) {
@@ -58,8 +58,7 @@ export function intersectInsideCube(
     origin.y + direction.y * bestT,
     origin.z + direction.z * bestT,
   );
-
-  const normal = new Vector3(0, 0, 0);
+  const normal = new Vector3();
   if (axis === 0) {
     normal.x = -sign;
   } else if (axis === 1) {
@@ -67,6 +66,5 @@ export function intersectInsideCube(
   } else {
     normal.z = -sign;
   }
-
   return { point, normal };
 }

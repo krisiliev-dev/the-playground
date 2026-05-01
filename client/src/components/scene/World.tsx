@@ -15,6 +15,7 @@ import { SkyBackground } from './SkyBackground';
 import { RevealOrchestrator } from './reveal';
 import { Haze3D } from './Haze3D';
 import { OrbitControls } from '@react-three/drei';
+import { SpatialAudioListener } from '../audio/SpatialAudioListener';
 
 /** Period in seconds for one full bob cycle (up + down). */
 const FLOAT_PERIOD = 6;
@@ -36,6 +37,7 @@ export function World(): JSX.Element {
 
   return (
     <>
+      <SpatialAudioListener />
       <ambientLight color={environment.ambientColor} intensity={environment.ambientIntensity} />
       {/* Float group — only the cube walls bob. Sword/cursor/sky stay anchored
           to world space so they don't drift with the breathing motion. */}

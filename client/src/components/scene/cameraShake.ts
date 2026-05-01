@@ -31,7 +31,9 @@ export function triggerImpactShake(now: number): void {
 
 /** Returns a 3-tuple offset for the current frame. Decays each impulse
  *  linearly over SHAKE_DURATION; sums decays across overlapping impulses
- *  (capped); applies random jitter scaled by intensity. */
+ *  (capped); applies random jitter scaled by intensity. Z is fixed at
+ *  0 — shake is screen-plane only so it doesn't push the camera into or
+ *  out of the scene (which would feel like a depth glitch, not a hit). */
 export function computeShakeOffset(now: number): [number, number, number] {
   let totalIntensity = 0;
   for (const imp of impulses) {
@@ -46,9 +48,12 @@ export function computeShakeOffset(now: number): [number, number, number] {
     return [0, 0, 0];
   }
   const mag = SHAKE_MAGNITUDE * totalIntensity;
-  return [(Math.random() - 0.5) * mag * 2, (Math.random() - 0.5) * mag * 2, 0];
+  return [(Math.random() * 2 - 1) * mag, (Math.random() * 2 - 1) * mag, 0];
 }
 
+/** Test-only — wipes the impulse queue so per-test isolation works.
+ *  Production code should never call this; if you want to suppress
+ *  shake for a moment, just stop calling `triggerImpactShake`. */
 export function clearShake(): void {
   impulses.length = 0;
 }

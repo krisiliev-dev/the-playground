@@ -26,6 +26,7 @@ import {
   Vector3,
 } from 'three';
 import { useWorldStore } from '@/store';
+import { sfx } from '../audio/SfxManager';
 
 const MODEL_URL = '/models/3d_icon_cursor.glb';
 
@@ -55,6 +56,13 @@ const LOOK_AHEAD_HEIGHT = 1.5;
 /** Padding from the cube walls — keeps the avatar's body clear of the
  *  geometry so it never visibly pokes through. */
 const AVATAR_WALL_MARGIN = 8;
+/** How close (in world units) the avatar has to be to a wall before
+ *  the wall-ambient drone becomes audible. Outside this band the
+ *  ambient is silent; at distance 0 it's at the manifest base volume. */
+const WALL_AMBIENT_FADE_DISTANCE = 12;
+/** Manifest base volume for `wallAmbient` — kept in sync with
+ *  sfxManifest.ts so the proximity factor can multiply against it. */
+const WALL_AMBIENT_BASE_VOLUME = 0.5;
 /** Padding from the cube walls for the camera. Smaller than the avatar
  *  margin so the camera can pull in tight when the avatar approaches a
  *  wall, without clipping through. */
@@ -179,8 +187,12 @@ function ActiveCursor(): JSX.Element {
   }, [gltf.scene]);
 
   useEffect(() => {
+    const anyKeyHeld = (): boolean =>
+      keys.current.w || keys.current.a || keys.current.s || keys.current.d;
+
     const onDown = (e: KeyboardEvent): void => {
       const k = e.key.toLowerCase();
+      const wasMoving = anyKeyHeld();
       if (k === 'w') {
         keys.current.w = true;
       } else if (k === 'a') {
@@ -189,6 +201,13 @@ function ActiveCursor(): JSX.Element {
         keys.current.s = true;
       } else if (k === 'd') {
         keys.current.d = true;
+      }
+      // Start the cursor-movement waka loop on the *aggregate*
+      // false→true transition (was idle, now moving). OS key-repeat
+      // fires this handler many times per second; SfxManager's loop
+      // guard ensures we don't try to restart an already-running loop.
+      if (!wasMoving && anyKeyHeld()) {
+        void sfx.play('cursorMove');
       }
     };
     const onUp = (e: KeyboardEvent): void => {
@@ -201,6 +220,11 @@ function ActiveCursor(): JSX.Element {
         keys.current.s = false;
       } else if (k === 'd') {
         keys.current.d = false;
+      }
+      // Stop the waka loop when the last movement key is released.
+      // Short fade so the cut isn't a hard click.
+      if (!anyKeyHeld()) {
+        sfx.stop('cursorMove', 80);
       }
     };
     window.addEventListener('keydown', onDown);
@@ -271,6 +295,14 @@ function ActiveCursor(): JSX.Element {
     );
     avatarYaw.current = 0;
     avatarPitch.current = 0;
+    // Audio: this transition is also a user-gesture-derived event
+    // (the user dismissed the controls hint by clicking). Re-call
+    // unlock() in case the cube reveal click hasn't happened yet
+    // (dev hotkey path). Idempotent.
+    sfx.unlock();
+    // Mark the cursor → avatar transition with the UI click (the same
+    // cue that previously fired on first reveal click).
+    void sfx.play('uiClick');
   }, [isAvatar, camera]);
 
   useFrame((state, delta) => {
@@ -450,6 +482,24 @@ function ActiveCursor(): JSX.Element {
     } else if (avatarPos.current.y > aMaxY) {
       avatarPos.current.y = aMaxY;
     }
+    // Proximity ambient: the cube hums louder as the avatar drifts
+    // toward an edge, silent at the centre. Compute distance to the
+    // *nearest* wall (any axis), map to a 0..1 factor over the fade
+    // band, and drive the loop's gain. Loop is started lazily the
+    // first frame the avatar enters the band.
+    {
+      const cx = dimensions[0] * 0.5 - Math.abs(avatarPos.current.x);
+      const cy = dimensions[1] * 0.5 - Math.abs(avatarPos.current.y);
+      const cz = dimensions[2] * 0.5 - Math.abs(avatarPos.current.z);
+      const distNearest = Math.min(cx, cy, cz);
+      const proximity = Math.max(0, 1 - distNearest / WALL_AMBIENT_FADE_DISTANCE);
+      if (proximity > 0 && !sfx.isLoopActive('wallAmbient')) {
+        // Start silent; the next setLoopVolume below ramps it in.
+        void sfx.play('wallAmbient', { volumeMultiplier: 0 });
+      }
+      sfx.setLoopVolume('wallAmbient', WALL_AMBIENT_BASE_VOLUME * proximity);
+    }
+
     if (avatarPos.current.z < -aMaxZ) {
       avatarPos.current.z = -aMaxZ;
     } else if (avatarPos.current.z > aMaxZ) {

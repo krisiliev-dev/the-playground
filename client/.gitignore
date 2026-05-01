@@ -1,1 +1,19 @@
 .vercel
+
+# Dependencies — also matched by the root .gitignore, but listing here
+# explicitly because pnpm's nested node_modules in this repo's symlink
+# layout occasionally falls outside the root pattern's match.
+node_modules/
+
+# TypeScript incremental build artifacts (from `tsc --noEmit` and
+# composite project references — written even with noEmit on in some
+# tsc versions).
+*.tsbuildinfo
+
+# Vite/Vitest config emit. tsc treats *.config.ts as sometimes-emittable
+# under composite projects, producing .d.ts and .js siblings we don't
+# want in version control.
+vite.config.d.ts
+vite.config.js
+vitest.config.d.ts
+vitest.config.js
