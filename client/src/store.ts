@@ -56,11 +56,15 @@ interface AppActions {
    *  this each frame; individual `useInteractable` consumers read it
    *  to drive their own highlight visuals. */
   setHoveredInteractable: (id: string | null) => void;
-  /** Bump the avatar punch counter to trigger one quick lerp-forward,
-   *  lerp-back animation. CursorAvatar subscribes to the counter and
-   *  fires the animation on every increment, so back-to-back interacts
-   *  produce back-to-back punches. */
-  triggerAvatarPunch: () => void;
+  /** Mark mouse-down over an interactable. CursorAvatar reads this to
+   *  lean the cursor forward to *touch* the target while held. The
+   *  point is the world-space hit position from the crosshair raycast,
+   *  so the cursor lerps right up to the surface the user clicked.
+   *  Future draggables can also subscribe to drive per-frame motion. */
+  beginInteractPress: (id: string, point: [number, number, number]) => void;
+  /** Release the press. CursorAvatar lerps back to the follow rig.
+   *  Called on every mouse-up regardless of where the cursor ended up. */
+  endInteractPress: () => void;
 }
 
 const createInitialPlayer = (): Player => ({
@@ -86,9 +90,15 @@ interface InteractionSlice {
    *  each frame; consumed by individual `useInteractable` callers for
    *  their highlight visuals. */
   hoveredInteractableId: string | null;
-  /** Monotonically-increasing punch counter — each increment triggers
-   *  one CursorAvatar lerp-forward/lerp-back animation. */
-  avatarPunchSeq: number;
+  /** Id of the interactable currently being pressed (mouse-down landed
+   *  on it, mouse-up hasn't fired yet). Decoupled from `hovered…` so
+   *  callers can detect "press started here, cursor since wandered" —
+   *  useful for drag interactions where the press anchors a binding. */
+  pressedInteractableId: string | null;
+  /** World-space point the cursor is leaning toward (the raycast hit
+   *  on the interactable at the moment of mouse-down). Null when no
+   *  press is active. */
+  pressedTargetPoint: [number, number, number] | null;
 }
 
 export const useWorldStore = create<AppState & AppActions & RevealSlice & InteractionSlice>(
@@ -105,7 +115,8 @@ export const useWorldStore = create<AppState & AppActions & RevealSlice & Intera
     // once the reveal completes. See CursorAvatar.tsx for the scale logic.
     cursorAvatarActive: true,
     hoveredInteractableId: null,
-    avatarPunchSeq: 0,
+    pressedInteractableId: null,
+    pressedTargetPoint: null,
 
     // Actions
     setPlayerPosition: (position) =>
@@ -149,6 +160,9 @@ export const useWorldStore = create<AppState & AppActions & RevealSlice & Intera
 
     setHoveredInteractable: (id) => set({ hoveredInteractableId: id }),
 
-    triggerAvatarPunch: () => set((state) => ({ avatarPunchSeq: state.avatarPunchSeq + 1 })),
+    beginInteractPress: (id, point) =>
+      set({ pressedInteractableId: id, pressedTargetPoint: point }),
+
+    endInteractPress: () => set({ pressedInteractableId: null, pressedTargetPoint: null }),
   }),
 );

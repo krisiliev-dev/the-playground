@@ -56,14 +56,16 @@ const LOOK_AHEAD_HEIGHT = 1.5;
 /** Padding from the cube walls — keeps the avatar's body clear of the
  *  geometry so it never visibly pokes through. */
 const AVATAR_WALL_MARGIN = 8;
-/** Avatar punch animation — a quick lerp forward then back, played
- *  whenever the user interacts with something in the world. Total
- *  duration is short so back-to-back clicks read as a percussive
- *  rhythm rather than a slow lerp loop. The forward leg is briefer
- *  than the return so the punch feels like a strike, not a sway. */
-const PUNCH_DURATION_S = 0.18;
-const PUNCH_FORWARD_FRACTION = 0.35;
-const PUNCH_DISTANCE = 1.5;
+/** Cursor lean animation. While the user holds mouse-down on an
+ *  interactable, the cursor lerps from its follow-rig position to a
+ *  point just behind the target's surface (so the cursor's tip
+ *  visually touches the object). On mouse-up it lerps back. Lerp rate
+ *  is high so the lean feels snappy and physical, not floaty. */
+const LEAN_LERP_RATE = 32;
+/** Distance the cursor pulls back from the actual surface point so
+ *  the visible mesh doesn't intersect the object. Tuned for the
+ *  cursor model + AVATAR_SCALE — adjust if either changes. */
+const CURSOR_TIP_OFFSET = 1.0;
 /** How close (in world units) the avatar has to be to a wall before
  *  the wall-ambient drone becomes audible. Outside this band the
  *  ambient is silent; at distance 0 it's at the manifest base volume. */
@@ -243,27 +245,25 @@ function ActiveCursor(): JSX.Element {
     };
   }, []);
 
-  /** Animation progress (0..1) for the avatar punch lerp-forward/
-   *  lerp-back. -1 means inactive. Set to 0 by the `avatarPunchSeq`
-   *  effect below; advanced each frame in useFrame. */
-  const punchProgress = useRef(-1);
-  const punchSeq = useWorldStore((s) => s.avatarPunchSeq);
-  useEffect(() => {
-    if (punchSeq > 0) {
-      // Reset to 0 to start a fresh animation. Even if a punch is
-      // already in flight (mid-lerp), we reset — the user expects
-      // each click to fire its own animation, not get swallowed.
-      punchProgress.current = 0;
-    }
-  }, [punchSeq]);
-  const punchOffset = useRef(new Vector3());
-  const punchForward = useRef(new Vector3());
+  /** World-space target the cursor leans toward while a press is
+   *  active. Read each frame from the store; a non-null value pulls
+   *  the cursor away from its follow-rig position toward the
+   *  interactable's surface. Stored in a ref so the useFrame loop
+   *  doesn't re-render on every store update. */
+  const pressedTargetPoint = useWorldStore((s) => s.pressedTargetPoint);
+  const leanForward = useRef(new Vector3());
+  const leanTarget = useRef(new Vector3());
 
-  // Mouselook listener. Pointer-lock itself is requested by ControlsHint's
-  // dismiss-click handler (synchronously inside the user-gesture window) —
-  // attempting it from this effect throws "requires a user gesture" because
-  // React effects run after commit, past the activation token's lifetime.
-  // The canvas click listener here re-engages lock if Esc dropped it.
+  // Desktop: mouselook via pointer lock. Mobile: swipe-to-look via
+  // touch events + synthesized mousedown/mouseup on tap. Both paths
+  // mount in the same effect so they share lifecycle (gated on
+  // `isPostClick` and the same dep array).
+  //
+  // Pointer-lock note: itself requested by ControlsHint's dismiss-click
+  // handler (synchronously inside the user-gesture window) — attempting
+  // it from this effect throws "requires a user gesture" because React
+  // effects run after commit, past the activation token's lifetime. The
+  // canvas click listener here re-engages lock if Esc dropped it.
   useEffect(() => {
     if (!isPostClick) {
       return;
@@ -293,11 +293,102 @@ function ActiveCursor(): JSX.Element {
       }
     };
 
+    // Touch state for tap-vs-drag classification. A touchstart begins
+    // a candidate gesture; if the user moves the finger more than
+    // TOUCH_TAP_DIST_THRESHOLD pixels we commit to "drag" (swipe-to-
+    // look). Otherwise touchend within TOUCH_TAP_TIME_THRESHOLD ms
+    // dispatches a synthetic mousedown+mouseup on window, reusing the
+    // global click pipeline (interaction + audio).
+    const TOUCH_TAP_DIST_THRESHOLD = 10;
+    const TOUCH_TAP_TIME_THRESHOLD_MS = 250;
+    const TOUCH_LOOK_SENSITIVITY = MOUSE_SENSITIVITY * 1.6; // touch deltas read smaller than mouse
+
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let touchLastX = 0;
+    let touchLastY = 0;
+    let touchStartTime = 0;
+    let touchIsDrag = false;
+
+    const onTouchStart = (e: TouchEvent): void => {
+      const t = e.touches[0];
+      if (!t) {
+        return;
+      }
+      touchStartX = touchLastX = t.clientX;
+      touchStartY = touchLastY = t.clientY;
+      touchStartTime = performance.now();
+      touchIsDrag = false;
+      // First touch is the canonical user gesture on mobile — unlock
+      // the AudioContext now so subsequent taps can produce sound.
+      sfx.unlock();
+    };
+    const onTouchMove = (e: TouchEvent): void => {
+      const t = e.touches[0];
+      if (!t) {
+        return;
+      }
+      // Promote to "drag" once we've moved past the tap threshold, and
+      // stay in drag mode until touchend.
+      if (!touchIsDrag) {
+        const totalDx = t.clientX - touchStartX;
+        const totalDy = t.clientY - touchStartY;
+        if (Math.hypot(totalDx, totalDy) > TOUCH_TAP_DIST_THRESHOLD) {
+          touchIsDrag = true;
+        }
+      }
+      if (!touchIsDrag) {
+        return;
+      }
+      // Same gating as mouselook — only apply look while the reveal
+      // has handed control back to the user.
+      const rs = useWorldStore.getState().revealState;
+      if (rs !== 'impact' && rs !== 'revealed') {
+        touchLastX = t.clientX;
+        touchLastY = t.clientY;
+        return;
+      }
+      const dx = t.clientX - touchLastX;
+      const dy = t.clientY - touchLastY;
+      avatarYaw.current -= dx * TOUCH_LOOK_SENSITIVITY;
+      const next = avatarPitch.current - dy * TOUCH_LOOK_SENSITIVITY;
+      avatarPitch.current = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, next));
+      touchLastX = t.clientX;
+      touchLastY = t.clientY;
+      // preventDefault to stop the browser's pull-to-refresh / scroll
+      // overlapping the look gesture.
+      e.preventDefault();
+    };
+    const onTouchEnd = (): void => {
+      if (touchIsDrag) {
+        return; // drag already handled; no synthetic click
+      }
+      const elapsed = performance.now() - touchStartTime;
+      if (elapsed > TOUCH_TAP_TIME_THRESHOLD_MS) {
+        return;
+      }
+      // Tap: synthesise a mousedown + mouseup on window so the
+      // existing InteractionController + global mouseDown/Up cues
+      // fire identically to a desktop click. clientX/Y are the touch's
+      // start point (not strictly needed since the crosshair always
+      // raycasts through screen centre, but keeps the events looking
+      // like a real click).
+      const init = { bubbles: true, clientX: touchStartX, clientY: touchStartY } as const;
+      window.dispatchEvent(new MouseEvent('mousedown', init));
+      window.dispatchEvent(new MouseEvent('mouseup', init));
+    };
+
     document.addEventListener('mousemove', onMove);
     canvas.addEventListener('click', onClick);
+    canvas.addEventListener('touchstart', onTouchStart, { passive: true });
+    canvas.addEventListener('touchmove', onTouchMove, { passive: false });
+    canvas.addEventListener('touchend', onTouchEnd);
     return () => {
       document.removeEventListener('mousemove', onMove);
       canvas.removeEventListener('click', onClick);
+      canvas.removeEventListener('touchstart', onTouchStart);
+      canvas.removeEventListener('touchmove', onTouchMove);
+      canvas.removeEventListener('touchend', onTouchEnd);
       if (document.pointerLockElement === canvas) {
         document.exitPointerLock?.();
       }
@@ -614,31 +705,20 @@ function ActiveCursor(): JSX.Element {
     }
     groupRef.current.scale.setScalar(renderedScale.current);
 
-    // Punch animation — additive offset on top of whatever the
-    // follow-rig logic above committed. Triangular envelope: ramp
-    // forward over PUNCH_FORWARD_FRACTION of the total duration, then
-    // ramp back over the remainder. Forward direction is the camera's
-    // -Z axis rotated into world space (i.e. the direction the avatar
-    // is looking + facing).
-    if (punchProgress.current >= 0) {
-      punchProgress.current += delta / PUNCH_DURATION_S;
-      if (punchProgress.current >= 1) {
-        punchProgress.current = -1;
-      } else {
-        let envelope: number;
-        if (punchProgress.current < PUNCH_FORWARD_FRACTION) {
-          // Forward leg: ease-out.
-          const t = punchProgress.current / PUNCH_FORWARD_FRACTION;
-          envelope = 1 - (1 - t) * (1 - t);
-        } else {
-          // Return leg: ease-in.
-          const t = (punchProgress.current - PUNCH_FORWARD_FRACTION) / (1 - PUNCH_FORWARD_FRACTION);
-          envelope = 1 - t * t;
-        }
-        punchForward.current.set(0, 0, -1).applyQuaternion(camera.quaternion);
-        punchOffset.current.copy(punchForward.current).multiplyScalar(envelope * PUNCH_DISTANCE);
-        groupRef.current.position.add(punchOffset.current);
-      }
+    // Lean animation. While `pressedTargetPoint` is set, lerp the
+    // cursor from its follow-rig position toward the world-space
+    // target (pulled back along camera-forward by CURSOR_TIP_OFFSET
+    // so the cursor's geometry doesn't intersect the surface). On
+    // release, the same lerp pulls it back to the follow rig. Both
+    // directions use the same LEAN_LERP_RATE so the press and release
+    // feel symmetric.
+    if (pressedTargetPoint) {
+      leanForward.current.set(0, 0, -1).applyQuaternion(camera.quaternion);
+      leanTarget.current
+        .set(pressedTargetPoint[0], pressedTargetPoint[1], pressedTargetPoint[2])
+        .addScaledVector(leanForward.current, -CURSOR_TIP_OFFSET);
+      const leanK = 1 - Math.exp(-LEAN_LERP_RATE * delta);
+      groupRef.current.position.lerp(leanTarget.current, leanK);
     }
   }, 2);
 

@@ -133,12 +133,12 @@ export const SFX = {
    *  character — fired together by InteractionController. */
   interactClick: {
     variants: ['/audio/cursor/click.wav'],
-    volume: 1.5,
+    volume: 2.0,
     reverb: { wet: 0.4 },
     effects: {
       compress: { threshold: -12, ratio: 12, attack: 0.0005, release: 0.05 },
-      saturate: 0.6,
-      filter: { type: 'highshelf', freq: 3000, gain: 6 },
+      saturate: 0.7,
+      filter: { type: 'highshelf', freq: 3000, gain: 8 },
     },
   },
   /** Avatar-interaction sub-boom — layered under `interactClick` for
@@ -148,7 +148,7 @@ export const SFX = {
    *  character. */
   interactImpact: {
     variants: ['/audio/impact/rumble-low.wav'],
-    volume: 0.85,
+    volume: 1.15,
     reverb: { wet: 0.5 },
     effects: {
       compress: { threshold: -18, ratio: 8, attack: 0.001, release: 0.1 },

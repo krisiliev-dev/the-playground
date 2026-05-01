@@ -27,7 +27,7 @@
  */
 import { useEffect, useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
-import { Mesh, Raycaster, Vector2 } from 'three';
+import { Mesh, Raycaster, Vector2, Vector3 } from 'three';
 import { useWorldStore } from '@/store';
 import { sfx } from '../audio/SfxManager';
 
@@ -60,12 +60,18 @@ interface UseInteractableResult {
   /** True when the crosshair is currently aimed at this object. Drive
    *  any highlight visual (emissive, scale, outline) from this. */
   isHovered: boolean;
+  /** True when the user has mouse-down'd on this object and hasn't
+   *  released yet. Decoupled from `isHovered` so a press that started
+   *  here remains "pressed" even if the cursor wanders off (useful for
+   *  future drag-with-cursor interactions). */
+  isPressed: boolean;
 }
 
 export function useInteractable(opts: UseInteractableOpts): UseInteractableResult {
   const { id, onInteract, range = INTERACT_RANGE } = opts;
   const ref = useRef<Mesh>(null);
   const isHovered = useWorldStore((s) => s.hoveredInteractableId === id);
+  const isPressed = useWorldStore((s) => s.pressedInteractableId === id);
 
   // Register the click handler. Re-registers if `onInteract` identity
   // changes — callers should `useCallback` if they want stability,
@@ -97,29 +103,36 @@ export function useInteractable(opts: UseInteractableOpts): UseInteractableResul
     };
   }, [id, range]);
 
-  return { ref, isHovered };
+  return { ref, isHovered, isPressed };
 }
 
 export function InteractionController(): null {
   const isAvatarActive = useWorldStore((s) => s.controlsDismissed);
   const setHoveredInteractable = useWorldStore((s) => s.setHoveredInteractable);
-  const triggerAvatarPunch = useWorldStore((s) => s.triggerAvatarPunch);
+  const beginInteractPress = useWorldStore((s) => s.beginInteractPress);
+  const endInteractPress = useWorldStore((s) => s.endInteractPress);
 
   const { camera, scene } = useThree();
   const raycaster = useMemo(() => new Raycaster(), []);
   /** NDC of the crosshair — always (0, 0) since the crosshair is
    *  fixed at screen centre. */
   const screenCentre = useMemo(() => new Vector2(0, 0), []);
+  /** Cached hit point of the most recent crosshair-on-interactable
+   *  raycast — captured each frame so mousedown can read it without
+   *  re-raycasting. */
+  const latestHit = useRef<{ id: string; point: Vector3 } | null>(null);
 
   // Per-frame raycast. Skipped while avatar mode is inactive so we
   // don't pay the cost during idle/reveal phases.
   useFrame(() => {
     if (!isAvatarActive) {
+      latestHit.current = null;
       return;
     }
     raycaster.setFromCamera(screenCentre, camera);
     const hits = raycaster.intersectObjects(scene.children, true);
     let hoveredId: string | null = null;
+    let hitPoint: Vector3 | null = null;
     for (const hit of hits) {
       const data = hit.object.userData;
       if (!data.interactable) {
@@ -132,8 +145,10 @@ export function InteractionController(): null {
         break;
       }
       hoveredId = (data.interactableId as string | undefined) ?? null;
+      hitPoint = hit.point;
       break;
     }
+    latestHit.current = hoveredId && hitPoint ? { id: hoveredId, point: hitPoint } : null;
     // Only call setHoveredInteractable if the value actually changed —
     // Zustand bails on equal updates anyway, but skipping the call
     // avoids subscriber re-render churn.
@@ -142,34 +157,49 @@ export function InteractionController(): null {
     }
   });
 
-  // Click → fire the hovered interactable's handler + avatar punch +
-  // heavy interact audio. Listens at window level so any click anywhere
-  // is considered (the hovered-state is what gates the interaction).
+  // mousedown → begin a press over whatever's hovered (cursor leans
+  // forward to touch). mouseup → if we ended on the same target,
+  // commit the interaction (handler + heavy audio). Always release
+  // the press so the cursor lerps back. Splitting the click into
+  // press/release this way also gives future draggable objects a
+  // hold signal to subscribe to.
   useEffect(() => {
-    const onClick = (): void => {
-      // Read fresh state — the hovered id can change between renders.
+    const onMouseDown = (): void => {
       const state = useWorldStore.getState();
       if (!state.controlsDismissed) {
         return;
       }
-      const targetId = state.hoveredInteractableId;
-      if (!targetId) {
+      const hit = latestHit.current;
+      if (!hit) {
         return;
       }
-      const handler = interactableHandlers.get(targetId);
-      handler?.();
-      triggerAvatarPunch();
-      // Layered audio for impact: a heavily-processed click on top of
-      // a low-frequency boom. See sfxManifest for the effects chain.
-      sfx.unlock();
-      void sfx.play('interactClick');
-      void sfx.play('interactImpact');
+      beginInteractPress(hit.id, [hit.point.x, hit.point.y, hit.point.z]);
     };
-    window.addEventListener('click', onClick);
+    const onMouseUp = (): void => {
+      const state = useWorldStore.getState();
+      const pressedId = state.pressedInteractableId;
+      // Commit: only if the press still targets the currently-hovered
+      // interactable (i.e. mouse-down and mouse-up landed on the same
+      // object). A press that wandered off doesn't fire — same
+      // semantics as a native click.
+      if (pressedId && pressedId === state.hoveredInteractableId) {
+        const handler = interactableHandlers.get(pressedId);
+        handler?.();
+        sfx.unlock();
+        void sfx.play('interactClick');
+        void sfx.play('interactImpact');
+      }
+      if (pressedId) {
+        endInteractPress();
+      }
+    };
+    window.addEventListener('mousedown', onMouseDown);
+    window.addEventListener('mouseup', onMouseUp);
     return () => {
-      window.removeEventListener('click', onClick);
+      window.removeEventListener('mousedown', onMouseDown);
+      window.removeEventListener('mouseup', onMouseUp);
     };
-  }, [triggerAvatarPunch]);
+  }, [beginInteractPress, endInteractPress]);
 
   return null;
 }

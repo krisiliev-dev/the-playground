@@ -15,8 +15,10 @@ import { useFrame } from '@react-three/fiber';
 import type { MeshStandardMaterial } from 'three';
 import { useInteractable } from './Interactable';
 
-const HIGHLIGHT_EMISSIVE_INTENSITY = 1.2;
-const HIGHLIGHT_SCALE = 1.08;
+const HOVER_EMISSIVE_INTENSITY = 1.2;
+const PRESS_EMISSIVE_INTENSITY = 2.4;
+const HOVER_SCALE = 1.08;
+const PRESS_SCALE = 0.92;
 const SCALE_LERP_RATE = 12;
 const SPIN_PER_CLICK = Math.PI / 2;
 const SPIN_LERP_RATE = 14;
@@ -24,7 +26,7 @@ const SPIN_LERP_RATE = 14;
 export function InteractableTestCube(): JSX.Element {
   const [targetSpinY, setTargetSpinY] = useState(0);
 
-  const { ref, isHovered } = useInteractable({
+  const { ref, isHovered, isPressed } = useInteractable({
     id: 'test-cube',
     onInteract: () => {
       setTargetSpinY((prev) => prev + SPIN_PER_CLICK);
@@ -44,7 +46,10 @@ export function InteractableTestCube(): JSX.Element {
     if (!mesh) {
       return;
     }
-    const targetScale = isHovered ? HIGHLIGHT_SCALE : 1;
+    // Pressed > hovered > idle. Press squashes the cube slightly
+    // (PRESS_SCALE < 1) so the user gets a "the cursor is touching me"
+    // affordance — the cube feels poked. Hover puffs it up.
+    const targetScale = isPressed ? PRESS_SCALE : isHovered ? HOVER_SCALE : 1;
     const k = 1 - Math.exp(-SCALE_LERP_RATE * delta);
     renderedScale.current += (targetScale - renderedScale.current) * k;
     mesh.scale.setScalar(renderedScale.current);
@@ -53,11 +58,13 @@ export function InteractableTestCube(): JSX.Element {
     renderedSpinY.current += (targetSpinY - renderedSpinY.current) * sk;
     mesh.rotation.y = renderedSpinY.current;
 
-    // Emissive pulse on hover — uses the same time signal as the
-    // floating bob so it feels alive, not just statically lit.
     const mat = matRef.current;
     if (mat) {
-      mat.emissiveIntensity = isHovered ? HIGHLIGHT_EMISSIVE_INTENSITY : 0;
+      mat.emissiveIntensity = isPressed
+        ? PRESS_EMISSIVE_INTENSITY
+        : isHovered
+          ? HOVER_EMISSIVE_INTENSITY
+          : 0;
     }
   });
 
