@@ -1,18 +1,27 @@
 /**
- * CursorAvatar — single 3D mesh that plays two roles.
+ * CursorAvatar — single 3D mesh that plays two roles, split into two
+ * focused subcomponents:
  *
- *   POINTER MODE  (revealState === 'idle')
+ *   POINTER MODE  — `<PointerCursor />`
  *     Sits at a fixed near-camera depth, projected from the OS pointer's
- *     NDC. Faces the camera. Acts visually as the user's cursor.
+ *     NDC. Faces the camera. Acts visually as the user's cursor while
+ *     reveal is idle / mid-reveal.
  *
- *   AVATAR MODE   (revealState !== 'idle', i.e. after first click)
- *     Becomes a world-space avatar driven by WASD + mouselook. The camera
- *     anchors to it in a classic 3rd-person follow rig: a fixed offset in
- *     the avatar's local frame, rotating with yaw/pitch.
+ *   AVATAR MODE   — `<AvatarCursor />`
+ *     Becomes a world-space avatar driven by WASD + mouselook. The
+ *     camera anchors to it in a classic 3rd-person follow rig: a
+ *     fixed offset in the avatar's local frame, rotating with
+ *     yaw/pitch. Activated when the user dismisses the controls hint.
+ *
+ * `ActiveCursor` is the orchestrator. It owns the cursor mesh + outline
+ * shells, the shared refs that survive the mode transition, and the
+ * input listeners (which span both modes — touch swipe-to-look, drag
+ * promotion, press-on-interactable, mouselook). The two subcomponents
+ * each own one useFrame and never mount simultaneously.
  *
  * The OS cursor stays hidden whenever this component is mounted.
  */
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, type MutableRefObject, type RefObject } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { useGLTF } from '@react-three/drei';
 import {
@@ -38,21 +47,25 @@ import { SWING_PRE } from './reveal/constants';
 import {
   clampToBoxInterior,
   computeCameraCollisionRatio,
+  computeInitialPanProgress,
   computeLeanTarget,
   computeWalkVector,
   computeWallProximity,
   projectNDCToWorld,
+  setYawQuat,
 } from './cursorAvatarMath';
 
 const MODEL_URL = '/models/3d_icon_cursor.glb';
 
+// ─── Pointer-mode constants ───────────────────────────────────────────
 /** Distance in front of the camera at which the pointer-mode cursor sits.
  *  Kept small so the cursor reads as foreground, not stuck on the wall. */
 const POINTER_DEPTH = 3;
 const POINTER_SCALE = 0.001;
+
+// ─── Avatar-mode constants ────────────────────────────────────────────
 const AVATAR_SCALE = 0.03;
 const SCALE_LERP_RATE = 5.0;
-
 /** Avatar movement (world units / sec). */
 const WALK_SPEED = 60;
 /** Mouse-delta → radians multiplier. */
@@ -63,7 +76,6 @@ const MOUSE_SENSITIVITY = 0.0025;
 const FOLLOW_OFFSET = new Vector3(0, 3, 8);
 /** Camera looks slightly above the avatar's origin (its "head"). */
 const LOOK_AHEAD_HEIGHT = 1.5;
-
 /** Padding from the cube walls — keeps the avatar's body clear of the
  *  geometry so it never visibly pokes through. */
 const AVATAR_WALL_MARGIN = 8;
@@ -102,6 +114,7 @@ const CAMERA_LERP_RATE = 12;
  *  lerp for ongoing follow. */
 const INITIAL_PAN_DURATION = 1.5;
 
+// ─── Mesh / appearance constants (shared) ─────────────────────────────
 const EMISSIVE_HEX = '#00ffcc';
 const EMISSIVE_INTENSITY = 1.0;
 const BODY_COLOR_HEX = '#0a1a18';
@@ -119,13 +132,59 @@ const OUTLINE_SCALE = 1.06;
  *  fractions of the cursor model's bbox size. After the geometry is
  *  re-centred for symmetric scaling, this offset pushes the outline
  *  slightly south + east (cursor-local -Y, +X) so the silhouette
- *  reads with weight toward the lower-right — same character as the
- *  pre-fix asymmetric outline the user liked, but as a deliberate
- *  authored choice instead of a pivot accident. */
+ *  reads with weight toward the lower-right. */
 const OUTLINE_SHIFT_X_FRACTION = 0.012;
 const OUTLINE_SHIFT_Y_FRACTION = 0.012;
 
 useGLTF.preload(MODEL_URL);
+
+/**
+ * Shared state between ActiveCursor and its mode subcomponents.
+ * Bundled into one object so each subcomponent receives a single
+ * `cursor` prop instead of 15+ individual refs. All refs survive
+ * the mode transition (they live in ActiveCursor's scope), so a
+ * value written by `<PointerCursor>` on its last frame is visible
+ * to `<AvatarCursor>` on its first frame — that's how the initial
+ * pan reads the cursor's screen-position to lerp from.
+ */
+interface CursorRefs {
+  groupRef: RefObject<Group>;
+  renderedScale: MutableRefObject<number>;
+  tipLocalOffset: MutableRefObject<Vector3>;
+  /** Avatar body position in world space. Read by AvatarCursor's
+   *  follow rig; reset on entry to avatar mode. */
+  avatarPos: MutableRefObject<Vector3>;
+  avatarYaw: MutableRefObject<number>;
+  avatarPitch: MutableRefObject<number>;
+  /** WASD held state — populated by ActiveCursor's keyboard listener. */
+  keys: MutableRefObject<{ w: boolean; a: boolean; s: boolean; d: boolean }>;
+  /** Continuous forward/back throttle from a 2-finger pinch on touch
+   *  devices. -1 = full backward, +1 = full forward, 0 = no walk. */
+  touchWalkVelocity: MutableRefObject<number>;
+  /** Initial-pan capture state. PointerCursor resets this every
+   *  frame so the next AvatarCursor mount starts clean; AvatarCursor
+   *  initializes on its first frame. */
+  initialPanStart: MutableRefObject<number | null>;
+  /** Cursor's *rendered* world position, persisted across frames so
+   *  the follow-rig lerp accumulates instead of resetting. */
+  renderedCursorPos: MutableRefObject<Vector3>;
+  /** Lean-on-press capture: pose at the moment the user pressed an
+   *  interactable. Used by AvatarCursor to keep the cursor world-
+   *  anchored on the target while the user rotates the camera. */
+  pressAnchorQuat: Quaternion;
+  /** Captured pointer NDC during world-frozen / camera-anchored
+   *  pointer modes. PointerCursor writes; the value persists if the
+   *  pre-reveal click chain captures one before AvatarCursor takes
+   *  over. */
+  pointerCaptured: MutableRefObject<boolean>;
+  capturedPointer: MutableRefObject<{ x: number; y: number }>;
+  cursorFrozen: MutableRefObject<boolean>;
+  frozenCursorPos: MutableRefObject<Vector3>;
+  frozenCursorQuat: MutableRefObject<Quaternion>;
+  swingingEnteredAt: MutableRefObject<number>;
+}
+
+// ─── Top-level entry point ────────────────────────────────────────────
 
 export function CursorAvatar(): JSX.Element | null {
   const active = useWorldStore((s) => s.cursorAvatarActive);
@@ -157,79 +216,51 @@ export function CursorAvatar(): JSX.Element | null {
   return <ActiveCursor />;
 }
 
+// ─── ActiveCursor (orchestrator) ──────────────────────────────────────
+
 function ActiveCursor(): JSX.Element {
   const groupRef = useRef<Group>(null);
-  const { pointer, camera, gl, scene } = useThree();
+  const { camera, gl, scene } = useThree();
 
   const revealState = useWorldStore((s) => s.revealState);
   const controlsDismissed = useWorldStore((s) => s.controlsDismissed);
   /** Visual avatar mode — cursor enlarges, camera transitions to 3rd
    *  person. Deferred until the user dismisses the controls hint. */
   const isAvatar = controlsDismissed;
-  /** True from the first reveal click onward. Gates the mouselook listener
-   *  so it's only mounted while a reveal sequence is in progress. */
+  /** True from the first reveal click onward. Gates the input listeners
+   *  so they're only mounted while a reveal sequence is in progress. */
   const isPostClick = revealState !== 'idle';
-  const dimensions = useWorldStore((s) => s.environment.dimensions);
 
   const gltf = useGLTF(MODEL_URL);
 
+  // Shared state — both subcomponents read from these refs. ActiveCursor
+  // owns them so they survive the !isAvatar → isAvatar transition.
+  const renderedScale = useRef(POINTER_SCALE);
+  const tipLocalOffset = useRef(new Vector3());
   const avatarPos = useRef(new Vector3());
   const avatarYaw = useRef(0);
   const avatarPitch = useRef(0);
   const keys = useRef({ w: false, a: false, s: false, d: false });
-  /** Continuous forward/back throttle from a 2-finger pinch on touch
-   *  devices. -1 = full backward, +1 = full forward, 0 = no walk.
-   *  Updated by the touch handler each pinch frame; consumed by the
-   *  movement integration in useFrame. Stays at 0 on desktop. */
   const touchWalkVelocity = useRef(0);
-  const renderedScale = useRef(POINTER_SCALE);
-
-  const tmpVec = useRef(new Vector3());
-  const tmpEuler = useRef(new Euler());
-  const tmpCamTarget = useRef(new Vector3());
-  /** Cube half-extents reused per frame for clamp + collision —
-   *  written from the live `dimensions` so it tracks any future
-   *  resize of the environment. */
-  const tmpCubeHalf = useRef(new Vector3());
-  /** Camera-basis buffers — we reproject the cursor each frame from
-   *  camera.quaternion + camera.position directly, instead of going through
-   *  unproject(). Skipping the matrix inversion removes a small floating-
-   *  point jitter that leaked through after BulletTimeDirector's lookAt. */
-  const tmpCamFwd = useRef(new Vector3());
-  const tmpCamRight = useRef(new Vector3());
-  const tmpCamUp = useRef(new Vector3());
-  /** Captured normalised pointer at the moment the reveal animation
-   *  begins. Used to project cursor at the click-time screen position
-   *  while the bullet-time camera pans, so the cursor reads as still
-   *  from the camera's viewpoint regardless of camera motion. */
+  const initialPanStart = useRef<number | null>(null);
+  const renderedCursorPos = useRef(new Vector3());
   const pointerCaptured = useRef(false);
   const capturedPointer = useRef({ x: 0, y: 0 });
-  /** Frozen cursor world pose during the chase phase — cursor stays at
-   *  the click world position, independent of camera motion. */
   const cursorFrozen = useRef(false);
   const frozenCursorPos = useRef(new Vector3());
   const frozenCursorQuat = useRef(new Quaternion());
-  /** Tracks when the 'swinging' state began so we can compute the swing
-   *  time and distinguish pre vs mid+post within it. */
   const swingingEnteredAt = useRef(-1);
+  /** Cursor target quaternion captured at press-start (camera
+   *  orientation at the moment of press × forward-tilt). */
+  const pressAnchorQuat = useMemo(() => new Quaternion(), []);
+  /** Constant forward-tilt quaternion in cursor-local frame. Composed
+   *  onto the captured camera quaternion to get the lean orientation. */
+  const leanTiltQuat = useMemo(
+    () => new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), LEAN_TILT_RAD),
+    [],
+  );
 
-  // Initial-pan state: captured the moment isAvatar flips on. Drives a
-  // single eased time curve for camera position, rotation, cursor
-  // position, cursor rotation, and cursor scale so they all complete
-  // together.
-  const initialPanStart = useRef<number | null>(null);
-  const initialCamPos = useRef(new Vector3());
-  const initialCamQuat = useRef(new Quaternion());
-  const initialCursorPos = useRef(new Vector3());
-  const initialCursorQuat = useRef(new Quaternion());
-  const initialScale = useRef(POINTER_SCALE);
-  // PerspectiveCamera (not Object3D) so its lookAt uses the camera
-  // convention (local -Z toward target). Plain Object3D's lookAt orients
-  // +Z toward target, which would slerp the camera 180° around.
-  const tmpHelper = useMemo(() => new PerspectiveCamera(), []);
-  const targetCamQuat = useMemo(() => new Quaternion(), []);
-  const avatarTargetQuat = useMemo(() => new Quaternion(), []);
-
+  // ─── Mesh setup: outline shells + tipLocalOffset measurement ─────
   useEffect(() => {
     // Collect target meshes first — adding outline children inside
     // the traverse callback would cause traverse to visit the new
@@ -262,14 +293,6 @@ function ActiveCursor(): JSX.Element {
       mesh.renderOrder = 999;
 
       // Outline shell — see OUTLINE_* constants for the rationale.
-      // The geometry is cloned and re-centered around its own bbox so
-      // the OUTLINE_SCALE grows uniformly in all directions. Without
-      // re-centering, scaling from the model's pivot (which is near
-      // the tip on this cursor) would make the outline thick on the
-      // side opposite the pivot and basically invisible on the
-      // pivot's side. After centering, we offset the outline mesh
-      // back to the bbox centre + a small authored south-east shift
-      // for visual weight at the lower-right.
       const outlineGeom = mesh.geometry.clone();
       outlineGeom.computeBoundingBox();
       const outlineCenter = new Vector3();
@@ -304,18 +327,12 @@ function ActiveCursor(): JSX.Element {
     // Measure where the cursor's visible tip is relative to the model
     // pivot. For OS-arrow-cursor models the tip is at the upper-left
     // of the bbox (min X, max Y). Stored in the model's local frame,
-    // pre-scale — at press time we rotate by pressAnchorQuat and
-    // multiply by AVATAR_SCALE to get the world-space offset, then
-    // subtract from the hit point to place the group origin such that
-    // the visible tip lands on the hit. updateMatrixWorld() runs
-    // first so Box3.setFromObject sees the correct geometry positions.
-    // Done AFTER outline meshes are added so they don't bias the bbox
-    // (they're at scale 1.08, slightly larger than the visible tip).
+    // pre-scale — at press time AvatarCursor rotates by pressAnchorQuat
+    // and multiplies by AVATAR_SCALE. Done AFTER outline meshes are
+    // added so they don't bias the bbox.
     gltf.scene.updateMatrixWorld(true);
     const bbox = new Box3();
     targetMeshes.forEach((mesh) => {
-      // Use the geometry's bounding box transformed into scene space
-      // — exclude outline meshes by only iterating originals.
       mesh.geometry.computeBoundingBox();
       if (mesh.geometry.boundingBox) {
         const meshBbox = mesh.geometry.boundingBox.clone();
@@ -329,9 +346,7 @@ function ActiveCursor(): JSX.Element {
       outlineMeshes.forEach((m) => {
         m.parent?.remove(m);
         // Dispose the cloned geometry + the dedicated material so
-        // the GPU buffers don't leak across HMR cycles. We constructed
-        // both ourselves; the original cursor mesh's geometry is
-        // untouched.
+        // the GPU buffers don't leak across HMR cycles.
         m.geometry.dispose();
         if (m.material instanceof MeshBasicMaterial) {
           m.material.dispose();
@@ -340,6 +355,7 @@ function ActiveCursor(): JSX.Element {
     };
   }, [gltf.scene]);
 
+  // ─── Keyboard listener (WASD → keys + waka loop) ────────────────
   useEffect(() => {
     const anyKeyHeld = (): boolean =>
       keys.current.w || keys.current.a || keys.current.s || keys.current.d;
@@ -356,10 +372,6 @@ function ActiveCursor(): JSX.Element {
       } else if (k === 'd') {
         keys.current.d = true;
       }
-      // Start the cursor-movement waka loop on the *aggregate*
-      // false→true transition (was idle, now moving). OS key-repeat
-      // fires this handler many times per second; SfxManager's loop
-      // guard ensures we don't try to restart an already-running loop.
       const isMoving = anyKeyHeld();
       if (!wasMoving && isMoving) {
         void sfx.play('cursorMove');
@@ -376,8 +388,6 @@ function ActiveCursor(): JSX.Element {
       } else if (k === 'd') {
         keys.current.d = false;
       }
-      // Stop the waka loop when the last movement key is released.
-      // Short fade so the cut isn't a hard click.
       if (!anyKeyHeld()) {
         sfx.stop('cursorMove', 80);
       }
@@ -395,57 +405,18 @@ function ActiveCursor(): JSX.Element {
    *  the cursor away from its follow-rig position toward the
    *  interactable's surface. */
   const pressedTargetPoint = useWorldStore((s) => s.pressedTargetPoint);
-  const leanTarget = useRef(new Vector3());
-  /** Cursor target quaternion captured at press-start (camera
-   *  orientation at the moment of press × forward-tilt). Frozen for
-   *  the duration of the press so the tilt reveals itself as the
-   *  camera moves around it. */
-  const pressAnchorQuat = useMemo(() => new Quaternion(), []);
-  /** Constant forward-tilt quaternion in cursor-local frame. Composed
-   *  onto the captured camera quaternion to get the lean orientation. */
-  const leanTiltQuat = useMemo(
-    () => new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), LEAN_TILT_RAD),
-    [],
-  );
-  /** Vector from the cursor's group origin (model pivot) to the
-   *  visible tip, in the cursor model's local frame (PRE-scale).
-   *  Measured once from the model's bounding box on mount: for
-   *  OS-arrow-cursor-shaped models the tip is at the upper-left
-   *  bbox corner (min.x, max.y). Used at press-time to position the
-   *  cursor so its visible tip — not its pivot — lands on the
-   *  raycast hit point. */
-  const tipLocalOffset = useRef(new Vector3());
-  /** Working buffer for the world-space tip offset (= tipLocalOffset
-   *  rotated by pressAnchorQuat × AVATAR_SCALE). Recomputed each
-   *  press frame because pressAnchorQuat is captured per-press. */
-  const tipWorldBuffer = useRef(new Vector3());
+
   // Capture the composed lean quaternion the moment a press starts.
-  // `pressedTargetPoint` flips from null → tuple on
-  // `beginInteractPress`, so this effect runs once per press; the ref
-  // is read-only until release.
   useEffect(() => {
     if (!pressedTargetPoint) {
       return;
     }
     pressAnchorQuat.copy(camera.quaternion).multiply(leanTiltQuat);
   }, [pressedTargetPoint, camera, leanTiltQuat, pressAnchorQuat]);
-  /** The cursor's *rendered* world position, persisted across frames.
-   *  The follow-rig and lean logic compute a *target* each frame; this
-   *  ref lerps toward that target so motion accumulates instead of
-   *  resetting from the follow point every frame (which is what made
-   *  the lean feel jittery + "stuck at 40% of the way"). */
-  const renderedCursorPos = useRef(new Vector3());
 
-  // Desktop: mouselook via pointer lock. Mobile: swipe-to-look via
-  // touch events + synthesized mousedown/mouseup on tap. Both paths
-  // mount in the same effect so they share lifecycle (gated on
-  // `isPostClick` and the same dep array).
-  //
-  // Pointer-lock note: itself requested by ControlsHint's dismiss-click
-  // handler (synchronously inside the user-gesture window) — attempting
-  // it from this effect throws "requires a user gesture" because React
-  // effects run after commit, past the activation token's lifetime. The
-  // canvas click listener here re-engages lock if Esc dropped it.
+  // ─── Pointer-lock + touch listeners (mouselook + tap/swipe/pinch) ──
+  // Mounted whenever a reveal sequence is in progress (`isPostClick`).
+  // Drives the same shared refs that PointerCursor / AvatarCursor read.
   useEffect(() => {
     if (!isPostClick) {
       return;
@@ -456,10 +427,9 @@ function ActiveCursor(): JSX.Element {
       if (document.pointerLockElement !== canvas) {
         return;
       }
-      // Lock yaw/pitch while the BulletTimeDirector owns the camera. Once
-      // the reveal sequence has handed control back ('impact' onward —
-      // camera is settled at its final pose and the swords have hit the
-      // wall), let mouselook resume so the cursor wakes up sooner.
+      // Lock yaw/pitch while the BulletTimeDirector owns the camera.
+      // Once the reveal sequence has handed control back ('impact'
+      // onward), let mouselook resume.
       const rs = useWorldStore.getState().revealState;
       if (rs !== 'impact' && rs !== 'revealed') {
         return;
@@ -475,22 +445,16 @@ function ActiveCursor(): JSX.Element {
       }
     };
 
-    // Touch state for tap-vs-drag classification. A touchstart begins
-    // a candidate gesture; if the user moves the finger more than
-    // TOUCH_TAP_DIST_THRESHOLD pixels we commit to "drag" (swipe-to-
-    // look). Otherwise touchend within TOUCH_TAP_TIME_THRESHOLD ms
-    // dispatches a synthetic mousedown+mouseup on window, reusing the
-    // global click pipeline (interaction + audio).
+    // Touch state — see comments below for tap-vs-drag classification,
+    // press-on-interactable, and pinch-throttle bookkeeping.
     const TOUCH_TAP_DIST_THRESHOLD = 10;
     const TOUCH_TAP_TIME_THRESHOLD_MS = 250;
-    const TOUCH_LOOK_SENSITIVITY = MOUSE_SENSITIVITY * 1.6; // touch deltas read smaller than mouse
+    const TOUCH_LOOK_SENSITIVITY = MOUSE_SENSITIVITY * 1.6;
     /** Pinch distance delta (px) that maps to full forward / backward
-     *  throttle. ±150 fits on most phone screens without requiring a
-     *  super-wide finger spread; smaller values get jittery, larger
-     *  values feel sluggish. */
+     *  throttle. ±150 fits on most phone screens; smaller values get
+     *  jittery, larger values feel sluggish. */
     const PINCH_FULL_THROTTLE_DELTA = 150;
 
-    // ---------- single-finger gesture (look + tap) ----------
     let touchStartX = 0;
     let touchStartY = 0;
     let touchLastX = 0;
@@ -498,15 +462,7 @@ function ActiveCursor(): JSX.Element {
     let touchStartTime = 0;
     let touchIsDrag = false;
     let touchSingleActive = false;
-
-    // ---------- single-finger press on interactable ----------
-    /** When the crosshair is on an interactable at touchstart, the
-     *  user's intent is "hold to interact", not "swipe to look". We
-     *  synthesise mousedown immediately and skip drag promotion so
-     *  the cursor leans without the camera trying to rotate. */
     let pressInteractActive = false;
-
-    // ---------- two-finger gesture (pinch → forward/back) ----------
     let pinchActive = false;
     let pinchStartDist = 0;
 
@@ -519,15 +475,9 @@ function ActiveCursor(): JSX.Element {
       return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
     };
 
-    // Re-used raycaster + NDC buffer for the touch-position raycast
-    // (separate from the InteractionController's crosshair raycaster
-    // — that one shoots through screen centre; this one shoots
-    // through wherever the user's finger landed).
     const touchRaycaster = new Raycaster();
     const touchNDC = new Vector2();
 
-    /** Raycast from the touch's screen position into the scene and
-     *  return the first interactable hit within range, or null. */
     const interactableUnderTouch = (
       clientX: number,
       clientY: number,
@@ -554,26 +504,13 @@ function ActiveCursor(): JSX.Element {
     };
 
     const onTouchStart = (e: TouchEvent): void => {
-      // First touch is the canonical user gesture on mobile — unlock
-      // the AudioContext on every touchstart so any path through the
-      // app reaches a real `source.start()` with a running ctx.
       sfx.unlock();
-      // Block the InteractionController + global mouseDown/Up audio
-      // for the *entire duration* of the touch (any hold, any
-      // length). iOS fires synthetic mouse events on touchend; the
-      // suppression is refreshed with a 400 ms buffer when the touch
-      // ends, covering the synthetic burst.
       setTouchInProgress(true);
 
       if (e.touches.length === 2) {
-        // Second finger landed: switch into pinch mode. Cancel any
-        // pending single-finger gesture so the touchend doesn't fire
-        // a synthetic click when the user lifts the first finger.
         pinchActive = true;
         pinchStartDist = fingerDistance(e);
         touchSingleActive = false;
-        // If a press was active, release it cleanly — the user is
-        // transitioning to a navigation gesture.
         if (pressInteractActive) {
           pressInteractActive = false;
           useWorldStore.getState().endInteractPress();
@@ -588,19 +525,10 @@ function ActiveCursor(): JSX.Element {
         touchStartY = t.clientY;
         touchStartTime = performance.now();
 
-        // Raycast from the *touch's* screen position to see if the
-        // finger landed on an interactable. This is the mobile
-        // analogue of "click on the object" — independent of where
-        // the crosshair (screen centre) is pointing.
         const touchHit = interactableUnderTouch(t.clientX, t.clientY);
         if (touchHit) {
           pressInteractActive = true;
           touchSingleActive = false;
-          // Drive the press directly via the store + audio; we
-          // bypass the InteractionController on this path because
-          // its mousedown handler uses the *crosshair* hit, not the
-          // touch hit. The cursor's lean animation reads from
-          // `pressedTargetPoint` regardless of how the press began.
           useWorldStore
             .getState()
             .beginInteractPress(touchHit.id, [
@@ -612,8 +540,6 @@ function ActiveCursor(): JSX.Element {
           return;
         }
 
-        // No interactable under the finger — this is a candidate
-        // swipe-to-look or quick-tap-on-empty.
         touchLastX = t.clientX;
         touchLastY = t.clientY;
         touchIsDrag = false;
@@ -623,13 +549,6 @@ function ActiveCursor(): JSX.Element {
 
     const onTouchMove = (e: TouchEvent): void => {
       if (pinchActive && e.touches.length >= 2) {
-        // Distance delta from start = continuous throttle. Pinch out
-        // (fingers spread) → positive delta → walk forward; pinch in
-        // → negative delta → walk back. Held = constant velocity.
-        // fingerDistance returns 0 if either touch slot is missing
-        // (degenerate case during a gesture transition); skip the
-        // throttle update on that frame instead of snapping to a
-        // delta of -pinchStartDist.
         const currentDist = fingerDistance(e);
         if (currentDist <= 0) {
           e.preventDefault();
@@ -642,8 +561,6 @@ function ActiveCursor(): JSX.Element {
         return;
       }
 
-      // Press-on-interactable absorbs all movement during the hold —
-      // the user is leaning, not rotating the camera.
       if (pressInteractActive) {
         e.preventDefault();
         return;
@@ -656,8 +573,6 @@ function ActiveCursor(): JSX.Element {
       if (!t) {
         return;
       }
-      // Promote to "drag" once we've moved past the tap threshold, and
-      // stay in drag mode until touchend.
       if (!touchIsDrag) {
         const totalDx = t.clientX - touchStartX;
         const totalDy = t.clientY - touchStartY;
@@ -668,8 +583,6 @@ function ActiveCursor(): JSX.Element {
       if (!touchIsDrag) {
         return;
       }
-      // Same gating as mouselook — only apply look while the reveal
-      // has handed control back to the user.
       const rs = useWorldStore.getState().revealState;
       if (rs !== 'impact' && rs !== 'revealed') {
         touchLastX = t.clientX;
@@ -683,34 +596,18 @@ function ActiveCursor(): JSX.Element {
       avatarPitch.current = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, next));
       touchLastX = t.clientX;
       touchLastY = t.clientY;
-      // preventDefault to stop the browser's pull-to-refresh / scroll
-      // overlapping the look gesture.
       e.preventDefault();
     };
 
     const onTouchEnd = (e: TouchEvent): void => {
-      // Pinch ends as soon as we drop below 2 fingers — don't wait
-      // for both to lift, otherwise the throttle stays applied while
-      // the user transitions back to a single finger.
       if (pinchActive && e.touches.length < 2) {
         pinchActive = false;
         touchWalkVelocity.current = 0;
       }
-      // Once the last finger is up, mark the touch ended. The
-      // press-on-interactable + tap-on-empty branches below also
-      // call setTouchInProgress(false) on their commit paths; this
-      // catches every other terminal case (drag-to-look ending,
-      // pinch ending, multi-finger weirdness, etc.).
       if (e.touches.length === 0) {
         setTouchInProgress(false);
       }
 
-      // Press-on-interactable: commit the interaction by reading
-      // the pressed id from the store, firing its registered
-      // handler, playing the heavy click audio, and ending the
-      // press. We don't synthesise mousedown/mouseup here because
-      // those would trigger the InteractionController's crosshair-
-      // based logic, which doesn't know about the touch's hit.
       if (pressInteractActive && e.touches.length === 0) {
         pressInteractActive = false;
         const state = useWorldStore.getState();
@@ -723,8 +620,6 @@ function ActiveCursor(): JSX.Element {
         }
         void sfx.play('mouseUp');
         state.endInteractPress();
-        // Mark touch ended — the suppression utility starts its
-        // 400 ms buffer for iOS's synthetic mouse events.
         setTouchInProgress(false);
         return;
       }
@@ -734,23 +629,14 @@ function ActiveCursor(): JSX.Element {
       }
       touchSingleActive = false;
       if (touchIsDrag) {
-        return; // drag already handled; no synthetic click
+        return;
       }
       const elapsed = performance.now() - touchStartTime;
       if (elapsed > TOUCH_TAP_TIME_THRESHOLD_MS) {
         return;
       }
-      // Tap on empty space: play the global mouseDown/Up cues
-      // directly (mirrors desktop tap audio feedback). We avoid
-      // dispatching synthetic mouse events here because iOS Safari
-      // *also* fires its own synthetic mousedown/mouseup right after
-      // touchend — dispatching ours would double them up. Pure
-      // direct sfx.play calls give the same audio without the
-      // duplicate-fire risk.
       void sfx.play('mouseDown');
       void sfx.play('mouseUp');
-      // Mark touch ended — the suppression utility starts its
-      // 400 ms buffer for iOS's synthetic mouse events.
       setTouchInProgress(false);
     };
 
@@ -769,263 +655,302 @@ function ActiveCursor(): JSX.Element {
         document.exitPointerLock?.();
       }
     };
-    // `scene` is in the dep list, so `scene.children` is read live each
-    // touch raycast — no stale snapshot risk if children are added or
-    // removed mid-session.
   }, [isPostClick, gl.domElement, camera, scene]);
 
-  // Anchor avatar position + reset yaw/pitch the moment the user dismisses
-  // ControlsHint (controlsDismissed → isAvatar). Discards any mouse delta
-  // accumulated during impact/revealed so the avatar starts looking
-  // straight ahead instead of at a weird drifted angle.
-  useEffect(() => {
-    if (!isAvatar) {
-      return;
-    }
-    avatarPos.current.set(
-      camera.position.x,
-      camera.position.y - FOLLOW_OFFSET.y,
-      camera.position.z - FOLLOW_OFFSET.z,
-    );
-    avatarYaw.current = 0;
-    avatarPitch.current = 0;
-    // Audio: this transition is also a user-gesture-derived event
-    // (the user dismissed the controls hint by clicking). Re-call
-    // unlock() in case the cube reveal click hasn't happened yet
-    // (dev hotkey path). Idempotent.
-    sfx.unlock();
-    // Mark the cursor → avatar transition with the UI click (the same
-    // cue that previously fired on first reveal click).
-    void sfx.play('uiClick');
-  }, [isAvatar, camera]);
+  const refs: CursorRefs = useMemo(
+    () => ({
+      groupRef,
+      renderedScale,
+      tipLocalOffset,
+      avatarPos,
+      avatarYaw,
+      avatarPitch,
+      keys,
+      touchWalkVelocity,
+      initialPanStart,
+      renderedCursorPos,
+      pressAnchorQuat,
+      pointerCaptured,
+      capturedPointer,
+      cursorFrozen,
+      frozenCursorPos,
+      frozenCursorQuat,
+      swingingEnteredAt,
+    }),
+    [pressAnchorQuat],
+  );
+
+  return (
+    <group ref={groupRef}>
+      <primitive object={gltf.scene} />
+      {isAvatar ? <AvatarCursor refs={refs} /> : <PointerCursor refs={refs} />}
+    </group>
+  );
+}
+
+// ─── PointerCursor ────────────────────────────────────────────────────
+// Pointer-mode useFrame: idle / world-frozen / camera-anchored
+// projection. Returns null — purely behavioural.
+
+interface ModeProps {
+  refs: CursorRefs;
+}
+
+function PointerCursor({ refs }: ModeProps): null {
+  const { pointer, camera } = useThree();
+  const revealState = useWorldStore((s) => s.revealState);
+  // Reusable buffers — three Vector3 + one PerspectiveCamera used for
+  // the projection + lookAt math. Owned here (not in the shared refs)
+  // because they're write-only scratch space.
+  const tmpCamFwd = useRef(new Vector3());
+  const tmpCamRight = useRef(new Vector3());
+  const tmpCamUp = useRef(new Vector3());
 
   useFrame((state, delta) => {
-    if (!groupRef.current) {
+    const group = refs.groupRef.current;
+    if (!group) {
       return;
     }
     const k = 1 - Math.exp(-SCALE_LERP_RATE * delta);
 
-    if (!isAvatar) {
-      // Reset the initial-pan capture so the next isAvatar=true cleanly
-      // captures fresh starting state.
-      initialPanStart.current = null;
+    // Reset the initial-pan capture so a future avatar-mode mount
+    // cleanly captures fresh starting state.
+    refs.initialPanStart.current = null;
 
-      // Track when 'swinging' began so we can split it into pre and
-      // mid+post for the two cursor behaviours.
-      if (revealState === 'swinging' && swingingEnteredAt.current < 0) {
-        swingingEnteredAt.current = state.clock.elapsedTime;
+    // Track when 'swinging' began so we can split it into pre and
+    // mid+post for the two cursor sub-behaviours below.
+    if (revealState === 'swinging' && refs.swingingEnteredAt.current < 0) {
+      refs.swingingEnteredAt.current = state.clock.elapsedTime;
+    }
+    if (revealState !== 'swinging') {
+      refs.swingingEnteredAt.current = -1;
+    }
+
+    const swingTime =
+      revealState === 'swinging' && refs.swingingEnteredAt.current >= 0
+        ? state.clock.elapsedTime - refs.swingingEnteredAt.current
+        : 0;
+
+    // Phase classification:
+    //   "world-frozen": chase phase (armed + early swinging) — cursor
+    //                   stays at the click-time WORLD position. Camera
+    //                   moves around it; user sees cursor parallax.
+    //   "camera-anchored": mid + post (formation + slam) — cursor
+    //                       projects through the live camera using a
+    //                       captured pointer NDC; reads as still on
+    //                       screen even while camera pans.
+    const inWorldFrozen =
+      revealState === 'armed' || (revealState === 'swinging' && swingTime < SWING_PRE);
+    const inCameraAnchored = revealState === 'swinging' && swingTime >= SWING_PRE;
+
+    // Hide the cursor entirely during the chase/world-frozen phase.
+    group.visible = !inWorldFrozen;
+
+    if (inWorldFrozen) {
+      if (!refs.cursorFrozen.current) {
+        refs.frozenCursorPos.current.copy(group.position);
+        refs.frozenCursorQuat.current.copy(group.quaternion);
+        refs.capturedPointer.current.x = pointer.x;
+        refs.capturedPointer.current.y = pointer.y;
+        refs.pointerCaptured.current = true;
+        refs.cursorFrozen.current = true;
       }
-      if (revealState !== 'swinging') {
-        swingingEnteredAt.current = -1;
-      }
+      group.position.copy(refs.frozenCursorPos.current);
+      group.quaternion.copy(refs.frozenCursorQuat.current);
+    } else {
+      // Camera-anchored OR live-pointer mode. Project NDC to a world-
+      // space cursor pose using the camera's basis vectors directly
+      // (no matrix inversion → no per-frame floating-point drift).
+      const cam = camera as PerspectiveCamera;
+      const fovY = (cam.fov * Math.PI) / 180;
+      tmpCamFwd.current.set(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
+      tmpCamRight.current.set(1, 0, 0).applyQuaternion(camera.quaternion).normalize();
+      tmpCamUp.current.set(0, 1, 0).applyQuaternion(camera.quaternion).normalize();
 
-      const swingTime =
-        revealState === 'swinging' && swingingEnteredAt.current >= 0
-          ? state.clock.elapsedTime - swingingEnteredAt.current
-          : 0;
-
-      // Phase classification:
-      //   "world-frozen": chase phase (armed + early swinging) — cursor
-      //                   stays at the click-time WORLD position. Camera
-      //                   moves around it; user sees cursor parallax.
-      //   "camera-anchored": mid + post (formation + slam) — cursor
-      //                       projects through the live camera using a
-      //                       captured pointer NDC; reads as still on
-      //                       screen even while camera pans.
-      const inWorldFrozen =
-        revealState === 'armed' || (revealState === 'swinging' && swingTime < SWING_PRE);
-      const inCameraAnchored = revealState === 'swinging' && swingTime >= SWING_PRE;
-
-      // Hide the cursor entirely during the chase/world-frozen phase. The
-      // camera's lookAt rotation would otherwise sweep the cursor through
-      // frame centre before parallax pushes it off screen — even at small
-      // scale, it reads as "the cursor got in the way for a beat".
-      groupRef.current.visible = !inWorldFrozen;
-
-      if (inWorldFrozen) {
-        // Capture world pose AND pointer NDC on entry. Capturing the NDC
-        // here (rather than waiting for camera-anchored to start) is what
-        // pins the cursor to the click position: pointer-lock isn't yet
-        // engaged during the hidden phase, so without this the user can
-        // drift the OS pointer and the cursor would re-appear at the
-        // mouse's current location instead of where they clicked.
-        if (!cursorFrozen.current) {
-          frozenCursorPos.current.copy(groupRef.current.position);
-          frozenCursorQuat.current.copy(groupRef.current.quaternion);
-          capturedPointer.current.x = pointer.x;
-          capturedPointer.current.y = pointer.y;
-          pointerCaptured.current = true;
-          cursorFrozen.current = true;
+      let px: number;
+      let py: number;
+      if (inCameraAnchored) {
+        if (!refs.pointerCaptured.current) {
+          refs.capturedPointer.current.x = pointer.x;
+          refs.capturedPointer.current.y = pointer.y;
+          refs.pointerCaptured.current = true;
         }
-        groupRef.current.position.copy(frozenCursorPos.current);
-        groupRef.current.quaternion.copy(frozenCursorQuat.current);
+        px = refs.capturedPointer.current.x;
+        py = refs.capturedPointer.current.y;
       } else {
-        // Camera-anchored OR live-pointer mode: project an NDC pointer to
-        // a world-space cursor pose using the camera's basis vectors (no
-        // matrix inversion → no per-frame floating-point drift).
-        const cam = camera as PerspectiveCamera;
-        const fovY = (cam.fov * Math.PI) / 180;
-        tmpCamFwd.current.set(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
-        tmpCamRight.current.set(1, 0, 0).applyQuaternion(camera.quaternion).normalize();
-        tmpCamUp.current.set(0, 1, 0).applyQuaternion(camera.quaternion).normalize();
-
-        let px: number;
-        let py: number;
-        if (inCameraAnchored) {
-          // NDC was captured on entry to world-frozen above. If we somehow
-          // skipped that phase (e.g. entered swinging without armed), grab
-          // it now as a fallback.
-          if (!pointerCaptured.current) {
-            capturedPointer.current.x = pointer.x;
-            capturedPointer.current.y = pointer.y;
-            pointerCaptured.current = true;
-          }
-          px = capturedPointer.current.x;
-          py = capturedPointer.current.y;
-        } else {
-          // Idle / impact / revealed — live-pointer mode.
-          cursorFrozen.current = false;
-          pointerCaptured.current = false;
-          px = pointer.x;
-          py = pointer.y;
-        }
-
-        projectNDCToWorld(
-          groupRef.current.position,
-          camera.position,
-          tmpCamFwd.current,
-          tmpCamRight.current,
-          tmpCamUp.current,
-          fovY,
-          cam.aspect,
-          POINTER_DEPTH,
-          px,
-          py,
-        );
-        groupRef.current.quaternion.copy(camera.quaternion);
+        // Idle / impact / revealed — live-pointer mode.
+        refs.cursorFrozen.current = false;
+        refs.pointerCaptured.current = false;
+        px = pointer.x;
+        py = pointer.y;
       }
 
-      renderedScale.current += (POINTER_SCALE - renderedScale.current) * k;
-      groupRef.current.scale.setScalar(renderedScale.current);
+      projectNDCToWorld(
+        group.position,
+        camera.position,
+        tmpCamFwd.current,
+        tmpCamRight.current,
+        tmpCamUp.current,
+        fovY,
+        cam.aspect,
+        POINTER_DEPTH,
+        px,
+        py,
+      );
+      group.quaternion.copy(camera.quaternion);
+    }
+
+    refs.renderedScale.current += (POINTER_SCALE - refs.renderedScale.current) * k;
+    group.scale.setScalar(refs.renderedScale.current);
+  }, 2);
+
+  return null;
+}
+
+// ─── AvatarCursor ─────────────────────────────────────────────────────
+// 3rd-person follow rig + lean-on-press. Returns null — purely behavioural.
+
+function AvatarCursor({ refs }: ModeProps): null {
+  const { camera } = useThree();
+  const dimensions = useWorldStore((s) => s.environment.dimensions);
+  const pressedTargetPoint = useWorldStore((s) => s.pressedTargetPoint);
+
+  // Scratch buffers owned by AvatarCursor — write-only per frame.
+  const tmpVec = useRef(new Vector3());
+  const tmpEuler = useRef(new Euler());
+  const tmpCamTarget = useRef(new Vector3());
+  const tmpCubeHalf = useRef(new Vector3());
+  const tmpHelper = useMemo(() => new PerspectiveCamera(), []);
+  const targetCamQuat = useMemo(() => new Quaternion(), []);
+  const avatarTargetQuat = useMemo(() => new Quaternion(), []);
+
+  // Initial-pan captured-state buffers. ActiveCursor's initialPanStart
+  // ref signals the capture moment; these refs hold the captured values.
+  const initialCamPos = useRef(new Vector3());
+  const initialCamQuat = useRef(new Quaternion());
+  const initialCursorPos = useRef(new Vector3());
+  const initialCursorQuat = useRef(new Quaternion());
+  const initialScale = useRef(POINTER_SCALE);
+
+  // Lean-target scratch buffers.
+  const leanTarget = useRef(new Vector3());
+  const tipWorldBuffer = useRef(new Vector3());
+
+  // Anchor avatar position + reset yaw/pitch the moment AvatarCursor mounts
+  // (was previously gated on `isAvatar` flipping true; same effect now that
+  // mount IS that transition).
+  useEffect(() => {
+    refs.avatarPos.current.set(
+      camera.position.x,
+      camera.position.y - FOLLOW_OFFSET.y,
+      camera.position.z - FOLLOW_OFFSET.z,
+    );
+    refs.avatarYaw.current = 0;
+    refs.avatarPitch.current = 0;
+    sfx.unlock();
+    void sfx.play('uiClick');
+  }, [camera, refs]);
+
+  useFrame((state, delta) => {
+    const group = refs.groupRef.current;
+    if (!group) {
       return;
     }
+    const k = 1 - Math.exp(-SCALE_LERP_RATE * delta);
 
-    // Capture pre-pan state on the first frame of avatar mode. Includes
-    // the cursor's CURRENT in-world position/orientation so the lerp
-    // can ease it into the avatar slot from wherever it was on screen,
-    // instead of snapping to the avatar position and growing in place.
-    if (initialPanStart.current === null) {
-      initialPanStart.current = state.clock.elapsedTime;
+    // Capture pre-pan state on the first frame of avatar mode.
+    if (refs.initialPanStart.current === null) {
+      refs.initialPanStart.current = state.clock.elapsedTime;
       initialCamPos.current.copy(camera.position);
       initialCamQuat.current.copy(camera.quaternion);
-      initialScale.current = renderedScale.current;
-      initialCursorPos.current.copy(groupRef.current.position);
-      initialCursorQuat.current.copy(groupRef.current.quaternion);
+      initialScale.current = refs.renderedScale.current;
+      initialCursorPos.current.copy(group.position);
+      initialCursorQuat.current.copy(group.quaternion);
     }
 
-    const yaw = avatarYaw.current;
-
-    // Walk vector from WASD + touch throttle, rotated by camera
-    // yaw/pitch. See ./cursorAvatarMath.computeWalkVector — A/D strafe
-    // ignores pitch (horizontal), W/S follows pitch (FPS-style flying).
+    const yaw = refs.avatarYaw.current;
     const walk = computeWalkVector(
-      keys.current,
+      refs.keys.current,
       yaw,
-      avatarPitch.current,
-      touchWalkVelocity.current,
+      refs.avatarPitch.current,
+      refs.touchWalkVelocity.current,
     );
     if (walk.len > 0) {
-      // Cap normalisation at 1 so partial throttles (e.g. touch pinch
-      // at half spread) move at half speed instead of being scaled
-      // back up to full. Diagonals (W+D = len √2) still get the
-      // anti-faster-diagonals normalisation.
+      // Cap normalisation at 1 so partial throttles (touch pinch at
+      // half spread) move at half speed instead of being scaled back
+      // to full. Diagonals (W+D = √2) still get anti-fast-diagonal
+      // normalisation.
       const cappedLen = Math.max(1, walk.len);
       const step = (WALK_SPEED * delta) / cappedLen;
-      avatarPos.current.x += walk.mx * step;
-      avatarPos.current.y += walk.my * step;
-      avatarPos.current.z += walk.mz * step;
+      refs.avatarPos.current.x += walk.mx * step;
+      refs.avatarPos.current.y += walk.my * step;
+      refs.avatarPos.current.z += walk.mz * step;
     }
 
-    // Cube half-extents from the live environment dimensions. Reused
-    // for both the avatar clamp and the camera collision check below.
     tmpCubeHalf.current.set(dimensions[0] * 0.5, dimensions[1] * 0.5, dimensions[2] * 0.5);
+    clampToBoxInterior(refs.avatarPos.current, tmpCubeHalf.current, AVATAR_WALL_MARGIN);
 
-    // Avatar collision: clamp to cube interior so the body never pokes
-    // through a wall.
-    clampToBoxInterior(avatarPos.current, tmpCubeHalf.current, AVATAR_WALL_MARGIN);
-
-    // Proximity ambient: cube hum scales with the avatar's distance to
-    // the nearest wall (any axis) — silent at centre, full at touching.
+    // Wall-proximity ambient — louder near walls, silent at centre.
     {
       const proximity = computeWallProximity(
-        avatarPos.current,
+        refs.avatarPos.current,
         tmpCubeHalf.current,
         WALL_AMBIENT_FADE_DISTANCE,
       );
       if (proximity > 0 && !sfx.isLoopActive('wallAmbient')) {
-        // Start silent; the next setLoopVolume below ramps it in.
         void sfx.play('wallAmbient', { volumeMultiplier: 0 });
       }
       sfx.setLoopVolume('wallAmbient', WALL_AMBIENT_BASE_VOLUME * proximity);
     }
 
-    // Avatar's target rotation as a quaternion (Y-axis yaw rotation).
-    // Y-axis quaternion: (0, sin(θ/2), 0, cos(θ/2)).
-    const halfYaw = yaw * 0.5;
-    avatarTargetQuat.set(0, Math.sin(halfYaw), 0, Math.cos(halfYaw));
+    // Avatar's target rotation (Y-axis yaw).
+    setYawQuat(avatarTargetQuat, yaw);
 
-    // Default 3rd-person offset, rotated into world-space.
-    tmpEuler.current.set(avatarPitch.current, yaw, 0, 'YXZ');
+    // Default 3rd-person offset rotated into world-space.
+    tmpEuler.current.set(refs.avatarPitch.current, yaw, 0, 'YXZ');
     tmpVec.current.copy(FOLLOW_OFFSET).applyEuler(tmpEuler.current);
 
     // Camera collision: shorten the offset so the camera stays inside
-    // the cube. See ./cursorAvatarMath.computeCameraCollisionRatio.
+    // the cube.
     const ratio = computeCameraCollisionRatio(
-      avatarPos.current,
+      refs.avatarPos.current,
       tmpVec.current,
       tmpCubeHalf.current,
       CAMERA_WALL_MARGIN,
     );
-    tmpCamTarget.current.copy(avatarPos.current).addScaledVector(tmpVec.current, ratio);
+    tmpCamTarget.current.copy(refs.avatarPos.current).addScaledVector(tmpVec.current, ratio);
 
-    // Compute target camera rotation via a temp Object3D so we can
-    // slerp toward it during the initial pan (snapping with .lookAt
-    // would skip the pan entirely on the first frame).
+    // Compute target camera rotation via a temp PerspectiveCamera so
+    // we can slerp toward it during the initial pan (snapping with
+    // .lookAt would skip the pan entirely on the first frame).
     tmpHelper.position.copy(tmpCamTarget.current);
     tmpHelper.lookAt(
-      avatarPos.current.x,
-      avatarPos.current.y + LOOK_AHEAD_HEIGHT,
-      avatarPos.current.z,
+      refs.avatarPos.current.x,
+      refs.avatarPos.current.y + LOOK_AHEAD_HEIGHT,
+      refs.avatarPos.current.z,
     );
     targetCamQuat.copy(tmpHelper.quaternion);
 
-    const elapsed = state.clock.elapsedTime - initialPanStart.current;
-    if (elapsed < INITIAL_PAN_DURATION) {
-      // Initial pan: smoothstep-eased over INITIAL_PAN_DURATION. Drives
-      // camera position+rotation, cursor position+rotation, and cursor
-      // scale together so the cursor visually slides+grows from its
-      // last screen position into the 3rd-person avatar slot.
-      const tNorm = elapsed / INITIAL_PAN_DURATION;
-      const eased = tNorm * tNorm * (3 - 2 * tNorm);
-      camera.position.lerpVectors(initialCamPos.current, tmpCamTarget.current, eased);
-      camera.quaternion.slerpQuaternions(initialCamQuat.current, targetCamQuat, eased);
-      groupRef.current.position.lerpVectors(initialCursorPos.current, avatarPos.current, eased);
-      groupRef.current.quaternion.slerpQuaternions(
-        initialCursorQuat.current,
-        avatarTargetQuat,
-        eased,
-      );
-      renderedScale.current = initialScale.current + (AVATAR_SCALE - initialScale.current) * eased;
+    const elapsed = state.clock.elapsedTime - refs.initialPanStart.current;
+    const panProgress = computeInitialPanProgress(elapsed, INITIAL_PAN_DURATION);
+
+    if (panProgress < 1) {
+      // Initial pan: smoothstep-eased over INITIAL_PAN_DURATION.
+      // Drives camera position+rotation, cursor position+rotation,
+      // and cursor scale together.
+      camera.position.lerpVectors(initialCamPos.current, tmpCamTarget.current, panProgress);
+      camera.quaternion.slerpQuaternions(initialCamQuat.current, targetCamQuat, panProgress);
+      group.position.lerpVectors(initialCursorPos.current, refs.avatarPos.current, panProgress);
+      group.quaternion.slerpQuaternions(initialCursorQuat.current, avatarTargetQuat, panProgress);
+      refs.renderedScale.current =
+        initialScale.current + (AVATAR_SCALE - initialScale.current) * panProgress;
       // Seed renderedCursorPos so the steady-state lerp picks up
-      // exactly where the initial pan left off (instead of starting
-      // at origin and snapping in on the first steady frame).
-      renderedCursorPos.current.copy(groupRef.current.position);
+      // exactly where the initial pan left off.
+      refs.renderedCursorPos.current.copy(group.position);
     } else {
-      // Steady-state. Camera lerps as before; cursor position +
-      // orientation lerp toward press-aware targets so the lean
-      // motion accumulates frame-to-frame instead of resetting from
-      // the follow rig each frame (the previous bug — caused the
-      // jitter the user reported).
+      // Steady-state. Camera lerps; cursor position + orientation lerp
+      // toward press-aware targets so the lean motion accumulates
+      // frame-to-frame instead of resetting from the follow rig.
       const camK = 1 - Math.exp(-CAMERA_LERP_RATE * delta);
       camera.position.lerp(tmpCamTarget.current, camK);
       camera.quaternion.copy(targetCamQuat);
@@ -1033,41 +958,36 @@ function ActiveCursor(): JSX.Element {
       let cursorPosTarget: Vector3;
       let cursorQuatTarget: Quaternion;
       if (pressedTargetPoint) {
-        // Position the group such that the visible tip — measured
-        // once from the model's bbox — lands exactly on the raycast
-        // hit. See ./cursorAvatarMath.computeLeanTarget. Press-time
-        // captured `pressAnchorQuat` (not live camera) keeps the
-        // cursor world-anchored while the user rotates the camera
-        // during a held press.
+        // Position the group such that the visible tip (measured once
+        // from the model's bbox) lands exactly on the raycast hit.
+        // Press-time captured `pressAnchorQuat` (not live camera)
+        // keeps the cursor world-anchored on the target while the
+        // user rotates the camera during a held press.
         tmpVec.current.set(pressedTargetPoint[0], pressedTargetPoint[1], pressedTargetPoint[2]);
         computeLeanTarget(
           leanTarget.current,
           tmpVec.current,
-          tipLocalOffset.current,
-          pressAnchorQuat,
+          refs.tipLocalOffset.current,
+          refs.pressAnchorQuat,
           AVATAR_SCALE,
           tipWorldBuffer.current,
         );
         cursorPosTarget = leanTarget.current;
-        cursorQuatTarget = pressAnchorQuat;
+        cursorQuatTarget = refs.pressAnchorQuat;
       } else {
-        cursorPosTarget = avatarPos.current;
+        cursorPosTarget = refs.avatarPos.current;
         cursorQuatTarget = avatarTargetQuat;
       }
 
       const leanK = 1 - Math.exp(-LEAN_LERP_RATE * delta);
-      renderedCursorPos.current.lerp(cursorPosTarget, leanK);
-      groupRef.current.position.copy(renderedCursorPos.current);
-      groupRef.current.quaternion.slerp(cursorQuatTarget, leanK);
+      refs.renderedCursorPos.current.lerp(cursorPosTarget, leanK);
+      group.position.copy(refs.renderedCursorPos.current);
+      group.quaternion.slerp(cursorQuatTarget, leanK);
 
-      renderedScale.current += (AVATAR_SCALE - renderedScale.current) * k;
+      refs.renderedScale.current += (AVATAR_SCALE - refs.renderedScale.current) * k;
     }
-    groupRef.current.scale.setScalar(renderedScale.current);
+    group.scale.setScalar(refs.renderedScale.current);
   }, 2);
 
-  return (
-    <group ref={groupRef}>
-      <primitive object={gltf.scene} />
-    </group>
-  );
+  return null;
 }

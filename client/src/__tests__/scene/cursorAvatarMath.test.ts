@@ -8,11 +8,13 @@ import { Quaternion, Vector3 } from 'three';
 import {
   clampToBoxInterior,
   computeCameraCollisionRatio,
+  computeInitialPanProgress,
   computeLeanTarget,
   computePinchVelocity,
   computeWalkVector,
   computeWallProximity,
   projectNDCToWorld,
+  setYawQuat,
 } from '@/components/scene/cursorAvatarMath';
 
 const HALF = new Vector3(40, 40, 40);
@@ -258,6 +260,79 @@ describe('clampToBoxInterior', () => {
     clampToBoxInterior(pos, HALF, 8);
     expect(ret).toBe(pos);
     expect(pos.x).toBe(32);
+  });
+});
+
+describe('setYawQuat', () => {
+  it('produces identity quaternion at yaw=0', () => {
+    const q = new Quaternion();
+    setYawQuat(q, 0);
+    expect(q.x).toBe(0);
+    expect(q.y).toBe(0);
+    expect(q.z).toBe(0);
+    expect(q.w).toBe(1);
+  });
+
+  it('writes a Y-axis-only rotation (x=z=0)', () => {
+    const q = new Quaternion();
+    setYawQuat(q, Math.PI / 4);
+    expect(q.x).toBe(0);
+    expect(q.z).toBe(0);
+    expect(q.y).toBeCloseTo(Math.sin(Math.PI / 8), 8);
+    expect(q.w).toBeCloseTo(Math.cos(Math.PI / 8), 8);
+  });
+
+  it('rotating (0, 0, -1) by setYawQuat(yaw) gives the correct world forward', () => {
+    // Avatar yaw rotates the body's local -Z (forward) into world space.
+    // For yaw=PI/2, world forward should be -X.
+    const q = new Quaternion();
+    setYawQuat(q, Math.PI / 2);
+    const fwd = new Vector3(0, 0, -1).applyQuaternion(q);
+    expect(fwd.x).toBeCloseTo(-1, 6);
+    expect(fwd.y).toBeCloseTo(0, 6);
+    expect(fwd.z).toBeCloseTo(0, 6);
+  });
+
+  it('mutates in place and writes nothing else', () => {
+    const q = new Quaternion(0.1, 0.2, 0.3, 0.4);
+    setYawQuat(q, 0);
+    // After setYawQuat(0), the quaternion is identity regardless of
+    // its prior contents.
+    expect(q.equals(new Quaternion())).toBe(true);
+  });
+});
+
+describe('computeInitialPanProgress', () => {
+  it('returns 0 at elapsed=0', () => {
+    expect(computeInitialPanProgress(0, 1.5)).toBe(0);
+  });
+
+  it('returns 1 at elapsed >= duration (clamps so callers can gate on >= 1)', () => {
+    expect(computeInitialPanProgress(1.5, 1.5)).toBe(1);
+    expect(computeInitialPanProgress(5, 1.5)).toBe(1);
+  });
+
+  it('returns 0 for negative elapsed (clock skew defensive)', () => {
+    expect(computeInitialPanProgress(-1, 1.5)).toBe(0);
+  });
+
+  it('returns smoothstep at the midpoint (eased = 0.5)', () => {
+    expect(computeInitialPanProgress(0.75, 1.5)).toBeCloseTo(0.5, 10);
+  });
+
+  it('eases in/out — derivative at endpoints is 0 (small ε is much smaller than ε itself)', () => {
+    const eps = 0.01;
+    const earlyProgress = computeInitialPanProgress(eps, 1);
+    expect(earlyProgress).toBeLessThan(eps); // ~0.0003
+  });
+
+  it('is monotonic across a sweep', () => {
+    let prev = -Infinity;
+    for (let t = 0; t <= 1.5; t += 0.05) {
+      const p = computeInitialPanProgress(t, 1.5);
+      expect(p).toBeGreaterThanOrEqual(prev);
+      prev = p;
+    }
   });
 });
 

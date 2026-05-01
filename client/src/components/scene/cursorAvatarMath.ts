@@ -190,6 +190,33 @@ export function clampToBoxInterior(pos: Vector3, half: Vector3, margin: number):
 }
 
 /**
+ * Set a Y-axis (yaw-only) quaternion in place: (0, sin(θ/2), 0,
+ * cos(θ/2)). The avatar's body always faces the look direction
+ * (yaw), and pitch is applied to the camera offset, not the body —
+ * so the avatar quaternion is a pure Y-rotation.
+ */
+export function setYawQuat(out: Quaternion, yaw: number): void {
+  const half = yaw * 0.5;
+  out.set(0, Math.sin(half), 0, Math.cos(half));
+}
+
+/**
+ * Initial-pan progress over `[0, 1]`. The pan is smoothstep-eased
+ * across `duration` seconds; past the end this returns 1 so callers
+ * can use `progress >= 1` as the "steady-state" gate.
+ */
+export function computeInitialPanProgress(elapsed: number, duration: number): number {
+  if (elapsed >= duration) {
+    return 1;
+  }
+  if (elapsed <= 0) {
+    return 0;
+  }
+  const t = elapsed / duration;
+  return t * t * (3 - 2 * t);
+}
+
+/**
  * Camera-offset shorten ratio so the camera stays inside the cube.
  * `offset` is the rotated 3rd-person offset (avatarPos + offset =
  * naive camera position). Returns the smallest ratio ≤ 1 by which
