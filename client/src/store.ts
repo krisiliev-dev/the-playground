@@ -30,6 +30,22 @@ export interface ClickHit {
   normal: [number, number, number];
 }
 
+/**
+ * Snapshot of the avatar's transient mid-experience state — position
+ * inside the cube, plus look angles. Captured when the Canvas is
+ * about to unmount (e.g. user flips into Simple Experience), restored
+ * the next time the avatar mounts so the user picks up exactly where
+ * they left off rather than respawning at the cube centre.
+ *
+ * Plain tuples so the store stays JSON-serialisable (same convention
+ * as `ClickHit`). Yaw + pitch are radians; position is world space.
+ */
+export interface AvatarSnapshot {
+  position: [number, number, number];
+  yaw: number;
+  pitch: number;
+}
+
 // ─── Store Actions ───────────────────────────────────────────────────
 
 interface AppActions {
@@ -60,6 +76,15 @@ interface AppActions {
   /** Toggle the Simple Experience document layout. Persisted to
    *  localStorage so the user's choice survives reload. */
   setDocumentMode: (mode: boolean) => void;
+  /** Persist the avatar's transient transform (position + look
+   *  angles) so it survives the Canvas unmount when the user flips
+   *  into Simple Experience and back. Pass `null` to clear. */
+  setAvatarSnapshot: (snapshot: AvatarSnapshot | null) => void;
+  /** Set the one-shot pointer-lock signal — true when the user has
+   *  asked to return to 3D from document mode and we should reclaim
+   *  the lock once the Canvas mounts. App clears it back to false
+   *  after consuming. */
+  setPendingPointerLock: (pending: boolean) => void;
   /** Set which interactable the crosshair is currently aimed at, or
    *  null if nothing is in range. The InteractionController updates
    *  this each frame; individual `useInteractable` consumers read it
@@ -103,6 +128,20 @@ interface RevealSlice {
    *  document (clean header + nav + scrollable content) instead of
    *  the 3D Canvas-and-overlays layout. Persisted to localStorage. */
   documentMode: boolean;
+  /** Last avatar transform captured before a Canvas unmount, or
+   *  null if the avatar hasn't run yet this session. Restored by
+   *  ActiveCursor on mount so flipping in/out of Simple Experience
+   *  doesn't respawn the user at the cube centre. */
+  avatarSnapshot: AvatarSnapshot | null;
+  /** One-shot signal set by DocumentShell when the user clicks
+   *  "Switch to 3D experience" *while in avatar mode*. App reads
+   *  + clears it inside handleCreated once the Canvas mounts, then
+   *  reclaims pointer-lock — so the user resumes mouselook without
+   *  a second confirming click. The signal lives in the store
+   *  (rather than a component ref) because the boot gate's
+   *  LoadingScreen can intervene between the click and the Canvas
+   *  mount, breaking any ref-based detection. */
+  pendingPointerLock: boolean;
 }
 
 /**
@@ -183,6 +222,8 @@ export const useWorldStore = create<AppState & AppActions & RevealSlice & Intera
     controlsDismissed: false,
     menuOpen: false,
     documentMode: readPersistedDocumentMode(),
+    avatarSnapshot: null,
+    pendingPointerLock: false,
     // Avatar lives from page load — small at first (cursor-sized), then grows
     // once the reveal completes. See CursorAvatar.tsx for the scale logic.
     cursorAvatarActive: true,
@@ -221,7 +262,12 @@ export const useWorldStore = create<AppState & AppActions & RevealSlice & Intera
         return { revealState: next };
       }),
 
-    resetReveal: () => set({ revealState: 'idle', clickHit: null, controlsDismissed: false }),
+    resetReveal: () =>
+      set({ revealState: 'idle', clickHit: null, controlsDismissed: false, avatarSnapshot: null }),
+
+    setAvatarSnapshot: (snapshot) => set({ avatarSnapshot: snapshot }),
+
+    setPendingPointerLock: (pending) => set({ pendingPointerLock: pending }),
 
     setClickHit: (hit) => set({ clickHit: hit }),
 

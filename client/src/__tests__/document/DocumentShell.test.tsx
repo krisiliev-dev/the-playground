@@ -60,4 +60,27 @@ describe('DocumentShell', () => {
     fireEvent.click(screen.getByRole('button', { name: /Switch to 3D experience/ }));
     expect(useWorldStore.getState().documentMode).toBe(false);
   });
+
+  describe('pointer-lock handoff signal', () => {
+    beforeEach(() => {
+      useWorldStore.setState({ pendingPointerLock: false });
+    });
+
+    it('sets pendingPointerLock when the user was in avatar mode', () => {
+      // controlsDismissed is the marker that the user has reached
+      // avatar mode (post-impact). DocumentShell uses it to decide
+      // whether reclaiming pointer-lock makes sense.
+      useWorldStore.setState({ controlsDismissed: true });
+      renderShell();
+      fireEvent.click(screen.getByRole('button', { name: /Switch to 3D experience/ }));
+      expect(useWorldStore.getState().pendingPointerLock).toBe(true);
+    });
+
+    it('does NOT set pendingPointerLock if the user has not reached avatar mode', () => {
+      useWorldStore.setState({ controlsDismissed: false });
+      renderShell();
+      fireEvent.click(screen.getByRole('button', { name: /Switch to 3D experience/ }));
+      expect(useWorldStore.getState().pendingPointerLock).toBe(false);
+    });
+  });
 });

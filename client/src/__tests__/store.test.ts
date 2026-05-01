@@ -225,6 +225,66 @@ describe('useWorldStore', () => {
     });
   });
 
+  describe('avatarSnapshot', () => {
+    beforeEach(() => {
+      useWorldStore.getState().setAvatarSnapshot(null);
+    });
+
+    it('defaults to null', () => {
+      expect(useWorldStore.getState().avatarSnapshot).toBeNull();
+    });
+
+    it('setAvatarSnapshot stores the position + look angles', () => {
+      useWorldStore.getState().setAvatarSnapshot({
+        position: [4, -3, 12],
+        yaw: 1.2,
+        pitch: -0.4,
+      });
+      expect(useWorldStore.getState().avatarSnapshot).toEqual({
+        position: [4, -3, 12],
+        yaw: 1.2,
+        pitch: -0.4,
+      });
+    });
+
+    it('setAvatarSnapshot(null) clears it back', () => {
+      useWorldStore.getState().setAvatarSnapshot({
+        position: [0, 0, 0],
+        yaw: 0,
+        pitch: 0,
+      });
+      useWorldStore.getState().setAvatarSnapshot(null);
+      expect(useWorldStore.getState().avatarSnapshot).toBeNull();
+    });
+
+    it('resetReveal clears the snapshot (full reset returns to spawn)', () => {
+      useWorldStore.getState().setAvatarSnapshot({
+        position: [10, 0, 0],
+        yaw: 0,
+        pitch: 0,
+      });
+      useWorldStore.getState().resetReveal();
+      expect(useWorldStore.getState().avatarSnapshot).toBeNull();
+    });
+  });
+
+  describe('pendingPointerLock', () => {
+    beforeEach(() => {
+      useWorldStore.getState().setPendingPointerLock(false);
+    });
+
+    it('defaults to false', () => {
+      expect(useWorldStore.getState().pendingPointerLock).toBe(false);
+    });
+
+    it('setPendingPointerLock toggles the flag', () => {
+      useWorldStore.getState().setPendingPointerLock(true);
+      expect(useWorldStore.getState().pendingPointerLock).toBe(true);
+      useWorldStore.getState().setPendingPointerLock(false);
+      expect(useWorldStore.getState().pendingPointerLock).toBe(false);
+    });
+  });
+
   describe('documentMode', () => {
     beforeEach(() => {
       // Each test starts from documentMode === false with a clean

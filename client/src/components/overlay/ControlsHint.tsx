@@ -11,7 +11,7 @@
 import { useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { useWorldStore } from '@/store';
-import { useIsTouchPrimary } from '@/utils';
+import { acquirePointerLock, useIsTouchPrimary } from '@/utils';
 
 const FADE_EASE = 'cubic-bezier(0.2, 0.8, 0.3, 1)';
 
@@ -50,17 +50,10 @@ export function ControlsHint(): JSX.Element | null {
     const onClick = (): void => {
       setShown(false);
       setControlsDismissed(true);
-      // Request pointer lock SYNCHRONOUSLY here — we're inside the click
-      // handler, so the user-activation token is still valid. Doing this
-      // in a React effect later fails with "requires a user gesture".
-      // querySelector returns null in test/jsdom (no canvas yet), and
-      // also in the rare case the canvas is unmounted between the
-      // dismiss timer arming and the click landing — both are fine to
-      // skip silently.
-      const canvas = document.querySelector('canvas');
-      if (canvas instanceof HTMLCanvasElement && typeof canvas.requestPointerLock === 'function') {
-        void canvas.requestPointerLock();
-      }
+      // Synchronous request — we're inside the click handler, so the
+      // user-activation token is still valid. Doing this from a
+      // React effect later would fail with "requires a user gesture".
+      acquirePointerLock();
     };
     const timer = window.setTimeout(() => {
       window.addEventListener('click', onClick, { once: true });

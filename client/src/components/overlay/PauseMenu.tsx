@@ -20,7 +20,7 @@ import type { CSSProperties } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { sfx } from '@/components/audio/SfxManager';
 import { useWorldStore } from '@/store';
-import { useIsTouchPrimary } from '@/utils';
+import { acquirePointerLock, useIsTouchPrimary } from '@/utils';
 
 const NAV_ITEMS = [
   { to: '/', label: 'Home' },
@@ -104,14 +104,7 @@ export function PauseMenu(): JSX.Element | null {
       // Outside avatar mode, pointer-lock isn't expected to be
       // active so re-acquiring would surprise the user.
       if (useWorldStore.getState().controlsDismissed) {
-        const canvas = document.querySelector('canvas');
-        if (
-          canvas instanceof HTMLCanvasElement &&
-          typeof canvas.requestPointerLock === 'function' &&
-          document.pointerLockElement !== canvas
-        ) {
-          void canvas.requestPointerLock();
-        }
+        acquirePointerLock();
       }
     }
     wasOpen.current = open;

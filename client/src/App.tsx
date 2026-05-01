@@ -14,6 +14,7 @@ import { isInteractionSynthSuppressed } from '@/components/scene/Interactable';
 import { About, Home, Projects, Writing } from '@/routes';
 import { DocumentShell } from '@/components/document';
 import { useWorldStore } from '@/store';
+import { acquirePointerLock } from '@/utils';
 
 type BootState = 'loading' | 'ready' | 'failed';
 
@@ -129,22 +130,26 @@ export function App(): JSX.Element {
   // real Canvas's onCreated handler attaches a webglcontextlost listener
   // that flips this flag if the GPU process dies under us mid-session.
   const [contextLost, setContextLost] = useState(false);
-  // Live ref into `documentMode` so the webglcontextlost listener
-  // (created once inside the `onCreated` callback) can read the
-  // current value without re-binding. When the user flips into
-  // document mode, the Canvas unmounts and that fires
-  // webglcontextlost — but it's an *expected* teardown, not a crash,
-  // so the listener should bail in that case.
+  // `documentModeRef` is dual-purpose:
+  //   1. The webglcontextlost listener (created once inside
+  //      `onCreated`) reads it to tell an *expected* Canvas
+  //      teardown (user flipped into Simple Experience) apart from
+  //      a real GPU crash.
+  //   2. `handleCreated` reads it to detect a doc → 3D transition.
+  //      Effects run child-first, so when the Canvas mock fires
+  //      onCreated, the parent's useEffect below hasn't synced the
+  //      ref yet — meaning `.current` still holds the *previous*
+  //      render's documentMode. If that's `true` and the live store
+  //      is `false`, we just transitioned out of document mode.
   const documentModeRef = useRef(documentMode);
   useEffect(() => {
     documentModeRef.current = documentMode;
-  }, [documentMode]);
-  // Reset the `contextLost` flag whenever documentMode toggles. The
-  // ref-guard above prevents the listener from setting it during a
-  // clean unmount, but the event can fire asynchronously around the
-  // mode flip — clearing it here keeps a stale "Display crashed"
-  // overlay from showing when the user switches back to 3D.
-  useEffect(() => {
+    // Reset the `contextLost` flag on every documentMode toggle.
+    // The ref-guard above prevents the listener from setting it
+    // during a clean unmount, but the event can fire asynchronously
+    // around the mode flip — clearing it here keeps a stale
+    // "Display crashed" overlay from showing when the user switches
+    // back to 3D.
     setContextLost(false);
   }, [documentMode]);
 
@@ -188,6 +193,20 @@ export function App(): JSX.Element {
     };
     canvas.addEventListener('webglcontextlost', onLost);
     canvas.addEventListener('webglcontextrestored', onRestored);
+
+    // Document → 3D handoff: DocumentShell sets `pendingPointerLock`
+    // synchronously inside its "Switch to 3D experience" click
+    // handler. Consume it here on the next Canvas mount and reclaim
+    // pointer-lock — this stays inside the user-gesture activation
+    // window (the click's), so the browser will honor it. Storing
+    // the signal in the store rather than a ref means it survives
+    // an intermediate LoadingScreen render in case bootState is
+    // still 'loading' on the doc → 3D transition.
+    const { pendingPointerLock, setPendingPointerLock } = useWorldStore.getState();
+    if (pendingPointerLock) {
+      setPendingPointerLock(false);
+      acquirePointerLock();
+    }
   }, []);
 
   if (isAdminRoute()) {

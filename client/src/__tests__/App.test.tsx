@@ -1,23 +1,43 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { act, render, screen } from '@testing-library/react';
 import { App } from '@/App';
 import { useWorldStore } from '@/store';
 
-// Mock the R3F Canvas — jsdom can't run WebGL, so we verify
-// that App renders a Canvas and passes children into it.
+// Mock the R3F Canvas. jsdom has no WebGL, so we replace it with a
+// `<div>` wrapper for testid-based queries — but we ALSO mount a real
+// `<canvas>` element inside, fire `onCreated` synchronously with a
+// fake `RootState`, and patch `requestPointerLock` on it. That gives
+// the App's pointer-lock-on-doc→3D handoff something real to acquire
+// without dragging in the actual Three.js renderer.
 interface MockCanvasProps {
   children?: React.ReactNode;
-  onCreated?: unknown;
+  onCreated?: (state: { gl: { domElement: HTMLCanvasElement; getContext: () => unknown } }) => void;
   [key: string]: unknown;
 }
 
 vi.mock('@react-three/fiber', () => ({
-  Canvas: ({ children, onCreated: _onCreated, ...props }: MockCanvasProps) => (
-    <div data-testid="r3f-canvas" {...props}>
-      {children}
-    </div>
-  ),
+  Canvas: ({ children, onCreated, ...props }: MockCanvasProps) => {
+    const canvasRef = useRef<HTMLCanvasElement>(null);
+    useEffect(() => {
+      const canvas = canvasRef.current;
+      if (!canvas || typeof onCreated !== 'function') {
+        return;
+      }
+      onCreated({
+        gl: {
+          domElement: canvas,
+          getContext: () => ({ isContextLost: () => false }),
+        },
+      });
+    }, [onCreated]);
+    return (
+      <div data-testid="r3f-canvas" {...props}>
+        <canvas ref={canvasRef} />
+        {children}
+      </div>
+    );
+  },
 }));
 
 // Mock the World component (plus ShakeGroup + CursorAvatar) so we can
@@ -96,6 +116,72 @@ describe('App', () => {
       useWorldStore.setState({ documentMode: false });
       render(<App />);
       expect(screen.getByTestId('r3f-canvas')).toBeInTheDocument();
+    });
+
+    describe('pointer-lock auto-acquire on doc → 3D return', () => {
+      let originalRequestPointerLock: typeof HTMLCanvasElement.prototype.requestPointerLock;
+      let requestPointerLockSpy: ReturnType<typeof vi.fn>;
+
+      beforeEach(() => {
+        // Patch the prototype so the Canvas mock's <canvas> element
+        // reports a `requestPointerLock` method to `acquirePointerLock`.
+        // eslint-disable-next-line @typescript-eslint/unbound-method
+        originalRequestPointerLock = HTMLCanvasElement.prototype.requestPointerLock;
+        requestPointerLockSpy = vi.fn();
+        HTMLCanvasElement.prototype.requestPointerLock = requestPointerLockSpy;
+      });
+
+      afterEach(() => {
+        HTMLCanvasElement.prototype.requestPointerLock = originalRequestPointerLock;
+        useWorldStore.setState({ controlsDismissed: false, pendingPointerLock: false });
+      });
+
+      it('does not request pointer-lock on the initial 3D mount', () => {
+        // Initial mount with no pending signal — App should boot
+        // through to the Canvas without grabbing pointer-lock.
+        useWorldStore.setState({
+          documentMode: false,
+          controlsDismissed: true,
+          pendingPointerLock: false,
+        });
+        render(<App />);
+        expect(requestPointerLockSpy).not.toHaveBeenCalled();
+      });
+
+      it('consumes the pendingPointerLock signal on Canvas mount and acquires the lock', () => {
+        // Mirror what DocumentShell's "Switch to 3D experience"
+        // click handler does: pre-set the pending signal, flip
+        // documentMode to false. handleCreated should acquire the
+        // lock and clear the flag.
+        useWorldStore.setState({
+          documentMode: true,
+          controlsDismissed: true,
+          pendingPointerLock: true,
+        });
+        render(<App />);
+
+        act(() => {
+          useWorldStore.setState({ documentMode: false });
+        });
+
+        expect(requestPointerLockSpy).toHaveBeenCalledTimes(1);
+        expect(useWorldStore.getState().pendingPointerLock).toBe(false);
+      });
+
+      it('does not acquire when pendingPointerLock is false (e.g. user was not in avatar mode)', () => {
+        useWorldStore.setState({
+          documentMode: true,
+          controlsDismissed: false,
+          pendingPointerLock: false,
+        });
+        render(<App />);
+
+        act(() => {
+          useWorldStore.setState({ documentMode: false });
+        });
+
+        expect(requestPointerLockSpy).not.toHaveBeenCalled();
+      });
     });
   });
 

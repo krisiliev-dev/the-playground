@@ -849,19 +849,44 @@ function AvatarCursor({ refs }: ModeProps): null {
   const leanTarget = useRef(new Vector3());
   const tipWorldBuffer = useRef(new Vector3());
 
-  // Anchor avatar position + reset yaw/pitch the moment AvatarCursor mounts
-  // (was previously gated on `isAvatar` flipping true; same effect now that
-  // mount IS that transition).
+  // Anchor avatar position + reset yaw/pitch the moment AvatarCursor mounts.
+  //
+  // If a snapshot exists in the store (e.g. the user just flipped out
+  // of Simple Experience and back), restore from it so they pick up
+  // exactly where they were. Otherwise initialise from the camera —
+  // that's the original first-mount path, where the avatar inherits
+  // wherever the cube-formation camera was looking from.
+  //
+  // On unmount we capture the latest transform back into the store so
+  // the next mount can restore. `setAvatarSnapshot` is read with
+  // `getState()` rather than as a hook subscription — we only want to
+  // write, not re-render when the snapshot changes.
   useEffect(() => {
-    refs.avatarPos.current.set(
-      camera.position.x,
-      camera.position.y - FOLLOW_OFFSET.y,
-      camera.position.z - FOLLOW_OFFSET.z,
-    );
-    refs.avatarYaw.current = 0;
-    refs.avatarPitch.current = 0;
+    const snapshot = useWorldStore.getState().avatarSnapshot;
+    if (snapshot) {
+      refs.avatarPos.current.set(...snapshot.position);
+      refs.avatarYaw.current = snapshot.yaw;
+      refs.avatarPitch.current = snapshot.pitch;
+    } else {
+      refs.avatarPos.current.set(
+        camera.position.x,
+        camera.position.y - FOLLOW_OFFSET.y,
+        camera.position.z - FOLLOW_OFFSET.z,
+      );
+      refs.avatarYaw.current = 0;
+      refs.avatarPitch.current = 0;
+    }
     sfx.unlock();
     void sfx.play('uiClick');
+
+    return () => {
+      const pos = refs.avatarPos.current;
+      useWorldStore.getState().setAvatarSnapshot({
+        position: [pos.x, pos.y, pos.z],
+        yaw: refs.avatarYaw.current,
+        pitch: refs.avatarPitch.current,
+      });
+    };
   }, [camera, refs]);
 
   useFrame((state, delta) => {

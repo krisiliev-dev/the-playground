@@ -131,13 +131,11 @@ const srOnly: CSSProperties = {
 };
 
 /**
- * Suggested style scaffolding for the document-mode landing page.
- * Use whichever pieces fit, ignore the rest, or add your own.
- * Colors mirror DocumentShell so the hero feels stitched in:
- * `#00ffcc` for accents, `#e0fffa` for primary text, muted teal for
- * secondary text.
+ * Document-mode landing page styles. Colors mirror DocumentShell so
+ * the hero feels stitched in: `#00ffcc` for accents, `#e0fffa` for
+ * primary text, muted teal for secondary text.
  */
-export const documentStyles: Record<string, CSSProperties> = {
+const documentStyles: Record<string, CSSProperties> = {
   hero: {
     margin: '24px 0 48px',
   },

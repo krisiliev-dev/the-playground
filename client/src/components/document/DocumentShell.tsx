@@ -30,7 +30,19 @@ interface DocumentShellProps {
 
 export function DocumentShell({ children }: DocumentShellProps): JSX.Element {
   const location = useLocation();
-  const setDocumentMode = useWorldStore((s) => s.setDocumentMode);
+  // Click handler runs synchronously: queue a pointer-lock reclaim
+  // (consumed by App's handleCreated when the Canvas mounts), then
+  // flip the store back to 3D mode. Keeping both in the same handler
+  // means the request travels with the user-gesture activation
+  // window the browser hands us — `acquirePointerLock` deferred via
+  // useEffect later would arrive too late.
+  const handleSwitchTo3D = (): void => {
+    const state = useWorldStore.getState();
+    if (state.controlsDismissed) {
+      state.setPendingPointerLock(true);
+    }
+    state.setDocumentMode(false);
+  };
 
   return (
     <div style={styles.shell}>
@@ -60,7 +72,7 @@ export function DocumentShell({ children }: DocumentShellProps): JSX.Element {
       <main style={styles.main}>{children}</main>
       <footer style={styles.footer}>
         <span style={styles.footerCopy}>© {new Date().getFullYear()} Kristiyan Iliev</span>
-        <button type="button" style={styles.modeToggle} onClick={() => setDocumentMode(false)}>
+        <button type="button" style={styles.modeToggle} onClick={handleSwitchTo3D}>
           Switch to 3D experience →
         </button>
       </footer>
