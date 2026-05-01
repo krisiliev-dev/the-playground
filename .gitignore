@@ -1,5 +1,9 @@
 # ── Dependencies ────────────────────────────────────────────────────
 node_modules/
+# Worktree-deps symlink — `client/node_modules` is a symlink to a
+# shared deps store, not a directory, so the trailing-slash pattern
+# above doesn't catch it. Add the explicit path.
+client/node_modules
 
 # ── Build output ────────────────────────────────────────────────────
 client/dist/

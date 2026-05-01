@@ -352,7 +352,8 @@ function ActiveCursor(): JSX.Element {
       // false→true transition (was idle, now moving). OS key-repeat
       // fires this handler many times per second; SfxManager's loop
       // guard ensures we don't try to restart an already-running loop.
-      if (!wasMoving && anyKeyHeld()) {
+      const isMoving = anyKeyHeld();
+      if (!wasMoving && isMoving) {
         void sfx.play('cursorMove');
       }
     };
@@ -617,7 +618,15 @@ function ActiveCursor(): JSX.Element {
         // Distance delta from start = continuous throttle. Pinch out
         // (fingers spread) → positive delta → walk forward; pinch in
         // → negative delta → walk back. Held = constant velocity.
+        // fingerDistance returns 0 if either touch slot is missing
+        // (degenerate case during a gesture transition); skip the
+        // throttle update on that frame instead of snapping to a
+        // delta of -pinchStartDist.
         const currentDist = fingerDistance(e);
+        if (currentDist <= 0) {
+          e.preventDefault();
+          return;
+        }
         const delta = currentDist - pinchStartDist;
         const v = Math.max(-1, Math.min(1, delta / PINCH_FULL_THROTTLE_DELTA));
         touchWalkVelocity.current = v;
@@ -752,10 +761,9 @@ function ActiveCursor(): JSX.Element {
         document.exitPointerLock?.();
       }
     };
-    // `scene` is stable across renders (the r3f root) so `scene.children`
-    // is intentionally not in the deps — we only need a fresh closure
-    // when the input bindings change.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // `scene` is in the dep list, so `scene.children` is read live each
+    // touch raycast — no stale snapshot risk if children are added or
+    // removed mid-session.
   }, [isPostClick, gl.domElement, camera, scene]);
 
   // Anchor avatar position + reset yaw/pitch the moment the user dismisses

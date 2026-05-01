@@ -184,8 +184,13 @@ export function BoxEnvironment({ dimensions }: BoxEnvironmentProps): JSX.Element
 
       if (sameWall && prevCellU !== currCellU) {
         const dir = Math.sign(currCellU - prevCellU);
+        // Iteration cap is the absolute distance between cells. With dir
+        // = ±1 and a guaranteed prevCellU !== currCellU the loop *should*
+        // converge in exactly this many steps; the cap turns a
+        // float-precision walk into a no-op instead of a frame hang.
+        const stepsU = Math.abs(currCellU - prevCellU);
         let cell = prevCellU;
-        while (cell !== currCellU) {
+        for (let i = 0; i < stepsU && cell !== currCellU; i++) {
           const crossingU = (cell + (dir > 0 ? 1 : 0)) * spacing;
           pushCaught(caught.current, {
             axis: uAxis.clone(),
@@ -200,8 +205,9 @@ export function BoxEnvironment({ dimensions }: BoxEnvironmentProps): JSX.Element
       }
       if (sameWall && prevCellV !== currCellV) {
         const dir = Math.sign(currCellV - prevCellV);
+        const stepsV = Math.abs(currCellV - prevCellV);
         let cell = prevCellV;
-        while (cell !== currCellV) {
+        for (let i = 0; i < stepsV && cell !== currCellV; i++) {
           const crossingV = (cell + (dir > 0 ? 1 : 0)) * spacing;
           pushCaught(caught.current, {
             axis: vAxis.clone(),

@@ -53,9 +53,13 @@ export function ControlsHint(): JSX.Element | null {
       // Request pointer lock SYNCHRONOUSLY here — we're inside the click
       // handler, so the user-activation token is still valid. Doing this
       // in a React effect later fails with "requires a user gesture".
+      // querySelector returns null in test/jsdom (no canvas yet), and
+      // also in the rare case the canvas is unmounted between the
+      // dismiss timer arming and the click landing — both are fine to
+      // skip silently.
       const canvas = document.querySelector('canvas');
-      if (canvas instanceof HTMLCanvasElement) {
-        void canvas.requestPointerLock?.();
+      if (canvas instanceof HTMLCanvasElement && typeof canvas.requestPointerLock === 'function') {
+        void canvas.requestPointerLock();
       }
     };
     const timer = window.setTimeout(() => {

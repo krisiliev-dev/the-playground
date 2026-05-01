@@ -34,10 +34,9 @@ import {
 } from 'three';
 import { useWorldStore } from '@/store';
 import { triggerImpactShake } from '../cameraShake';
-import { type SwordSlot } from './vibeFormation';
+import { FORMATION_SCALE, type SwordSlot } from './vibeFormation';
 import { sfx, type PositionalLoopHandle } from '../../audio/SfxManager';
 import { useSwordKinematics } from './useSwordKinematics';
-import { FORMATION_SCALE } from './vibeFormation';
 
 const SWORD_URL = '/models/sword/scene.gltf';
 

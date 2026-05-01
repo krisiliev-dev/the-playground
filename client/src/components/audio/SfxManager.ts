@@ -198,7 +198,12 @@ class SfxManager {
    *   - A diffuse decaying-noise tail
    *  Stereo channels get independent randomisation for natural width.
    *  `sideLength` is clamped to `MAX_AUDIO_ROOM_SIZE` so the world's
-   *  visual scale doesn't translate into multi-second echo delays. */
+   *  visual scale doesn't translate into multi-second echo delays.
+   *
+   *  RNG is seeded from `sideLength + sampleRate + channel` (mulberry32)
+   *  so the same room always yields the same IR — reverb stays stable
+   *  reload-to-reload, and tests can pin sample values. The two
+   *  channels still get independent seeds for natural stereo width. */
   private makeCubeImpulseResponse(ctx: AudioContext, sideLength: number): AudioBuffer {
     const sr = ctx.sampleRate;
     const audioSize = Math.min(sideLength, MAX_AUDIO_ROOM_SIZE);
@@ -211,25 +216,29 @@ class SfxManager {
 
     for (let ch = 0; ch < 2; ch++) {
       const data = buf.getChannelData(ch);
+      // Per-channel seed: `sideLength * 1000` quantises sub-unit room
+      // changes, sampleRate disambiguates 44.1k vs 48k contexts, channel
+      // index gives left/right independent decorrelation.
+      const rand = mulberry32((Math.floor(sideLength * 1000) ^ sr) + ch * 2654435761);
 
       // Direct sound (impulse at t=0).
       data[0] = 1.0;
 
       // First-order: 6 wall reflections with small time/amplitude jitter.
       for (let i = 0; i < 6; i++) {
-        const jitter = (Math.random() - 0.5) * 0.04;
+        const jitter = (rand() - 0.5) * 0.04;
         const idx = Math.floor((firstReflectDelay + jitter) * sr);
         if (idx >= 0 && idx < length) {
-          data[idx] = (data[idx] ?? 0) + 0.45 * (0.8 + Math.random() * 0.4);
+          data[idx] = (data[idx] ?? 0) + 0.45 * (0.8 + rand() * 0.4);
         }
       }
 
       // Second-order: more taps, lower amplitude, wider time spread.
       for (let i = 0; i < 18; i++) {
-        const jitter = (Math.random() - 0.5) * 0.08;
+        const jitter = (rand() - 0.5) * 0.08;
         const idx = Math.floor((2 * firstReflectDelay + jitter) * sr);
         if (idx >= 0 && idx < length) {
-          data[idx] = (data[idx] ?? 0) + 0.18 * (0.8 + Math.random() * 0.4);
+          data[idx] = (data[idx] ?? 0) + 0.18 * (0.8 + rand() * 0.4);
         }
       }
 
@@ -240,7 +249,7 @@ class SfxManager {
       for (let i = diffuseStart; i < length; i++) {
         const tSec = (i - diffuseStart) / sr;
         const env = Math.exp(-tSec * 1.5);
-        data[i] = (data[i] ?? 0) + (Math.random() * 2 - 1) * env * 0.15;
+        data[i] = (data[i] ?? 0) + (rand() * 2 - 1) * env * 0.15;
       }
     }
     return buf;
@@ -785,6 +794,20 @@ class SfxManager {
 }
 
 export const sfx = new SfxManager();
+
+/** Tiny seedable PRNG (mulberry32). Returns values in [0, 1). Used by
+ *  `makeCubeImpulseResponse` so reverb is reproducible per session and
+ *  test snapshots stay stable. Exported for the IR test. */
+export function mulberry32(seed: number): () => number {
+  let s = seed >>> 0;
+  return () => {
+    s = (s + 0x6d2b79f5) >>> 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
 
 /** Build a soft-saturation transfer curve for `WaveShaperNode`. The
  *  curve is a tanh-shaped soft clipper: linear-ish near zero, gently
