@@ -226,8 +226,21 @@ function ActiveCursor(): JSX.Element {
       mesh.renderOrder = 999;
 
       // Outline shell — see OUTLINE_* constants for the rationale.
+      // The geometry is cloned and re-centered around its own bbox so
+      // the OUTLINE_SCALE grows uniformly in all directions. Without
+      // re-centering, scaling from the model's pivot (which is near
+      // the tip on this cursor) would make the outline thick on the
+      // side opposite the pivot and basically invisible on the
+      // pivot's side. After centering, we offset the outline mesh
+      // back to the bbox centre so it visually sits where the
+      // original geometry was.
+      const outlineGeom = mesh.geometry.clone();
+      outlineGeom.computeBoundingBox();
+      const outlineCenter = new Vector3();
+      outlineGeom.boundingBox?.getCenter(outlineCenter);
+      outlineGeom.center();
       const outlineMesh = new Mesh(
-        mesh.geometry,
+        outlineGeom,
         new MeshBasicMaterial({
           color: new Color(OUTLINE_COLOR_HEX),
           side: BackSide,
@@ -235,6 +248,7 @@ function ActiveCursor(): JSX.Element {
           transparent: true,
         }),
       );
+      outlineMesh.position.copy(outlineCenter);
       outlineMesh.scale.setScalar(OUTLINE_SCALE);
       outlineMesh.renderOrder = 998;
       mesh.add(outlineMesh);
@@ -268,9 +282,11 @@ function ActiveCursor(): JSX.Element {
     return () => {
       outlineMeshes.forEach((m) => {
         m.parent?.remove(m);
-        // We constructed each outline mesh's material as a single
-        // MeshBasicMaterial, but Mesh.material's static type is
-        // `Material | Material[]`. Narrow before dispose.
+        // Dispose the cloned geometry + the dedicated material so
+        // the GPU buffers don't leak across HMR cycles. We constructed
+        // both ourselves; the original cursor mesh's geometry is
+        // untouched.
+        m.geometry.dispose();
         if (m.material instanceof MeshBasicMaterial) {
           m.material.dispose();
         }
