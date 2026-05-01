@@ -68,12 +68,17 @@ const LEAN_LERP_RATE = 32;
  *  the visible tip lands at the surface instead of clipping through.
  *  Tuned for the cursor model + AVATAR_SCALE = 0.03 — the model's
  *  visible tip sits roughly this far from its group origin in world
- *  units once scaled. Adjust by eye if the cursor changes. */
-const CURSOR_TIP_OFFSET = 1.8;
+ *  units once scaled. Bumped after early testing showed the body
+ *  (not the tip) was at the crosshair; adjust by eye if the cursor
+ *  model changes. */
+const CURSOR_TIP_OFFSET = 3.5;
 /** Extra forward pitch applied to the cursor's orientation while
- *  pressed — beyond camera-alignment — so the cursor visibly *leans
- *  into* the target rather than just pointing rigidly at it. */
-const LEAN_TILT_RAD = -0.28;
+ *  pressed — beyond the captured press-time camera alignment — so
+ *  the cursor visibly *leans into* the target. ~32° is the smallest
+ *  angle that reads as a deliberate bow at a glance; smaller values
+ *  look static, larger ones over-rotate. Negative because we rotate
+ *  around +X and the tip-direction is local -Z. */
+const LEAN_TILT_RAD = -0.55;
 /** How close (in world units) the avatar has to be to a wall before
  *  the wall-ambient drone becomes audible. Outside this band the
  *  ambient is silent; at distance 0 it's at the manifest base volume. */
@@ -265,17 +270,35 @@ function ActiveCursor(): JSX.Element {
    *  the cursor away from its follow-rig position toward the
    *  interactable's surface. */
   const pressedTargetPoint = useWorldStore((s) => s.pressedTargetPoint);
-  const leanForward = useRef(new Vector3());
   const leanTarget = useRef(new Vector3());
-  /** Working buffer for the press-state target quaternion (camera
-   *  orientation × forward-tilt). */
-  const leanRotQuat = useMemo(() => new Quaternion(), []);
+  /** Forward direction captured at press-start, NOT recomputed from
+   *  the live camera each frame. This is what makes the cursor stay
+   *  anchored in world space when the user rotates the camera while
+   *  holding — without the snapshot, the lean target tracks the
+   *  camera's current forward and the cursor "follows" the rotation. */
+  const pressAnchorForward = useRef(new Vector3());
+  /** Cursor target quaternion captured at press-start (camera
+   *  orientation at the moment of press × forward-tilt). Frozen for
+   *  the duration of the press so the tilt reveals itself as the
+   *  camera moves around it. */
+  const pressAnchorQuat = useMemo(() => new Quaternion(), []);
   /** Constant forward-tilt quaternion in cursor-local frame. Composed
-   *  onto camera.quaternion to get the press-state cursor orientation. */
+   *  onto the captured camera quaternion to get the lean orientation. */
   const leanTiltQuat = useMemo(
     () => new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), LEAN_TILT_RAD),
     [],
   );
+  // Capture the camera's forward + composed lean quaternion the
+  // moment a press starts. `pressedTargetPoint` flips from null →
+  // tuple on `beginInteractPress`, so the dep array runs the capture
+  // once per press, after which both refs are read-only until release.
+  useEffect(() => {
+    if (!pressedTargetPoint) {
+      return;
+    }
+    pressAnchorForward.current.set(0, 0, -1).applyQuaternion(camera.quaternion);
+    pressAnchorQuat.copy(camera.quaternion).multiply(leanTiltQuat);
+  }, [pressedTargetPoint, camera, leanTiltQuat, pressAnchorQuat]);
   /** The cursor's *rendered* world position, persisted across frames.
    *  The follow-rig and lean logic compute a *target* each frame; this
    *  ref lerps toward that target so motion accumulates instead of
@@ -739,19 +762,14 @@ function ActiveCursor(): JSX.Element {
       let cursorPosTarget: Vector3;
       let cursorQuatTarget: Quaternion;
       if (pressedTargetPoint) {
-        // Position: hit point pulled back along camera-forward by
-        // CURSOR_TIP_OFFSET so the visible tip ends up at the surface,
-        // not clipping through it.
-        leanForward.current.set(0, 0, -1).applyQuaternion(camera.quaternion);
+        // Position + orientation use the press-time captured values,
+        // not the live camera — so rotating the camera while held
+        // doesn't drag the cursor along; it stays anchored to the hit.
         leanTarget.current
           .set(pressedTargetPoint[0], pressedTargetPoint[1], pressedTargetPoint[2])
-          .addScaledVector(leanForward.current, -CURSOR_TIP_OFFSET);
+          .addScaledVector(pressAnchorForward.current, -CURSOR_TIP_OFFSET);
         cursorPosTarget = leanTarget.current;
-        // Orientation: camera-aligned (so the cursor's tip points
-        // along the crosshair direction toward the hit) plus a small
-        // forward tilt (so it visibly leans into the object).
-        leanRotQuat.copy(camera.quaternion).multiply(leanTiltQuat);
-        cursorQuatTarget = leanRotQuat;
+        cursorQuatTarget = pressAnchorQuat;
       } else {
         cursorPosTarget = avatarPos.current;
         cursorQuatTarget = avatarTargetQuat;
