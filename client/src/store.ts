@@ -51,6 +51,16 @@ interface AppActions {
   /** Mark the post-impact controls hint as dismissed. Triggers the
    *  camera transition into 3rd-person avatar mode. */
   setControlsDismissed: (dismissed: boolean) => void;
+  /** Set which interactable the crosshair is currently aimed at, or
+   *  null if nothing is in range. The InteractionController updates
+   *  this each frame; individual `useInteractable` consumers read it
+   *  to drive their own highlight visuals. */
+  setHoveredInteractable: (id: string | null) => void;
+  /** Bump the avatar punch counter to trigger one quick lerp-forward,
+   *  lerp-back animation. CursorAvatar subscribes to the counter and
+   *  fires the animation on every increment, so back-to-back interacts
+   *  produce back-to-back punches. */
+  triggerAvatarPunch: () => void;
 }
 
 const createInitialPlayer = (): Player => ({
@@ -70,56 +80,75 @@ interface RevealSlice {
   controlsDismissed: boolean;
 }
 
-export const useWorldStore = create<AppState & AppActions & RevealSlice>((set) => ({
-  // State
-  player: createInitialPlayer(),
-  environment: DEFAULT_ENVIRONMENT,
-  activeZoneId: null,
-  isReady: false,
-  revealState: 'idle',
-  clickHit: null,
-  controlsDismissed: false,
-  // Avatar lives from page load — small at first (cursor-sized), then grows
-  // once the reveal completes. See CursorAvatar.tsx for the scale logic.
-  cursorAvatarActive: true,
+interface InteractionSlice {
+  /** Id of the interactable the crosshair is currently aimed at,
+   *  or null if nothing is in range. Updated by the InteractionController
+   *  each frame; consumed by individual `useInteractable` callers for
+   *  their highlight visuals. */
+  hoveredInteractableId: string | null;
+  /** Monotonically-increasing punch counter — each increment triggers
+   *  one CursorAvatar lerp-forward/lerp-back animation. */
+  avatarPunchSeq: number;
+}
 
-  // Actions
-  setPlayerPosition: (position) =>
-    set((state) => ({
-      player: { ...state.player, position },
-    })),
+export const useWorldStore = create<AppState & AppActions & RevealSlice & InteractionSlice>(
+  (set) => ({
+    // State
+    player: createInitialPlayer(),
+    environment: DEFAULT_ENVIRONMENT,
+    activeZoneId: null,
+    isReady: false,
+    revealState: 'idle',
+    clickHit: null,
+    controlsDismissed: false,
+    // Avatar lives from page load — small at first (cursor-sized), then grows
+    // once the reveal completes. See CursorAvatar.tsx for the scale logic.
+    cursorAvatarActive: true,
+    hoveredInteractableId: null,
+    avatarPunchSeq: 0,
 
-  setPlayerRotation: (rotation) =>
-    set((state) => ({
-      player: { ...state.player, rotation },
-    })),
+    // Actions
+    setPlayerPosition: (position) =>
+      set((state) => ({
+        player: { ...state.player, position },
+      })),
 
-  setActiveZone: (zoneId) => set({ activeZoneId: zoneId }),
+    setPlayerRotation: (rotation) =>
+      set((state) => ({
+        player: { ...state.player, rotation },
+      })),
 
-  updateEnvironment: (config) => set({ environment: config }),
+    setActiveZone: (zoneId) => set({ activeZoneId: zoneId }),
 
-  setReady: (ready) => set({ isReady: ready }),
+    updateEnvironment: (config) => set({ environment: config }),
 
-  advanceReveal: () =>
-    set((state) => {
-      const idx = REVEAL_ORDER.indexOf(state.revealState);
-      if (idx < 0 || idx >= REVEAL_ORDER.length - 1) {
-        return state;
-      }
-      const next = REVEAL_ORDER[idx + 1];
-      if (!next) {
-        return state;
-      }
-      return { revealState: next };
-    }),
+    setReady: (ready) => set({ isReady: ready }),
 
-  resetReveal: () => set({ revealState: 'idle', clickHit: null, controlsDismissed: false }),
+    advanceReveal: () =>
+      set((state) => {
+        const idx = REVEAL_ORDER.indexOf(state.revealState);
+        if (idx < 0 || idx >= REVEAL_ORDER.length - 1) {
+          return state;
+        }
+        const next = REVEAL_ORDER[idx + 1];
+        if (!next) {
+          return state;
+        }
+        return { revealState: next };
+      }),
 
-  setClickHit: (hit) => set({ clickHit: hit }),
+    resetReveal: () => set({ revealState: 'idle', clickHit: null, controlsDismissed: false }),
 
-  toggleCursorAvatar: () => set((state) => ({ cursorAvatarActive: !state.cursorAvatarActive })),
+    setClickHit: (hit) => set({ clickHit: hit }),
 
-  setCursorAvatarActive: (active) => set({ cursorAvatarActive: active }),
+    toggleCursorAvatar: () => set((state) => ({ cursorAvatarActive: !state.cursorAvatarActive })),
 
-  setControlsDismissed: (dismissed) => set({ controlsDismissed: dismissed }),
-}));
+    setCursorAvatarActive: (active) => set({ cursorAvatarActive: active }),
+
+    setControlsDismissed: (dismissed) => set({ controlsDismissed: dismissed }),
+
+    setHoveredInteractable: (id) => set({ hoveredInteractableId: id }),
+
+    triggerAvatarPunch: () => set((state) => ({ avatarPunchSeq: state.avatarPunchSeq + 1 })),
+  }),
+);

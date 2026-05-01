@@ -56,6 +56,14 @@ const LOOK_AHEAD_HEIGHT = 1.5;
 /** Padding from the cube walls — keeps the avatar's body clear of the
  *  geometry so it never visibly pokes through. */
 const AVATAR_WALL_MARGIN = 8;
+/** Avatar punch animation — a quick lerp forward then back, played
+ *  whenever the user interacts with something in the world. Total
+ *  duration is short so back-to-back clicks read as a percussive
+ *  rhythm rather than a slow lerp loop. The forward leg is briefer
+ *  than the return so the punch feels like a strike, not a sway. */
+const PUNCH_DURATION_S = 0.18;
+const PUNCH_FORWARD_FRACTION = 0.35;
+const PUNCH_DISTANCE = 1.5;
 /** How close (in world units) the avatar has to be to a wall before
  *  the wall-ambient drone becomes audible. Outside this band the
  *  ambient is silent; at distance 0 it's at the manifest base volume. */
@@ -234,6 +242,22 @@ function ActiveCursor(): JSX.Element {
       window.removeEventListener('keyup', onUp);
     };
   }, []);
+
+  /** Animation progress (0..1) for the avatar punch lerp-forward/
+   *  lerp-back. -1 means inactive. Set to 0 by the `avatarPunchSeq`
+   *  effect below; advanced each frame in useFrame. */
+  const punchProgress = useRef(-1);
+  const punchSeq = useWorldStore((s) => s.avatarPunchSeq);
+  useEffect(() => {
+    if (punchSeq > 0) {
+      // Reset to 0 to start a fresh animation. Even if a punch is
+      // already in flight (mid-lerp), we reset — the user expects
+      // each click to fire its own animation, not get swallowed.
+      punchProgress.current = 0;
+    }
+  }, [punchSeq]);
+  const punchOffset = useRef(new Vector3());
+  const punchForward = useRef(new Vector3());
 
   // Mouselook listener. Pointer-lock itself is requested by ControlsHint's
   // dismiss-click handler (synchronously inside the user-gesture window) —
@@ -589,6 +613,33 @@ function ActiveCursor(): JSX.Element {
       renderedScale.current += (AVATAR_SCALE - renderedScale.current) * k;
     }
     groupRef.current.scale.setScalar(renderedScale.current);
+
+    // Punch animation — additive offset on top of whatever the
+    // follow-rig logic above committed. Triangular envelope: ramp
+    // forward over PUNCH_FORWARD_FRACTION of the total duration, then
+    // ramp back over the remainder. Forward direction is the camera's
+    // -Z axis rotated into world space (i.e. the direction the avatar
+    // is looking + facing).
+    if (punchProgress.current >= 0) {
+      punchProgress.current += delta / PUNCH_DURATION_S;
+      if (punchProgress.current >= 1) {
+        punchProgress.current = -1;
+      } else {
+        let envelope: number;
+        if (punchProgress.current < PUNCH_FORWARD_FRACTION) {
+          // Forward leg: ease-out.
+          const t = punchProgress.current / PUNCH_FORWARD_FRACTION;
+          envelope = 1 - (1 - t) * (1 - t);
+        } else {
+          // Return leg: ease-in.
+          const t = (punchProgress.current - PUNCH_FORWARD_FRACTION) / (1 - PUNCH_FORWARD_FRACTION);
+          envelope = 1 - t * t;
+        }
+        punchForward.current.set(0, 0, -1).applyQuaternion(camera.quaternion);
+        punchOffset.current.copy(punchForward.current).multiplyScalar(envelope * PUNCH_DISTANCE);
+        groupRef.current.position.add(punchOffset.current);
+      }
+    }
   }, 2);
 
   return (
