@@ -22,9 +22,12 @@ import { sfx } from '../../audio/SfxManager';
  *  registers what's about to happen. */
 const ARMED_TO_SWINGING_MS = 800;
 /** Sword swing duration: 5.5s per-sword (3.5 pre + 1.2 mid + 0.8 post) +
- *  cascade tail (12 × 50ms = 0.6s). Total ≈ 6.1s; round to 6300ms with
- *  a small buffer. */
-const SWINGING_TO_IMPACT_MS = 6300;
+ *  cascade tail (12 × 50ms stagger = 0.6s). Total ≈ 6.1s; padded to
+ *  6800ms so every sword has time to cross its `t >= SWING_DURATION`
+ *  threshold inside the swinging state (otherwise the per-frame slam
+ *  fire is skipped and the catch-up path runs at default volume,
+ *  losing the velocity-driven dynamics for most slams in the cascade). */
+const SWINGING_TO_IMPACT_MS = 6800;
 const IMPACT_TO_REVEALED_MS = 1450;
 
 export function RevealOrchestrator(): JSX.Element {

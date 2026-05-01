@@ -26,7 +26,7 @@
  *
  * Per-cue `reverb: { wet }` controls how much of that cue's signal goes
  * to the room vs. straight to dry. The convolver itself is shared so
- * 11 swords flying simultaneously all reverb through the same room.
+ * 12 swords flying simultaneously all reverb through the same room.
  *
  * Looped cues (cube ambient) keep their source node + gain node so we
  * can stop them later with `stop(id)`. Per-instance positional loops
@@ -48,7 +48,7 @@ interface PlayOpts {
   position?: { x: number; y: number; z: number };
   /** Per-fire override for the manifest's `effects.filter.gain` (dB).
    *  Used to randomize EQ per fire on cascading cues (e.g. each
-   *  swordSlam gets a different high-shelf gain so 11 hits don't
+   *  swordSlam gets a different high-shelf gain so 12 hits don't
    *  share the same timbre). No-op if the cue has no filter config. */
   filterGain?: number;
 }
@@ -60,7 +60,7 @@ interface LoopHandle {
 
 /** Handle for a per-instance positional loop (e.g. each sword's
  *  flying-whoosh). Unlike `play()` for loops which is keyed by SfxId
- *  (one per id), this returns a fresh handle every call so 11 swords
+ *  (one per id), this returns a fresh handle every call so 12 swords
  *  can each have their own moving emitter. */
 export interface PositionalLoopHandle {
   /** Move the emitter to a new world-space position. Called each frame
@@ -453,7 +453,7 @@ class SfxManager {
    *  `setPosition` is meant to be called every frame so the panner
    *  follows a moving emitter (e.g. each sword's mesh during flight).
    *  Unlike `play()` for loops which is keyed by id (one per id), this
-   *  creates a fresh source+gain+panner each call, so 11 instances can
+   *  creates a fresh source+gain+panner each call, so 12 instances can
    *  run side by side. */
   playPositionalLoop(
     id: SfxId,
@@ -658,9 +658,9 @@ class SfxManager {
     }
   }
 
-  /** Expose the AudioContext + master gain so other audio modules can
-   *  share the same context. Only valid after at least one `play()`
-   *  has unlocked the context. */
+  /** Expose the AudioContext + master gain for other audio modules
+   *  that want to share the same routing graph. Only valid after
+   *  `unlock()` has run (i.e. inside a user gesture). */
   getContext(): { ctx: AudioContext; masterGain: GainNode } | null {
     if (!this.ctx || !this.masterGain) {
       return null;

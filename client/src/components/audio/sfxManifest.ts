@@ -25,7 +25,7 @@ export interface SfxEntry {
   /** Hard upper bound on playback length in ms. SfxManager applies a
    *  short fade-out before stopping so the cut isn't audible. Useful
    *  when source files have long reverb tails that overlap and smear
-   *  together when many copies cascade (e.g. 11 sword slams within
+   *  together when many copies cascade (e.g. 12 sword slams within
    *  500ms, each with a 5s tail, would otherwise become one wash). */
   maxDurationMs?: number;
   /** Fixed pitch shift applied via `AudioBufferSourceNode.playbackRate`
@@ -85,7 +85,7 @@ export interface SfxEntry {
     /** BiquadFilterNode for tone shaping. Per-fire random gain can
      *  be passed via `playOpts.filterGain` to vary timbre per hit
      *  (e.g. one slam bright, one dark) — that's how cascading
-     *  impacts read as 11 distinct events instead of 11 takes of
+     *  impacts read as 12 distinct events instead of 12 takes of
      *  the same sample. */
     filter?: {
       /** Filter type. 'highshelf' boosts/cuts above frequency,
@@ -205,7 +205,7 @@ export const SFX = {
       // by Sword.tsx via playOpts.filterGain) — half the slams get a
       // brightness boost, the other half a cut, so the cascade has
       // timbral variation on top of pitch jitter. The slam.wav is
-      // low-end heavy; without this, all 11 hits sit in the same
+      // low-end heavy; without this, all 12 hits sit in the same
       // frequency band and the ear can't separate them.
       filter: { type: 'highshelf', freq: 3000, gain: 0 },
     },

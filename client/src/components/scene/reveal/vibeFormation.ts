@@ -47,7 +47,10 @@ function strokeFromEndpoints(
 ): RawStroke {
   const dx = tip[0] - hilt[0];
   const dy = tip[1] - hilt[1];
-  const len = Math.hypot(dx, dy) || 1;
+  // No defensive `|| 1` — every defined stroke has distinct
+  // endpoints, and a degenerate (hilt == tip) stroke is a bug we
+  // want to surface as NaN, not silently rescue.
+  const len = Math.hypot(dx, dy);
   return {
     mid: [(hilt[0] + tip[0]) / 2, (hilt[1] + tip[1]) / 2],
     dir: [dx / len, dy / len],
@@ -121,7 +124,6 @@ const LETTER_OFFSETS = computeLetterOffsets();
 
 interface NamedStroke {
   id: string;
-  letter: keyof typeof LETTER_WIDTHS;
   mid: readonly [number, number];
   dir: readonly [number, number];
 }
@@ -133,7 +135,6 @@ function placeStrokes(
   const dx = LETTER_OFFSETS[letter];
   return strokes.map((s, i) => ({
     id: `${letter}_${i}`,
-    letter,
     mid: [s.mid[0] + dx, s.mid[1]],
     dir: s.dir,
   }));
