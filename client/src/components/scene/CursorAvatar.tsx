@@ -54,6 +54,7 @@ import {
   projectNDCToWorld,
   setYawQuat,
 } from './cursorAvatarMath';
+import { activatePortalQuadrant, detectPortalWalkthrough } from './portalWalkthrough';
 
 const MODEL_URL = '/models/3d_icon_cursor.glb';
 
@@ -850,6 +851,11 @@ function AvatarCursor({ refs }: ModeProps): null {
   const initialCursorPos = useRef(new Vector3());
   const initialCursorQuat = useRef(new Quaternion());
   const initialScale = useRef(POINTER_SCALE);
+  /** Tracks whether the avatar was inside the portal trigger band
+   *  on the previous frame. Walk-through fires only on the
+   *  false → true transition, so standing still inside the zone
+   *  doesn't keep re-firing every frame. */
+  const wasInZoneRef = useRef(false);
 
   // Lean-target scratch buffers.
   const leanTarget = useRef(new Vector3());
@@ -918,6 +924,26 @@ function AvatarCursor({ refs }: ModeProps): null {
 
     tmpCubeHalf.current.set(dimensions[0] * 0.5, dimensions[1] * 0.5, dimensions[2] * 0.5);
     clampToBoxInterior(refs.avatarPos.current, tmpCubeHalf.current, AVATAR_WALL_MARGIN);
+
+    // Walk-through portal detection. Runs after position clamping
+    // so detection sees the same avatarPos that's about to render.
+    // wasInZoneRef gates the trigger to entry transitions only —
+    // walking up to the disc fires once, standing in the zone
+    // doesn't keep re-firing every frame.
+    {
+      const clickHit = useWorldStore.getState().clickHit;
+      const revealStateNow = useWorldStore.getState().revealState;
+      const portalTransit = useWorldStore.getState().portalTransit;
+      const pendingNavigation = useWorldStore.getState().pendingNavigation;
+      const inZone =
+        revealStateNow === 'revealed' && clickHit
+          ? detectPortalWalkthrough(refs.avatarPos.current, clickHit)
+          : null;
+      if (inZone && !wasInZoneRef.current && !portalTransit && !pendingNavigation) {
+        activatePortalQuadrant(inZone.quadrant);
+      }
+      wasInZoneRef.current = inZone !== null;
+    }
 
     // Wall-proximity ambient — louder near walls, silent at centre.
     {
