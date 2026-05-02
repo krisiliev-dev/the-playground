@@ -1,15 +1,15 @@
 /**
  * Rooms — phase-4 step 1 verifies that the three section rooms
- * render as separate spatial cubes with the right per-section
- * colors and unique world positions. Subsequent phases will add
- * traversal, per-room clamping, and URL sync; those land their
- * own tests.
+ * render as separate spatial cubes with section-matched colors
+ * and lateral slots that line up correctly with the user's
+ * left-to-right view through the disc. The position computation
+ * is a pure function (`computeRoomPosition`), tested directly
+ * without mounting R3F.
  *
- * R3F intrinsic JSX (`<mesh>`, `<boxGeometry>`,
- * `<meshStandardMaterial>`) renders as unknown DOM tags in jsdom,
- * which is enough for `querySelector`-based structural assertions.
+ * Subsequent phases will add traversal, per-room clamping, and
+ * URL sync; those land their own tests.
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render } from '@testing-library/react';
 
 vi.mock('@react-three/fiber', () => ({
@@ -19,7 +19,18 @@ vi.mock('@react-three/fiber', () => ({
   }),
 }));
 
-import { Rooms, ROOMS } from '@/components/scene/Rooms';
+import { Rooms, ROOMS, computeRoomPosition } from '@/components/scene/Rooms';
+import { useWorldStore, type ClickHit } from '@/store';
+
+const RIGHT_WALL_HIT: ClickHit = {
+  point: [400, 0, 0],
+  normal: [-1, 0, 0],
+};
+
+const BACK_WALL_HIT: ClickHit = {
+  point: [0, 0, 400],
+  normal: [0, 0, -1],
+};
 
 describe('Rooms', () => {
   describe('configuration', () => {
@@ -39,31 +50,82 @@ describe('Rooms', () => {
       expect(colors.size).toBe(ROOMS.length);
     });
 
-    it('places each room at a unique world position far from the formation', () => {
-      // Formation cube spans ±400. Each room should sit well
-      // outside that envelope so it's a distinct spatial
-      // destination, not overlapping with the formation or with
-      // the other rooms.
-      const positions = ROOMS.map((r) => r.position);
-      // Distinct.
-      expect(new Set(positions.map((p) => p.join(','))).size).toBe(positions.length);
-      // Outside formation envelope on at least one axis.
-      for (const [x, y, z] of positions) {
-        const farthest = Math.max(Math.abs(x), Math.abs(y), Math.abs(z));
-        expect(farthest).toBeGreaterThan(400);
-      }
+    it('places rooms in the user-described left-to-right ordering', () => {
+      // Through the disc: yellow (Writing) on left, pink (Projects)
+      // in middle, blue (About) on right.
+      const bySlot = new Map(ROOMS.map((r) => [r.slot, r]));
+      expect(bySlot.get(-1)?.path).toBe('/writing');
+      expect(bySlot.get(0)?.path).toBe('/projects');
+      expect(bySlot.get(1)?.path).toBe('/about');
+    });
+
+    it('uses unique slot values so the rooms don’t overlap', () => {
+      const slots = new Set(ROOMS.map((r) => r.slot));
+      expect(slots.size).toBe(ROOMS.length);
+    });
+  });
+
+  describe('computeRoomPosition (pure)', () => {
+    it('places the room behind the wall by ROOM_BEHIND_DISTANCE', () => {
+      const [x, y, z] = computeRoomPosition(RIGHT_WALL_HIT, 0);
+      // RIGHT_WALL_HIT: point [400,0,0], inward normal [-1,0,0].
+      // "back" = +1 along x → room at x = 400 + 1500 = 1900.
+      expect(x).toBeCloseTo(1900);
+      expect(y).toBeCloseTo(0);
+      expect(z).toBeCloseTo(0);
+    });
+
+    it('staggers rooms left/right via the slot value', () => {
+      const left = computeRoomPosition(RIGHT_WALL_HIT, -1);
+      const center = computeRoomPosition(RIGHT_WALL_HIT, 0);
+      const right = computeRoomPosition(RIGHT_WALL_HIT, 1);
+      // For the +X wall, the user looks from -X toward +X. Their
+      // "right" is world -Z (normal × world_up = (-1,0,0) × (0,1,0)
+      // = (0,0,1) — but clickHit normal is the *inward* normal,
+      // and our right axis is normal × world_up). Let's test the
+      // *spread* rather than pin specific axes:
+      // the three rooms differ along one perpendicular axis.
+      const dxLR = right[0] - left[0];
+      const dzLR = right[2] - left[2];
+      // 2 × ROOM_SPACING worth of separation between the outermost
+      // slots, on whichever axis is "right" for this wall.
+      expect(Math.hypot(dxLR, dzLR)).toBeCloseTo(2 * 600);
+      // Centre is the midpoint between left and right.
+      expect(center[0]).toBeCloseTo((left[0] + right[0]) / 2);
+      expect(center[2]).toBeCloseTo((left[2] + right[2]) / 2);
+    });
+
+    it('orientation works on different walls (room ⊥ wall normal)', () => {
+      const [bx, , bz] = computeRoomPosition(BACK_WALL_HIT, 0);
+      // BACK_WALL_HIT: point [0,0,400], inward normal [0,0,-1].
+      // back = (0,0,1) → room at z = 400 + 1500 = 1900.
+      expect(bx).toBeCloseTo(0);
+      expect(bz).toBeCloseTo(1900);
     });
   });
 
   describe('rendering', () => {
-    it('renders one mesh per room (3 total)', () => {
+    beforeEach(() => {
+      useWorldStore.setState({ clickHit: null });
+    });
+
+    afterEach(() => {
+      useWorldStore.setState({ clickHit: null });
+    });
+
+    it('renders nothing before clickHit is set (no impact yet)', () => {
       const { container } = render(<Rooms />);
-      // Each Room renders a single <mesh>; the orchestrator
-      // produces three of them — one per section room.
+      expect(container.firstChild).toBeNull();
+    });
+
+    it('renders one mesh per room when clickHit is set', () => {
+      useWorldStore.setState({ clickHit: RIGHT_WALL_HIT });
+      const { container } = render(<Rooms />);
       expect(container.querySelectorAll('mesh')).toHaveLength(ROOMS.length);
     });
 
-    it('renders the boxGeometry args for each room', () => {
+    it('renders one boxGeometry per room', () => {
+      useWorldStore.setState({ clickHit: RIGHT_WALL_HIT });
       const { container } = render(<Rooms />);
       expect(container.querySelectorAll('boxGeometry')).toHaveLength(ROOMS.length);
     });
