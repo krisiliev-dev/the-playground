@@ -167,24 +167,83 @@ export function computeWallProximity(
  * caller already owns `pos`. Used for both the avatar's body
  * (margin = AVATAR_WALL_MARGIN) and the camera's offset endpoint
  * (margin = CAMERA_WALL_MARGIN).
+ *
+ * Optional `portalHole` carves a circular exception in *one* wall:
+ * when the position's projection onto the portal's wall plane falls
+ * within `radius` of `center`, the clamp on that wall's specific
+ * side is skipped, so the avatar can physically pass through the
+ * disc into the room beyond. The opposite wall (and the other four
+ * walls) still clamp normally — the hole is one-sided, not a
+ * tunnel through the entire cube.
+ *
+ * The portal's wall is identified by the dominant component of
+ * `normal` (axis-aligned cubes have wall normals ±1 on exactly one
+ * axis). The sign of that component tells us which side of the
+ * cube the portal is on, so we know which clamp end to relax.
  */
-export function clampToBoxInterior(pos: Vector3, half: Vector3, margin: number): void {
+export interface PortalHole {
+  center: Vector3;
+  normal: Vector3;
+  radius: number;
+}
+
+export function clampToBoxInterior(
+  pos: Vector3,
+  half: Vector3,
+  margin: number,
+  portalHole?: PortalHole,
+): void {
   const limX = half.x - margin;
   const limY = half.y - margin;
   const limZ = half.z - margin;
-  if (pos.x < -limX) {
+
+  // Compute whether `pos` falls inside the portal's circular hole
+  // (projection onto the wall plane is within `radius` of `center`).
+  // If no hole, all six clamp-end checks below stay enabled.
+  let insideHole = false;
+  let skipNegX = false;
+  let skipPosX = false;
+  let skipNegY = false;
+  let skipPosY = false;
+  let skipNegZ = false;
+  let skipPosZ = false;
+  if (portalHole) {
+    const dx = pos.x - portalHole.center.x;
+    const dy = pos.y - portalHole.center.y;
+    const dz = pos.z - portalHole.center.z;
+    const dotN = dx * portalHole.normal.x + dy * portalHole.normal.y + dz * portalHole.normal.z;
+    const tx = dx - dotN * portalHole.normal.x;
+    const ty = dy - dotN * portalHole.normal.y;
+    const tz = dz - dotN * portalHole.normal.z;
+    const tangentDistSq = tx * tx + ty * ty + tz * tz;
+    insideHole = tangentDistSq < portalHole.radius * portalHole.radius;
+    if (insideHole) {
+      // The inward normal points away from the wall; its sign on
+      // the wall's axis tells us which end of the cube the wall is
+      // on, and therefore which clamp side to skip. (Threshold of
+      // 0.5 is robust given the components are ±1 on one axis.)
+      skipNegX = portalHole.normal.x > 0.5;
+      skipPosX = portalHole.normal.x < -0.5;
+      skipNegY = portalHole.normal.y > 0.5;
+      skipPosY = portalHole.normal.y < -0.5;
+      skipNegZ = portalHole.normal.z > 0.5;
+      skipPosZ = portalHole.normal.z < -0.5;
+    }
+  }
+
+  if (!skipNegX && pos.x < -limX) {
     pos.x = -limX;
-  } else if (pos.x > limX) {
+  } else if (!skipPosX && pos.x > limX) {
     pos.x = limX;
   }
-  if (pos.y < -limY) {
+  if (!skipNegY && pos.y < -limY) {
     pos.y = -limY;
-  } else if (pos.y > limY) {
+  } else if (!skipPosY && pos.y > limY) {
     pos.y = limY;
   }
-  if (pos.z < -limZ) {
+  if (!skipNegZ && pos.z < -limZ) {
     pos.z = -limZ;
-  } else if (pos.z > limZ) {
+  } else if (!skipPosZ && pos.z > limZ) {
     pos.z = limZ;
   }
 }

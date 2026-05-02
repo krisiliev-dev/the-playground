@@ -38,11 +38,14 @@ describe('detectPortalWalkthrough', () => {
       expect(detectPortalWalkthrough(avatar, RIGHT_WALL_HIT)).not.toBeNull();
     });
 
-    it('returns null when avatar is past the wall (negative distance)', () => {
-      // Defensive — clamping prevents this in practice, but the
-      // function rejects it rather than producing a junk quadrant.
+    it('returns a quadrant when avatar is past the wall (negative distance)', () => {
+      // The portal hole in the clamp lets the avatar physically
+      // pass through. We want detection to *stay* "in zone" while
+      // the avatar is past the wall so the edge-triggered fire
+      // doesn't re-arm and double-dispatch when distToPlane
+      // crosses zero in either direction.
       const avatar = new Vector3(401, 0, 0);
-      expect(detectPortalWalkthrough(avatar, RIGHT_WALL_HIT)).toBeNull();
+      expect(detectPortalWalkthrough(avatar, RIGHT_WALL_HIT)).not.toBeNull();
     });
 
     it('returns a quadrant when avatar is just inside the trigger band', () => {

@@ -64,10 +64,15 @@ export function detectPortalWalkthrough(
 
   // Perpendicular distance from the avatar to the wall plane.
   // Positive = on cube interior side, 0 = on the wall, negative =
-  // behind the wall (defensive — shouldn't happen with clamping).
+  // past the wall (now legitimately reachable now that the clamp
+  // has a portal hole). We bound only above: if the avatar is
+  // farther from the wall than WALK_THROUGH_THRESHOLD, they're not
+  // close to entering the portal. Past-wall is "in zone" too — the
+  // avatar walking through the disc shouldn't bounce out of zone
+  // and re-trigger when distToPlane crosses zero.
   SCRATCH_TO_AVATAR.subVectors(avatarPos, SCRATCH_HIT_POINT);
   const distToPlane = SCRATCH_TO_AVATAR.dot(SCRATCH_NORMAL);
-  if (distToPlane < 0 || distToPlane > WALK_THROUGH_THRESHOLD) {
+  if (distToPlane > WALK_THROUGH_THRESHOLD) {
     return null;
   }
 

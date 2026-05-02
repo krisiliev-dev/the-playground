@@ -261,6 +261,50 @@ describe('clampToBoxInterior', () => {
     expect(ret).toBe(pos);
     expect(pos.x).toBe(32);
   });
+
+  describe('with portalHole', () => {
+    // Hole on the +X wall (point [40, 0, 0], inward normal [-1, 0, 0]),
+    // disc radius 10. Avatar projection onto the wall plane is just
+    // (y, z); inside-disc means sqrt(y² + z²) < 10.
+    const PLUS_X_HOLE = {
+      center: new Vector3(40, 0, 0),
+      normal: new Vector3(-1, 0, 0),
+      radius: 10,
+    };
+
+    it('skips the +X clamp when the avatar projects inside the disc', () => {
+      // Avatar past the +X wall (x > 32 = limX) but tangentially
+      // centred → in the hole → +X clamp doesn't fire.
+      const pos = new Vector3(100, 0, 0);
+      clampToBoxInterior(pos, HALF, 8, PLUS_X_HOLE);
+      expect(pos.x).toBe(100);
+    });
+
+    it('still clamps the +X wall when the projection is outside the disc', () => {
+      // Avatar past the +X wall but tangentially way out (y = 50 >
+      // disc radius 10) → not in hole → normal clamp.
+      const pos = new Vector3(100, 50, 0);
+      clampToBoxInterior(pos, HALF, 8, PLUS_X_HOLE);
+      expect(pos.x).toBe(32);
+      // Y also clamps independently because (50 > 32 = limY).
+      expect(pos.y).toBe(32);
+    });
+
+    it('still clamps the OPPOSITE (-X) wall even when in the +X hole', () => {
+      // Hole is one-sided. An avatar in the hole's tangent zone
+      // but on the wrong side of the cube can't tunnel through to
+      // the +X wall via a non-existent -X exception.
+      const pos = new Vector3(-100, 0, 0);
+      clampToBoxInterior(pos, HALF, 8, PLUS_X_HOLE);
+      expect(pos.x).toBe(-32);
+    });
+
+    it('passes through when no portalHole is provided (back-compat)', () => {
+      const pos = new Vector3(100, 0, 0);
+      clampToBoxInterior(pos, HALF, 8);
+      expect(pos.x).toBe(32);
+    });
+  });
 });
 
 describe('setYawQuat', () => {

@@ -54,7 +54,17 @@ import {
   projectNDCToWorld,
   setYawQuat,
 } from './cursorAvatarMath';
-import { activatePortalQuadrant, detectPortalWalkthrough } from './portalWalkthrough';
+import {
+  activatePortalQuadrant,
+  detectPortalWalkthrough,
+  PORTAL_RADIUS_FOR_WALKTHROUGH,
+} from './portalWalkthrough';
+
+/** Radius of the circular hole carved out of the wall-margin
+ *  clamp at the portal disc's location. Matches the visible disc
+ *  radius so "where the disc renders" === "where the avatar can
+ *  pass through". */
+const PORTAL_HOLE_RADIUS = PORTAL_RADIUS_FOR_WALKTHROUGH;
 
 const MODEL_URL = '/models/3d_icon_cursor.glb';
 
@@ -856,6 +866,15 @@ function AvatarCursor({ refs }: ModeProps): null {
    *  false → true transition, so standing still inside the zone
    *  doesn't keep re-firing every frame. */
   const wasInZoneRef = useRef(false);
+  /** Scratch buffers for the per-frame portal-hole config passed
+   *  into clampToBoxInterior. Reused each frame to avoid GC churn. */
+  const portalHoleCenter = useRef(new Vector3());
+  const portalHoleNormal = useRef(new Vector3());
+  const portalHoleConfig = useRef({
+    center: new Vector3(),
+    normal: new Vector3(),
+    radius: 0,
+  });
 
   // Lean-target scratch buffers.
   const leanTarget = useRef(new Vector3());
@@ -923,7 +942,28 @@ function AvatarCursor({ refs }: ModeProps): null {
     }
 
     tmpCubeHalf.current.set(dimensions[0] * 0.5, dimensions[1] * 0.5, dimensions[2] * 0.5);
-    clampToBoxInterior(refs.avatarPos.current, tmpCubeHalf.current, AVATAR_WALL_MARGIN);
+    // Carve a circular hole in the wall-margin clamp at the portal's
+    // location so the avatar can physically pass through the disc
+    // into the room beyond. Other walls + the opposite side of the
+    // portal's wall still clamp normally.
+    {
+      const clickHit = useWorldStore.getState().clickHit;
+      if (clickHit && useWorldStore.getState().revealState === 'revealed') {
+        portalHoleCenter.current.set(...clickHit.point);
+        portalHoleNormal.current.set(...clickHit.normal);
+        portalHoleConfig.current.center = portalHoleCenter.current;
+        portalHoleConfig.current.normal = portalHoleNormal.current;
+        portalHoleConfig.current.radius = PORTAL_HOLE_RADIUS;
+        clampToBoxInterior(
+          refs.avatarPos.current,
+          tmpCubeHalf.current,
+          AVATAR_WALL_MARGIN,
+          portalHoleConfig.current,
+        );
+      } else {
+        clampToBoxInterior(refs.avatarPos.current, tmpCubeHalf.current, AVATAR_WALL_MARGIN);
+      }
+    }
 
     // Walk-through portal detection. Runs after position clamping
     // so detection sees the same avatarPos that's about to render.
