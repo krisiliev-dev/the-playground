@@ -17,8 +17,13 @@ import { useMemo } from 'react';
 import { useWorldStore } from '@/store';
 import type { Entity } from '@/multiplayer/types';
 
-const REMOTE_CUBE_SIZE = 0.4;
-const REMOTE_CUBE_COLOR = '#00ffcc';
+// Placeholder marker for remote players — a small colored cube
+// while the proper GLB cursor reuse is on the follow-up slice.
+// `cursor_color` from the entity's props takes precedence so each
+// player can have a distinct rim hue once the editor lets admins
+// set it; the constant below is the fallback.
+const REMOTE_CUBE_SIZE = 1.2;
+const REMOTE_CUBE_COLOR = '#ff00ff';
 
 export function RemotePlayers(): JSX.Element {
   const entities = useWorldStore((s) => s.entities);
@@ -60,7 +65,7 @@ function RemotePlayerCube({ entity }: RemotePlayerCubeProps): JSX.Element {
   const [px, py, pz] = entity.transform.position;
   const color = (entity.props as { cursor_color?: string }).cursor_color ?? REMOTE_CUBE_COLOR;
   return (
-    <mesh position={[px, py, pz]}>
+    <mesh position={[px, py, pz]} frustumCulled={false}>
       <boxGeometry args={[REMOTE_CUBE_SIZE, REMOTE_CUBE_SIZE, REMOTE_CUBE_SIZE]} />
       <meshBasicMaterial color={color} />
     </mesh>

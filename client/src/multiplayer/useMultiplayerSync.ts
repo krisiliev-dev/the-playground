@@ -56,6 +56,8 @@ export function useMultiplayerSync(opts: MultiplayerOptions): void {
 
   useEffect(() => {
     if (!enabled) {
+      // eslint-disable-next-line no-console
+      console.info('[multiplayer] disabled — set VITE_MULTIPLAYER_URL to enable');
       return;
     }
 
@@ -67,10 +69,14 @@ export function useMultiplayerSync(opts: MultiplayerOptions): void {
         return;
       }
       const fullUrl = adminToken ? `${url}?token=${encodeURIComponent(adminToken)}` : url;
+      // eslint-disable-next-line no-console
+      console.info('[multiplayer] connecting →', fullUrl);
       const ws = new WebSocket(fullUrl);
       socketRef.current = ws;
 
       ws.addEventListener('open', () => {
+        // eslint-disable-next-line no-console
+        console.info('[multiplayer] connected');
         backoffMs = RECONNECT_INITIAL_MS;
       });
 
@@ -104,7 +110,21 @@ export function useMultiplayerSync(opts: MultiplayerOptions): void {
         }, backoffMs);
       };
 
-      ws.addEventListener('close', scheduleReconnect);
+      ws.addEventListener('close', () => {
+        // Only honour close events from the *currently active*
+        // socket. Under React StrictMode the effect double-mounts:
+        // WS_1 is opened, cleanup closes it (still CONNECTING),
+        // second mount opens WS_2 — and only AFTER WS_2 is up does
+        // WS_1's `close` event fire asynchronously. Without this
+        // guard, WS_1's stale close handler runs `scheduleReconnect`
+        // which clears entities and nulls `socketRef.current`,
+        // leaving the active WS_2 unreachable from the outbound
+        // pump (which is keyed off socketRef.current).
+        if (socketRef.current !== ws) {
+          return;
+        }
+        scheduleReconnect();
+      });
       ws.addEventListener('error', () => {
         // Browsers fire `error` then `close`; close handles the
         // reconnect. We just close defensively here in case some
