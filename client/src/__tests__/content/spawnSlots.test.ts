@@ -17,6 +17,7 @@ import {
   TOTAL_SLOTS,
   getSpawnSlot,
   getSlotIndexForActor,
+  clampHitToSlotSection,
 } from '@/content/spawnSlots';
 
 const CUBE_HALF = 400;
@@ -104,5 +105,87 @@ describe('getSlotIndexForActor', () => {
     const peers = Array.from({ length: 50 }, (_, i) => `actor-${String(i).padStart(3, '0')}`);
     const indexes = peers.map((id) => getSlotIndexForActor(id, peers));
     expect(new Set(indexes).size).toBe(50);
+  });
+});
+
+describe('clampHitToSlotSection', () => {
+  it('passes through a hit at the slot center unchanged', () => {
+    const slot = getSpawnSlot(0);
+    const center = slot.clickHit;
+    const clamped = clampHitToSlotSection(center, slot);
+    expect(clamped.point[0]).toBeCloseTo(center.point[0], 5);
+    expect(clamped.point[1]).toBeCloseTo(center.point[1], 5);
+    expect(clamped.point[2]).toBeCloseTo(center.point[2], 5);
+  });
+
+  it('clamps a hit far past the section edge to the section boundary', () => {
+    const slot = getSpawnSlot(0);
+    const halfX = slot.sectionHalfExtent[0];
+    // Hit 9999 units to the right of the slot center along the
+    // wall plane → should land at the +halfX boundary.
+    const farRight = {
+      point: [
+        slot.clickHit.point[0] + 9999 * slot.wallRight[0],
+        slot.clickHit.point[1] + 9999 * slot.wallRight[1],
+        slot.clickHit.point[2] + 9999 * slot.wallRight[2],
+      ] as [number, number, number],
+      normal: slot.clickHit.normal,
+    };
+    const clamped = clampHitToSlotSection(farRight, slot);
+    // Distance from slot center along right axis should equal halfX.
+    const dx = clamped.point[0] - slot.clickHit.point[0];
+    const dy = clamped.point[1] - slot.clickHit.point[1];
+    const dz = clamped.point[2] - slot.clickHit.point[2];
+    const tx =
+      dx * slot.wallRight[0] + dy * slot.wallRight[1] + dz * slot.wallRight[2];
+    expect(tx).toBeCloseTo(halfX, 5);
+  });
+
+  it('keeps a hit inside the section unchanged', () => {
+    const slot = getSpawnSlot(0);
+    // 5 units along right axis (well inside the section).
+    const inside = {
+      point: [
+        slot.clickHit.point[0] + 5 * slot.wallRight[0],
+        slot.clickHit.point[1] + 5 * slot.wallRight[1],
+        slot.clickHit.point[2] + 5 * slot.wallRight[2],
+      ] as [number, number, number],
+      normal: slot.clickHit.normal,
+    };
+    const clamped = clampHitToSlotSection(inside, slot);
+    expect(clamped.point[0]).toBeCloseTo(inside.point[0], 5);
+    expect(clamped.point[1]).toBeCloseTo(inside.point[1], 5);
+    expect(clamped.point[2]).toBeCloseTo(inside.point[2], 5);
+  });
+
+  it('always returns the slot wall normal (collapses cross-wall clicks)', () => {
+    // Slot 100 lives on the front wall (+Z normal = -Z). Suppose the
+    // user's raycast hit the back wall instead: the clamp should
+    // still yield the slot's wall normal, not the back wall's.
+    const slot = getSpawnSlot(100);
+    const wrongWallHit = {
+      point: [10, 5, -400] as [number, number, number],
+      normal: [0, 0, 1] as [number, number, number],
+    };
+    const clamped = clampHitToSlotSection(wrongWallHit, slot);
+    expect(clamped.normal).toEqual(slot.clickHit.normal);
+  });
+
+  it('two adjacent slots clamping to their facing edges still leave a clearance', () => {
+    // Cluster radius is FORMATION_QUADRANT_OFFSET + DEFAULT_PORTAL_SIZE/2 ≈ 11.
+    // Adjacent slot centers on the back wall are ~78 apart along
+    // wallRight. Each section has halfExtent 28, so worst-case
+    // adjacent clusters land at displacement +28 / -28 from their
+    // slot centers — distance between cluster centers becomes
+    // 78 - 28 - 28 = 22, which is exactly 2 * cluster radius. The
+    // safety buffer (4-unit gap between slots) makes the actual
+    // clearance ≥ 0.
+    const a = getSpawnSlot(0);
+    const b = getSpawnSlot(1);
+    expect(b.clickHit.point[0]).toBeGreaterThan(a.clickHit.point[0]);
+    const slotSpacing = b.clickHit.point[0] - a.clickHit.point[0];
+    const minDistance = slotSpacing - 2 * a.sectionHalfExtent[0];
+    const clusterDiameter = 22; // 2 * (FORMATION_QUADRANT_OFFSET + DEFAULT_PORTAL_SIZE/2)
+    expect(minDistance).toBeGreaterThanOrEqual(clusterDiameter - 0.001);
   });
 });

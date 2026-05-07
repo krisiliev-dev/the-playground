@@ -24,16 +24,28 @@ import type { ClickHit } from '@/store';
 
 export interface SpawnSlot {
   readonly index: number;
-  /** "As if a player clicked here" anchor — point on the wall
-   *  + inward normal. The cascade math already consumes a
-   *  `ClickHit`, so passing this through unchanged keeps the
-   *  existing pipeline intact. */
+  /** Center of this slot's section — the wall point + inward
+   *  normal. Used as the default click hit (before the user
+   *  clicks) and as the origin for clamping a real click hit
+   *  inside the section's wall-plane bounds. */
   readonly clickHit: ClickHit;
   /** Offset from a section room's wall center (room-local x, y)
    *  for THIS slot's room-exit portal. Distinct per slot so
    *  different players' room exits don't overlap. Sized to fit
    *  the 400-unit room wall comfortably. */
   readonly roomExitOffset: readonly [number, number];
+  /** Wall-plane "right" axis. Pairs with `wallUp` so the click
+   *  clamp can project a 3D hit point onto a 2D wall frame
+   *  and clamp tangentially without recomputing the basis. */
+  readonly wallRight: readonly [number, number, number];
+  /** Wall-plane "up" axis. */
+  readonly wallUp: readonly [number, number, number];
+  /** Half-extents of the player's section on the wall, in
+   *  wall-plane (right, up) units. A real click hit is clamped
+   *  to within ±this from the section center — gives the
+   *  player freedom of placement inside their patch without
+   *  letting them stomp adjacent sections. */
+  readonly sectionHalfExtent: readonly [number, number];
 }
 
 /** Half-extent of the main cube. Mirrors `routes.ts::CUBE_HALF`. */
@@ -55,6 +67,14 @@ const CUBE_USABLE_HALF = CUBE_HALF - CUBE_WALL_INSET;
 const CUBE_GRID_COLS = 10;
 const CUBE_GRID_ROWS = 10;
 const SLOTS_PER_WALL = CUBE_GRID_COLS * CUBE_GRID_ROWS;
+
+/** Half-extent of each player's clickable section on the wall.
+ *  Adjacent slot centers are ~77.78 apart (`2 * 350 / 9`); the
+ *  cluster has radius ~11 at default formation scale. A section
+ *  half of 27 leaves: `77.78 - 2*27 - 2*11 ≈ 1.78` units of
+ *  guaranteed clearance between worst-case adjacent clusters.
+ *  Tight but enough to read as separate clusters. */
+const SECTION_HALF = 27;
 
 interface WallDef {
   /** World-space center of the wall plane. */
@@ -152,6 +172,51 @@ export function getSpawnSlot(index: number): SpawnSlot {
       normal: [wall.normal[0], wall.normal[1], wall.normal[2]],
     },
     roomExitOffset: [ru * ROOM_USABLE_HALF, rv * ROOM_USABLE_HALF],
+    wallRight: [wall.right[0], wall.right[1], wall.right[2]],
+    wallUp: [wall.up[0], wall.up[1], wall.up[2]],
+    sectionHalfExtent: [SECTION_HALF, SECTION_HALF],
+  };
+}
+
+/**
+ * Project a raw click hit (from a free-form raycast against the
+ * cube wall) into the slot's section, clamping the tangential
+ * displacement so the resulting point stays inside the player's
+ * patch. The returned hit always lies on the slot's wall —
+ * even if the user clicked on a different wall, the hit gets
+ * collapsed to the section by tangential projection.
+ *
+ * Pure: no side effects, fresh return value. Tested in
+ * `spawnSlots.test.ts`.
+ */
+export function clampHitToSlotSection(hit: ClickHit, slot: SpawnSlot): ClickHit {
+  const cx = slot.clickHit.point[0];
+  const cy = slot.clickHit.point[1];
+  const cz = slot.clickHit.point[2];
+  // Vector from slot center to hit, projected onto wall axes.
+  const dx = hit.point[0] - cx;
+  const dy = hit.point[1] - cy;
+  const dz = hit.point[2] - cz;
+  const tx =
+    dx * slot.wallRight[0] + dy * slot.wallRight[1] + dz * slot.wallRight[2];
+  const ty = dx * slot.wallUp[0] + dy * slot.wallUp[1] + dz * slot.wallUp[2];
+  const halfX = slot.sectionHalfExtent[0];
+  const halfY = slot.sectionHalfExtent[1];
+  const cTx = Math.max(-halfX, Math.min(halfX, tx));
+  const cTy = Math.max(-halfY, Math.min(halfY, ty));
+  return {
+    point: [
+      cx + cTx * slot.wallRight[0] + cTy * slot.wallUp[0],
+      cy + cTx * slot.wallRight[1] + cTy * slot.wallUp[1],
+      cz + cTx * slot.wallRight[2] + cTy * slot.wallUp[2],
+    ],
+    // Always the slot's wall normal — even if the raw hit was
+    // on a different wall, the clamp collapses it onto this one.
+    normal: [
+      slot.clickHit.normal[0],
+      slot.clickHit.normal[1],
+      slot.clickHit.normal[2],
+    ],
   };
 }
 
