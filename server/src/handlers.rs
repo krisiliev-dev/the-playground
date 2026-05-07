@@ -136,9 +136,18 @@ async fn handle_ws(socket: WebSocket, state: AppState, ip: String, is_admin: boo
             match msg {
                 Message::Close(_) => break,
                 Message::Text(text) => {
-                    let Ok(client_msg) = serde_json::from_str::<ClientMessage>(&text) else {
-                        debug!(?text, "ignoring malformed ClientMessage");
-                        continue;
+                    let client_msg = match serde_json::from_str::<ClientMessage>(&text) {
+                        Ok(m) => m,
+                        Err(err) => {
+                            // WARN level (not debug) so an out-of-date
+                            // server immediately surfaces the mismatch
+                            // instead of silently dropping a whole
+                            // category of messages — the historical
+                            // bug pattern when ClientMessage variants
+                            // grew without redeploying.
+                            warn!(error = %err, ?text, "ignoring malformed ClientMessage");
+                            continue;
+                        }
                     };
                     handle_client_message(&inbound_state, player_id, is_admin, client_msg).await;
                 }
@@ -200,8 +209,16 @@ async fn forward_scene_event(state: &AppState, actor_id: EntityId, event: SceneE
     };
     let validated = match outcome {
         ValidationOutcome::Pass(e) => e,
-        ValidationOutcome::Drop => return,
+        ValidationOutcome::Drop => {
+            tracing::debug!(actor = %actor_id, "scene event dropped by validator");
+            return;
+        }
     };
+    tracing::info!(
+        actor = %actor_id,
+        receivers = state.broadcast_tx.receiver_count(),
+        "scene event forwarded"
+    );
     let _ = state.broadcast_tx.send(ServerMessage::SceneEvent {
         actor_id: Some(actor_id),
         event: validated,

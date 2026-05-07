@@ -80,7 +80,7 @@ Validation is **per-variant**, with rate limits and value clamps in a single `va
 | `Audio` | Rate-limit ≤ 20/sec per actor; drop excess |
 | `SwordSwing` | Cooldown 200ms per actor |
 | `SwordImpact` | Cooldown 200ms per actor |
-| `CameraShake` | Clamp `intensity` to ≤ 1.0; clamp `duration_ms` to ≤ 1500; rate-limit ≤ 5/sec per actor |
+| `CameraShake` | Clamp `radius` ≤ 1000u, `intensity` ≤ 1.0, `duration_ms` ≤ 1500ms; rate-limit ≤ 5/sec per actor |
 
 Continuous presence state needs only ownership validation: a client can only mutate `props` on their own entity. (Already enforced for `PlayerInput`.)
 

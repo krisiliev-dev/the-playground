@@ -141,10 +141,13 @@ pub fn validate_event(
             }
             // Clamp shake parameters to safe ranges — a malicious
             // client can't trigger a 60-second screen-shaker on
-            // every other player.
+            // every other player. Radius is large (1000u) because
+            // the world geometry has cameras hundreds of units back
+            // from impact points; tighter caps swallowed legitimate
+            // long-range shakes (sword slams against a far wall).
             ValidationOutcome::Pass(SceneEventKind::CameraShake {
                 position,
-                radius: radius.clamp(0.0, 100.0),
+                radius: radius.clamp(0.0, 1000.0),
                 intensity: intensity.clamp(0.0, 1.0),
                 duration_ms: duration_ms.min(1500),
             })
@@ -252,7 +255,7 @@ mod tests {
         let actor = fresh_actor();
         let event = SceneEventKind::CameraShake {
             position: [0.0, 0.0, 0.0],
-            radius: 1000.0,
+            radius: 9999.0,
             intensity: 99.0,
             duration_ms: 60_000,
         };
@@ -264,11 +267,33 @@ mod tests {
                 duration_ms,
                 ..
             }) => {
-                assert_eq!(radius, 100.0);
+                assert_eq!(radius, 1000.0);
                 assert_eq!(intensity, 1.0);
                 assert_eq!(duration_ms, 1500);
             }
             _ => panic!("expected clamped Pass"),
+        }
+    }
+
+    #[test]
+    fn camera_shake_radius_within_cap_is_unchanged() {
+        let mut tracker = RateTracker::new();
+        let actor = fresh_actor();
+        // The default world radius (500) should pass through
+        // without clamping — guards against future off-by-one
+        // tightenings of the cap.
+        let event = SceneEventKind::CameraShake {
+            position: [0.0, 0.0, 0.0],
+            radius: 500.0,
+            intensity: 1.0,
+            duration_ms: 180,
+        };
+        let outcome = validate_event(Some(actor), event, &mut tracker, Instant::now());
+        match outcome {
+            ValidationOutcome::Pass(SceneEventKind::CameraShake { radius, .. }) => {
+                assert_eq!(radius, 500.0);
+            }
+            _ => panic!("expected pass-through"),
         }
     }
 
