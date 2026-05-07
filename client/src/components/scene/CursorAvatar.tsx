@@ -43,7 +43,7 @@ import { useWorldStore } from '@/store';
 import { useIsTouchPrimary } from '@/utils';
 import { sfx } from '../audio/SfxManager';
 import { getInteractableUserData, interactableHandlers, setTouchInProgress } from './Interactable';
-import { cursorWorldPosition } from './cursorWorldPosition';
+import { cursorWorldPosition, cursorWorldQuaternion } from './cursorWorldPosition';
 import { SWING_PRE } from './reveal/constants';
 import {
   clampToBoxInterior,
@@ -1606,12 +1606,13 @@ function AvatarCursor({ refs }: ModeProps): null {
     }
     group.scale.setScalar(refs.renderedScale.current);
 
-    // Publish the final-for-this-frame avatar world position to the
-    // shared singleton. InteractionController reads it next frame as
-    // the raycast origin, so things between camera and cursor (i.e.
-    // behind the cursor in view direction) don't intercept the
-    // crosshair ray. See `cursorWorldPosition.ts`.
+    // Publish the final-for-this-frame avatar world pose to the
+    // shared singletons. InteractionController reads position next
+    // frame as the raycast origin; useMultiplayerSync reads both
+    // position + quaternion to send authoritative-server updates.
+    // See `cursorWorldPosition.ts`.
     cursorWorldPosition.copy(refs.avatarPos.current);
+    cursorWorldQuaternion.copy(group.quaternion);
   }, 2);
 
   return null;

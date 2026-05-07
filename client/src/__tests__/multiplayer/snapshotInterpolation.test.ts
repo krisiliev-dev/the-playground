@@ -86,13 +86,43 @@ describe('SnapshotBuffer', () => {
     expect(out?.position[0]).toBeCloseTo(75, 6);
   });
 
-  it('lerps quaternion components linearly (slerp deferred)', () => {
+  it('nlerps quaternions and normalises the result onto the unit hyper-sphere', () => {
     const buf = new SnapshotBuffer();
+    // Identity → 90° around Y. Halfway should be 45° around Y,
+    // i.e. (0, sin(22.5°), 0, cos(22.5°)) ≈ (0, 0.3827, 0, 0.9239).
+    // Strict slerp would give that. nlerp produces (0, 0.5, 0, 0.5)
+    // before normalising → (0, ~0.707, 0, ~0.707). For 90° deltas
+    // the difference between nlerp and slerp is visible, but at the
+    // per-tick deltas this hook actually sees (~few degrees) it's
+    // imperceptible. The contract this test locks: the *result is
+    // normalised* (length=1), regardless of which interpolation
+    // we use, so downstream Three.js stays well-defined.
     buf.push({ time: 0, position: [0, 0, 0], quaternion: [0, 0, 0, 1] });
     buf.push({ time: 100, position: [0, 0, 0], quaternion: [0, 1, 0, 0] });
 
     const out = buf.sample(50);
-    expect(out?.quaternion).toEqual([0, 0.5, 0, 0.5]);
+    const q = out!.quaternion;
+    const len = Math.sqrt(q[0] ** 2 + q[1] ** 2 + q[2] ** 2 + q[3] ** 2);
+    expect(len).toBeCloseTo(1, 6);
+    // The y and w components should each be ~0.707 (since the
+    // raw lerp would give 0.5 each; normalising scales by sqrt(2)).
+    expect(q[1]).toBeCloseTo(Math.SQRT1_2, 4);
+    expect(q[3]).toBeCloseTo(Math.SQRT1_2, 4);
+  });
+
+  it('takes the short arc when quaternions are on opposite hyper-spheres', () => {
+    // q and -q represent the same rotation. Naïve component-wise
+    // lerp would interpolate the *long* way around the unit
+    // hyper-sphere — visually a 360° spin during a static pose.
+    // nlerp with sign correction lerps to the short arc.
+    const buf = new SnapshotBuffer();
+    buf.push({ time: 0, position: [0, 0, 0], quaternion: [0, 0, 0, 1] });
+    buf.push({ time: 100, position: [0, 0, 0], quaternion: [0, 0, 0, -1] });
+
+    const out = buf.sample(50);
+    // Short-arc midpoint of (0,0,0,1) and (0,0,0,-1) is
+    // (0,0,0,1) — they're the same rotation.
+    expect(out!.quaternion[3]).toBeCloseTo(1, 6);
   });
 
   it('handles zero-time-span snapshots without dividing by zero', () => {

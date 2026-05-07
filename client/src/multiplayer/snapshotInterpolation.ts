@@ -17,10 +17,13 @@
  *     to the player) for guaranteed-smooth motion regardless of
  *     network jitter.
  *
- * Quaternion interpolation deferred — the client doesn't (yet)
- * source rotation from the local cursor, so all snapshots have
- * identity quaternion, and slerp would be a no-op. When real
- * pose lands, swap `lerpVec3` for slerp on the quaternion path.
+ * Quaternion interpolation uses normalised lerp (nlerp) rather
+ * than slerp: nlerp is constant-speed only for small deltas but
+ * is significantly cheaper to compute, and at 30+ Hz tick rates
+ * the per-step delta is small enough that the speed-curve
+ * difference is imperceptible. Genuine slerp would matter for
+ * keyframe animation; for streaming tick-by-tick poses, nlerp +
+ * normalize is the standard tradeoff.
  */
 import type { EntityId } from './types';
 
@@ -113,10 +116,7 @@ export class SnapshotBuffer {
         const t = span === 0 ? 1 : (renderTime - older.time) / span;
         return {
           position: lerpVec3(older.position, newer.position, t),
-          // Quaternion: NOT slerp yet. With identity quaternions
-          // throughout, lerp is identical to slerp; once real
-          // rotation lands, replace with three.js Quaternion.slerp.
-          quaternion: lerpVec4(older.quaternion, newer.quaternion, t),
+          quaternion: nlerpQuat(older.quaternion, newer.quaternion, t),
         };
       }
     }
@@ -147,17 +147,27 @@ function lerpVec3(
   return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
 }
 
-function lerpVec4(
+/** Normalised quaternion lerp ("nlerp"). Cheaper than slerp, and
+ *  for the small per-tick rotation deltas this hook deals with,
+ *  visually equivalent. Critical detail: when the dot product is
+ *  negative the quaternions are on opposite sides of the
+ *  hyper-sphere — naïve component-wise lerp would interpolate the
+ *  long way around. Negating one quaternion before lerp picks the
+ *  short arc. Final normalize keeps the result on the unit
+ *  hyper-sphere so Three.js's slerp/multiply remain well-defined. */
+function nlerpQuat(
   a: readonly [number, number, number, number],
   b: readonly [number, number, number, number],
   t: number,
 ): [number, number, number, number] {
-  return [
-    a[0] + (b[0] - a[0]) * t,
-    a[1] + (b[1] - a[1]) * t,
-    a[2] + (b[2] - a[2]) * t,
-    a[3] + (b[3] - a[3]) * t,
-  ];
+  const dot = a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3];
+  const sign = dot < 0 ? -1 : 1;
+  const x = a[0] + (sign * b[0] - a[0]) * t;
+  const y = a[1] + (sign * b[1] - a[1]) * t;
+  const z = a[2] + (sign * b[2] - a[2]) * t;
+  const w = a[3] + (sign * b[3] - a[3]) * t;
+  const len = Math.sqrt(x * x + y * y + z * z + w * w) || 1;
+  return [x / len, y / len, z / len, w / len];
 }
 
 // ─── Module-scoped registry ────────────────────────────────────

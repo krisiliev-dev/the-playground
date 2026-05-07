@@ -171,7 +171,7 @@ describe('transformsEqual', () => {
     expect(transformsEqual(at(1, 2, 3), at(1, 2, 3 + POSITION_EPSILON * 10))).toBe(false);
   });
 
-  it('ignores quaternion + scale differences (only position is compared)', () => {
+  it('returns false when quaternion diverges past epsilon', () => {
     const a: Transform = {
       position: [1, 2, 3],
       quaternion: [0, 0, 0, 1],
@@ -180,7 +180,35 @@ describe('transformsEqual', () => {
     const b: Transform = {
       position: [1, 2, 3],
       quaternion: [0.5, 0.5, 0.5, 0.5],
+      scale: [1, 1, 1],
+    };
+    expect(transformsEqual(a, b)).toBe(false);
+  });
+
+  it('ignores scale differences (scale is not synced)', () => {
+    const a: Transform = {
+      position: [1, 2, 3],
+      quaternion: [0, 0, 0, 1],
+      scale: [1, 1, 1],
+    };
+    const b: Transform = {
+      position: [1, 2, 3],
+      quaternion: [0, 0, 0, 1],
       scale: [9, 9, 9],
+    };
+    expect(transformsEqual(a, b)).toBe(true);
+  });
+
+  it('treats sub-epsilon quaternion jitter as equal', () => {
+    const a: Transform = {
+      position: [0, 0, 0],
+      quaternion: [0, 0, 0, 1],
+      scale: [1, 1, 1],
+    };
+    const b: Transform = {
+      position: [0, 0, 0],
+      quaternion: [0, 0.0001, 0, 1],
+      scale: [1, 1, 1],
     };
     expect(transformsEqual(a, b)).toBe(true);
   });

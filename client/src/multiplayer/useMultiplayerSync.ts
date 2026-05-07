@@ -14,7 +14,7 @@
  * is owned by the existing CursorAvatar; this hook just relays.
  */
 import { useEffect, useRef } from 'react';
-import { cursorWorldPosition } from '@/components/scene/cursorWorldPosition';
+import { cursorWorldPosition, cursorWorldQuaternion } from '@/components/scene/cursorWorldPosition';
 import { useWorldStore } from '@/store';
 import type { ClientMessage, Entity, EntityId, ServerMessage, Transform } from './types';
 import { IDENTITY_TRANSFORM } from './types';
@@ -237,14 +237,21 @@ export function dispatchServerMessage(msg: ServerMessage, d: Dispatchers): void 
   }
 }
 
-/** Read the current local cursor world position into a Transform.
- *  Quaternion + scale are placeholders for now — the avatar's
- *  rotation isn't consumed by remote cube rendering yet. When
- *  remote-avatar-with-pose lands, wire a real quaternion source. */
+/** Read the current local cursor world pose into a Transform.
+ *  Both `cursorWorldPosition` and `cursorWorldQuaternion` are
+ *  written each frame by CursorAvatar's useFrame. Scale is held
+ *  identity — the local avatar self-scales for animation
+ *  effects (intro pan, hover/press lerp), but those are
+ *  view-relative and shouldn't drive remote rendering. */
 function readLocalTransform(): Transform {
   return {
     position: [cursorWorldPosition.x, cursorWorldPosition.y, cursorWorldPosition.z],
-    quaternion: [0, 0, 0, 1],
+    quaternion: [
+      cursorWorldQuaternion.x,
+      cursorWorldQuaternion.y,
+      cursorWorldQuaternion.z,
+      cursorWorldQuaternion.w,
+    ],
     scale: [1, 1, 1],
   };
 }
@@ -255,14 +262,27 @@ function readLocalTransform(): Transform {
  *  point is to coalesce "no actual movement" into "no message." */
 export const POSITION_EPSILON = 0.001;
 
+/** Quaternion components are bounded in [-1, 1] so a much smaller
+ *  threshold makes sense — sub-degree rotation changes are visually
+ *  meaningful for cursor pose and shouldn't be coalesced away. */
+export const QUATERNION_EPSILON = 0.0005;
+
 /** Pure equality check used by the outbound pump to skip sends
- *  when nothing changed. Quaternion / scale not compared because
- *  the hook doesn't (yet) source either from the client. Exported
- *  for tests. */
+ *  when neither position nor rotation changed. Scale not compared
+ *  — the hook doesn't source it from the client. Exported for
+ *  tests. */
 export function transformsEqual(a: Transform, b: Transform): boolean {
+  if (
+    Math.abs(a.position[0] - b.position[0]) > POSITION_EPSILON ||
+    Math.abs(a.position[1] - b.position[1]) > POSITION_EPSILON ||
+    Math.abs(a.position[2] - b.position[2]) > POSITION_EPSILON
+  ) {
+    return false;
+  }
   return (
-    Math.abs(a.position[0] - b.position[0]) <= POSITION_EPSILON &&
-    Math.abs(a.position[1] - b.position[1]) <= POSITION_EPSILON &&
-    Math.abs(a.position[2] - b.position[2]) <= POSITION_EPSILON
+    Math.abs(a.quaternion[0] - b.quaternion[0]) <= QUATERNION_EPSILON &&
+    Math.abs(a.quaternion[1] - b.quaternion[1]) <= QUATERNION_EPSILON &&
+    Math.abs(a.quaternion[2] - b.quaternion[2]) <= QUATERNION_EPSILON &&
+    Math.abs(a.quaternion[3] - b.quaternion[3]) <= QUATERNION_EPSILON
   );
 }
