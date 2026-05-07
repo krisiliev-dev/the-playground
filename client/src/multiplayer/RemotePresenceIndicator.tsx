@@ -10,30 +10,19 @@
  * surfaced into the world via the *target* object animating, not
  * a per-player overlay, so it doesn't render here).
  */
-import { useRef } from 'react';
-import { useFrame, useThree } from '@react-three/fiber';
-import type { Group, Mesh } from 'three';
+import { Text } from '@react-three/drei';
 import type { Entity } from './types';
 
 interface RemotePresenceIndicatorProps {
   entity: Entity;
 }
 
-/** Distance the menu plane floats in front of the remote cursor.
- *  Local-frame; cursor's transform handles world-space placement. */
-const MENU_PLANE_FORWARD_OFFSET = 80;
-const MENU_PLANE_VERTICAL_OFFSET = 40;
-const MENU_PLANE_WIDTH = 60;
-const MENU_PLANE_HEIGHT = 36;
-const MENU_PLANE_BG = '#0f1117';
-const MENU_PLANE_ICON = '#00ffcc';
-
 export function RemotePresenceIndicator({ entity }: RemotePresenceIndicatorProps): JSX.Element {
   const menu = readMenu(entity);
 
   return (
     <>
-      {menu !== null && <MenuPlane menuKind={menu} />}
+      {menu !== null && <MenuPanel />}
       {/* Future slice 3b additions go here — but `near` is rendered on
           the *target* object, not over the cursor, so it lives elsewhere. */}
     </>
@@ -52,71 +41,93 @@ function readMenu(entity: Entity): string | null {
   return null;
 }
 
-interface MenuPlaneProps {
-  menuKind: string;
-}
+// ─── Menu panel ───────────────────────────────────────────────
+// All sizes are in the *pre-scale* frame — the parent cursor
+// group multiplies by REMOTE_AVATAR_SCALE (0.03), so a width
+// of 80 here ends up ~2.4 world units. Tuned so the menu
+// is comfortably readable a few units away from the remote
+// cursor without dwarfing the cursor model itself.
 
-/** A small 2D plane floating in front of the remote cursor that
- *  faces the local viewer's camera (billboard). Stylised — a dark
- *  rectangle with a cyan "II" pause icon — not a literal mirror of
- *  the local pause-menu UI per ADR-006's stylised-not-literal
- *  guidance.
- *
- *  Per-frame work: we re-orient toward the camera each frame
- *  (manual lookAt rather than drei's <Billboard> to avoid the
- *  extra dependency surface and to keep the cursor scale chain
- *  simple — the indicator inherits the cursor group's scale, so
- *  REMOTE_AVATAR_SCALE = 0.03 means our plane geometry must be
- *  authored in the much-larger pre-scale frame). */
-function MenuPlane({ menuKind: _menuKind }: MenuPlaneProps): JSX.Element {
-  const groupRef = useRef<Group>(null);
-  const camera = useThree((s) => s.camera);
+const PANEL_WIDTH = 80;
+const PANEL_HEIGHT = 110;
+const PANEL_FORWARD_OFFSET = 90;
+const PANEL_VERTICAL_OFFSET = 30;
+const PANEL_BG_COLOR = '#0f1117';
+const PANEL_BORDER_COLOR = '#00ffcc';
+const PANEL_OPACITY = 0.92;
 
-  useFrame(() => {
-    const group = groupRef.current;
-    if (!group) {
-      return;
-    }
-    // Billboard: face the local camera. Not the cursor's camera —
-    // we want THIS viewer's camera, which is what useThree exposes.
-    group.quaternion.copy(camera.quaternion);
-  });
+const TEXT_COLOR = '#e0e0e8';
+const TEXT_SIZE = 7.5;
+const TEXT_LINE_SPACING = 11;
+
+/** Items match the local PauseMenu's section list. Kept hand-
+ *  synced rather than imported from `PauseMenu.tsx` because that
+ *  module pulls in DOM-only dependencies (react-router); a quiet
+ *  duplication is cheaper than a circular-dep workaround. Update
+ *  both when the section list changes. */
+const MENU_ITEMS: readonly string[] = [
+  'Home',
+  'About',
+  'Projects',
+  'Writing',
+  'Contact',
+  'Simple Experience',
+];
+
+/**
+ * The menu panel — a stylised 2D plane with the section list
+ * rendered as 3D text. Orientation: rotated 180° around Y so
+ * its front face points back at the remote cursor (i.e. the
+ * "owner" of the menu reads it). Other viewers see it from
+ * whatever angle they're at — walking around the remote cursor
+ * naturally reveals the back/sides of the panel, like watching
+ * someone read a book.
+ */
+function MenuPanel(): JSX.Element {
+  // Total stack height for vertical centring.
+  const stackHeight = (MENU_ITEMS.length - 1) * TEXT_LINE_SPACING;
+  const topY = stackHeight / 2;
 
   return (
-    <group ref={groupRef} position={[0, MENU_PLANE_VERTICAL_OFFSET, MENU_PLANE_FORWARD_OFFSET]}>
-      {/* Dark rectangular background. */}
+    <group
+      position={[0, PANEL_VERTICAL_OFFSET, PANEL_FORWARD_OFFSET]}
+      // 180° around Y: the panel's geometry default-faces local +Z;
+      // we want it facing local -Z so the cursor (at local origin,
+      // looking down +Z toward the panel) sees the FRONT of it.
+      rotation={[0, Math.PI, 0]}
+    >
+      {/* Background. Slight inset border via two stacked planes —
+          cheaper than a textured border and reads cleanly at the
+          panel's size. */}
       <mesh frustumCulled={false}>
-        <planeGeometry args={[MENU_PLANE_WIDTH, MENU_PLANE_HEIGHT]} />
-        <meshBasicMaterial color={MENU_PLANE_BG} transparent opacity={0.85} />
+        <planeGeometry args={[PANEL_WIDTH + 2, PANEL_HEIGHT + 2]} />
+        <meshBasicMaterial
+          color={PANEL_BORDER_COLOR}
+          transparent
+          opacity={PANEL_OPACITY * 0.55}
+        />
       </mesh>
-      {/* Pause icon — two parallel bars rendered as small mesh
-          panels. Simple geometry so we don't need a font/texture
-          for slice 3a; future versions can swap in a textured
-          plane or the actual pause-menu render-target. */}
-      <PauseBars />
+      <mesh frustumCulled={false} position={[0, 0, 0.05]}>
+        <planeGeometry args={[PANEL_WIDTH, PANEL_HEIGHT]} />
+        <meshBasicMaterial color={PANEL_BG_COLOR} transparent opacity={PANEL_OPACITY} />
+      </mesh>
+
+      {/* Section labels — top to bottom, line-spaced. Each item is
+          a separate <Text> — drei caches the font/SDF atlas, so
+          additional labels are cheap. The slight forward offset
+          (+0.1 z) keeps the text from z-fighting the bg plane. */}
+      {MENU_ITEMS.map((label, i) => (
+        <Text
+          key={label}
+          position={[0, topY - i * TEXT_LINE_SPACING, 0.1]}
+          fontSize={TEXT_SIZE}
+          color={TEXT_COLOR}
+          anchorX="center"
+          anchorY="middle"
+        >
+          {label}
+        </Text>
+      ))}
     </group>
-  );
-}
-
-const PAUSE_BAR_WIDTH = 6;
-const PAUSE_BAR_HEIGHT = 18;
-const PAUSE_BAR_SPACING = 12;
-
-function PauseBars(): JSX.Element {
-  return (
-    <group position={[0, 0, 0.1]}>
-      <PauseBar x={-PAUSE_BAR_SPACING / 2} />
-      <PauseBar x={+PAUSE_BAR_SPACING / 2} />
-    </group>
-  );
-}
-
-function PauseBar({ x }: { x: number }): JSX.Element {
-  const ref = useRef<Mesh>(null);
-  return (
-    <mesh ref={ref} position={[x, 0, 0]} frustumCulled={false}>
-      <planeGeometry args={[PAUSE_BAR_WIDTH, PAUSE_BAR_HEIGHT]} />
-      <meshBasicMaterial color={MENU_PLANE_ICON} />
-    </mesh>
   );
 }
