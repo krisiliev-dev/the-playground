@@ -25,11 +25,63 @@
  * isn't necessarily screen-centre. Driving NDC=(0,0) directly each
  * frame is independent of the pointer-lock state.
  */
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, type MutableRefObject } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
-import { Mesh, Raycaster, Vector2, Vector3 } from 'three';
+import { Mesh, type Object3D, Raycaster, Vector2, Vector3 } from 'three';
 import { useWorldStore } from '@/store';
 import { sfx } from '../audio/SfxManager';
+import { cursorWorldPosition } from './cursorWorldPosition';
+
+/**
+ * Shape of the interactable metadata stored on a mesh's
+ * `Three.Mesh.userData`. The userData prop is `Record<string,
+ * unknown>` upstream — using a branded interface + accessors gives
+ * us spell-check on field names and a single place to evolve the
+ * schema.
+ */
+export interface InteractableUserData {
+  readonly interactable: true;
+  readonly interactableId: string;
+  readonly interactableRange: number;
+}
+
+/** Tag a mesh's userData with the interactable fields the central
+ *  raycaster looks for. Mutates `mesh.userData` in place. */
+export function setInteractableUserData(mesh: Mesh, data: InteractableUserData): void {
+  mesh.userData.interactable = data.interactable;
+  mesh.userData.interactableId = data.interactableId;
+  mesh.userData.interactableRange = data.interactableRange;
+}
+
+/** Remove the interactable userData fields, e.g. on hook unmount.
+ *  Other userData entries are untouched. */
+export function clearInteractableUserData(mesh: Mesh): void {
+  delete mesh.userData.interactable;
+  delete mesh.userData.interactableId;
+  delete mesh.userData.interactableRange;
+}
+
+/** Read the typed interactable userData from any Object3D, or
+ *  return null if the object isn't tagged or is partially tagged
+ *  (e.g. the mesh outlived the hook's cleanup). The defensive
+ *  `typeof` checks act as the runtime type guard. */
+export function getInteractableUserData(obj: Object3D): InteractableUserData | null {
+  const ud = obj.userData;
+  if (ud.interactable !== true) {
+    return null;
+  }
+  if (typeof ud.interactableId !== 'string') {
+    return null;
+  }
+  if (typeof ud.interactableRange !== 'number') {
+    return null;
+  }
+  return {
+    interactable: true,
+    interactableId: ud.interactableId,
+    interactableRange: ud.interactableRange,
+  };
+}
 
 /** Maximum distance (world units) at which an object is considered
  *  interactable. The cube is 800 units across; 60 units puts the
@@ -102,18 +154,36 @@ export const interactableHandlers = new Map<string, () => void>();
 let touchInProgress = false;
 let suppressUntil = 0;
 
+/** How long after a touchend to keep ignoring synthetic mouse
+ *  events. iOS's compatibility burst (mousedown/mouseup/click)
+ *  fires within a few ms, but the spec doesn't pin a maximum, so
+ *  we buffer 400ms to be safe across older devices and slow
+ *  frame budgets. */
+const SYNTHETIC_EVENT_BUFFER_MS = 400;
+
 export function setTouchInProgress(active: boolean): void {
   touchInProgress = active;
   if (!active) {
-    // Touch just ended — buffer the post-touchend synthetic event
-    // burst (typically a few ms, but give it 400 to be safe).
-    suppressUntil = performance.now() + 400;
+    suppressUntil = performance.now() + SYNTHETIC_EVENT_BUFFER_MS;
   }
 }
 
 export function isInteractionSynthSuppressed(): boolean {
   return touchInProgress || performance.now() < suppressUntil;
 }
+
+/** Scale factor applied to the interactable's visual on hover.
+ *  Tuned to be noticeable but not jarring — 6% growth reads as "I
+ *  see you aiming at me" without disrupting layout. */
+const INTERACTABLE_HOVER_SCALE = 1.06;
+/** Scale factor applied while the user is mouse-down'd on the
+ *  interactable. Slightly under 1.0 makes the object feel like
+ *  it's being "pressed" — same affordance as a button click. */
+const INTERACTABLE_PRESS_SCALE = 0.94;
+/** Lerp rate for the hover/press scale animation. High enough to
+ *  feel responsive (full transition in ~100ms) without being
+ *  instant (which would defeat the purpose of an animation). */
+const INTERACTABLE_SCALE_LERP_RATE = 18;
 
 interface UseInteractableOpts {
   /** Stable identifier — used as the key both in the registry and in
@@ -125,23 +195,70 @@ interface UseInteractableOpts {
    *  large objects you want to allow interaction with from further
    *  away than usual. */
   range?: number;
+  /** Optional external mesh ref. The hook tags THIS mesh's userData
+   *  for the central raycaster. If omitted, the hook creates its
+   *  own ref (returned in the result) — pass that ref to your
+   *  primary mesh.
+   *
+   *  Use the external form when the same mesh ref is also consumed
+   *  elsewhere (e.g. the portal cascade's stencil pass uses the
+   *  surface plane mesh ref it allocated), so you don't end up with
+   *  two refs on the same mesh. */
+  ref?: MutableRefObject<Mesh | null>;
+  /** Optional ref to apply visual feedback (scale animation) to. If
+   *  omitted, defaults to the interactable mesh (`ref`). Pass a
+   *  separate ref when the visual affordance is on a different
+   *  object than the click target — e.g. a portal whose surface
+   *  plane is invisible (clicked via stencil) but whose VISIBLE
+   *  rim should be the thing that pops on hover. */
+  visualRef?: MutableRefObject<Object3D | null>;
 }
 
 interface UseInteractableResult {
-  ref: React.RefObject<Mesh>;
-  /** True when the crosshair is currently aimed at this object. Drive
-   *  any highlight visual (emissive, scale, outline) from this. */
+  /** The ref to attach to your interactable mesh. Same as the one
+   *  passed in via `opts.ref`, or a freshly-created one if omitted. */
+  ref: MutableRefObject<Mesh | null>;
+  /** True when the crosshair is currently aimed at this object.
+   *  Already wired to drive automatic scale feedback on `visualRef`,
+   *  but exposed for callers that want additional custom visuals
+   *  (emissive boost, outline, color shift). */
   isHovered: boolean;
   /** True when the user has mouse-down'd on this object and hasn't
    *  released yet. Decoupled from `isHovered` so a press that started
-   *  here remains "pressed" even if the cursor wanders off (useful for
-   *  future drag-with-cursor interactions). */
+   *  here remains "pressed" even if the cursor wanders off. */
   isPressed: boolean;
 }
 
+/**
+ * Crosshair-driven interaction hook.
+ *
+ * Wiring an interactable now requires only this single hook call —
+ * no manual userData tagging, no separate visual-affordance rig.
+ * The hook handles, in this order:
+ *
+ *   1. Registers the click handler so `InteractionController`
+ *      can fire it on mouseup.
+ *   2. Tags `userData.interactable` + id + range on the mesh, which
+ *      is what the per-frame crosshair raycast looks for.
+ *   3. Animates the visual mesh's scale on hover and press, so
+ *      every interactable has a consistent "I'm clickable" affordance
+ *      without each consumer reimplementing it.
+ *
+ * Intent: a caller who just wants "this mesh is clickable from
+ * `range` units away, fire `onInteract` on click" needs zero other
+ * code. Hovers, scale animations, presses, ranges all flow from
+ * the single hook configuration.
+ */
 export function useInteractable(opts: UseInteractableOpts): UseInteractableResult {
-  const { id, onInteract, range = INTERACT_RANGE } = opts;
-  const ref = useRef<Mesh>(null);
+  const {
+    id,
+    onInteract,
+    range = INTERACT_RANGE,
+    ref: externalRef,
+    visualRef: externalVisualRef,
+  } = opts;
+  const internalRef = useRef<Mesh>(null);
+  const ref = externalRef ?? internalRef;
   const isHovered = useWorldStore((s) => s.hoveredInteractableId === id);
   const isPressed = useWorldStore((s) => s.pressedInteractableId === id);
 
@@ -155,25 +272,44 @@ export function useInteractable(opts: UseInteractableOpts): UseInteractableResul
     };
   }, [id, onInteract]);
 
-  // Tag the mesh's userData so the central raycaster knows which hits
-  // count + can read back the id. Re-applies whenever the ref settles
-  // on a new mesh (rare, but cheap).
+  // Tag the mesh's userData so the central raycaster knows which
+  // hits count + can read back the id. Set/clear via the typed
+  // accessors so all writes go through one schema-aware site.
   useEffect(() => {
     const mesh = ref.current;
     if (!mesh) {
       return;
     }
-    mesh.userData.interactable = true;
-    mesh.userData.interactableId = id;
-    mesh.userData.interactableRange = range;
+    setInteractableUserData(mesh, {
+      interactable: true,
+      interactableId: id,
+      interactableRange: range,
+    });
     return () => {
-      // Clear so the raycaster doesn't hold a stale reference if the
-      // mesh outlives the hook.
-      delete mesh.userData.interactable;
-      delete mesh.userData.interactableId;
-      delete mesh.userData.interactableRange;
+      clearInteractableUserData(mesh);
     };
-  }, [id, range]);
+  }, [id, range, ref]);
+
+  // Animate visual scale on hover/press. Scales lerp toward the
+  // target each frame, so changes read as smooth animation rather
+  // than instant snaps. Default visual target is the interactable
+  // mesh itself; consumers with separate visual + click meshes
+  // (e.g. portals) pass an explicit `visualRef`.
+  useFrame((_state, delta) => {
+    const target = (externalVisualRef ?? ref).current;
+    if (!target) {
+      return;
+    }
+    const targetScale = isPressed
+      ? INTERACTABLE_PRESS_SCALE
+      : isHovered
+        ? INTERACTABLE_HOVER_SCALE
+        : 1.0;
+    const k = 1 - Math.exp(-INTERACTABLE_SCALE_LERP_RATE * delta);
+    const cur = target.scale.x;
+    const next = cur + (targetScale - cur) * k;
+    target.scale.setScalar(next);
+  });
 
   return { ref, isHovered, isPressed };
 }
@@ -214,22 +350,31 @@ export function InteractionController(): null {
       }
       return;
     }
+    // Direction from camera through screen-centre, then move the
+    // origin to the cursor's current world position. The result: a
+    // ray that starts AT the cursor and travels in the camera's
+    // view direction. Anything between the camera and the cursor
+    // (closer to camera than the cursor itself) doesn't intercept
+    // this ray, so a portal positioned behind the cursor in view
+    // direction can't be accidentally clicked. Pre-reveal /
+    // pointer-mode the function early-returns above, so the
+    // singleton's default (origin) value never reaches this code.
     raycaster.setFromCamera(screenCentre, camera);
+    raycaster.ray.origin.copy(cursorWorldPosition);
     const hits = raycaster.intersectObjects(scene.children, true);
     let hoveredId: string | null = null;
     let hitPoint: Vector3 | null = null;
     for (const hit of hits) {
-      const data = hit.object.userData;
-      if (!data.interactable) {
+      const data = getInteractableUserData(hit.object);
+      if (!data) {
         continue;
       }
-      const range = (data.interactableRange as number | undefined) ?? INTERACT_RANGE;
-      if (hit.distance > range) {
+      if (hit.distance > data.interactableRange) {
         // Out of range — stop walking, nothing closer is interactable.
         // (Hits are sorted by distance.)
         break;
       }
-      hoveredId = (data.interactableId as string | undefined) ?? null;
+      hoveredId = data.interactableId;
       hitPoint = hit.point;
       break;
     }
@@ -326,19 +471,25 @@ export function InteractionController(): null {
         return;
       }
       const pressedId = state.pressedInteractableId;
-      // Commit: only if the press still targets the currently-hovered
-      // interactable (i.e. mouse-down and mouse-up landed on the same
-      // object). A press that wandered off doesn't fire — same
-      // semantics as a native click. Audio + handler fire on commit
-      // (mouseup), regardless of any visual hold delay below.
-      if (pressedId && pressedId === state.hoveredInteractableId) {
+      // Commit: fire the handler for whichever interactable the
+      // press TARGETED (mousedown), regardless of where the cursor
+      // ended up at release. The press already established intent;
+      // dragging out of range / panning the camera away mid-hold
+      // shouldn't cancel a deliberate click. This matches the way
+      // every native button handles "press, drag away, release" —
+      // commit the press's original target.
+      //
+      // The earlier rule (`pressedId === hoveredId`) was native-
+      // click semantics, but it didn't fit this 3D crosshair UI
+      // where the camera moves while you hold and intent should
+      // be honored once mousedown captures a target.
+      if (pressedId) {
         const handler = interactableHandlers.get(pressedId);
         handler?.();
         sfx.unlock();
         void sfx.play('interactClick');
         void sfx.play('interactImpact');
-      }
-      if (!pressedId) {
+      } else {
         return;
       }
       // Enforce minimum visible press duration. See `planRelease` —

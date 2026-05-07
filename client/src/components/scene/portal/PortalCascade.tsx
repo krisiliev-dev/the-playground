@@ -67,7 +67,7 @@ import {
 import { MAX_PORTAL_RECURSION, getPaired, type PortalEndpoint } from '@/content/portals';
 import { MAIN_CUBE_BOB } from '@/content/routes';
 import { useWorldStore } from '@/store';
-import { interactableHandlers } from '../Interactable';
+import { useInteractable } from '../Interactable';
 import { floatOffset } from '../floatBob';
 import {
   CASCADE_OVERLAY_LAYER,
@@ -123,26 +123,20 @@ export function PortalCascade(): JSX.Element {
       // colorWrite + depthWrite stay false so the surface plane
       // never produces visible pixels or interferes with depth.
       //
-      // `depthTest: false` is load-bearing for deep cascade levels.
-      // The stencil mark is supposed to be a *screen-region selector*
-      // — "where does this portal project on the framebuffer?" — not
-      // a depth-occlusion query. With depthTest=true, scene geometry
-      // closer to the cascade's parentCam (e.g. the *other* portal's
-      // rim particles, which become foreground objects relative to
-      // the surface plane at deep recursion levels) blocks surface_A
-      // by depth-LESS and the stencil never gets marked. The
-      // through-view then renders nothing where the rim was, which
-      // visually looks like "interior of the nested portal goes
-      // black." The mark pass writes no color or depth either way
-      // (`colorWrite: false`, `depthWrite: false`), so disabling
-      // depth-test here is safe — depth-occlusion semantics for the
-      // through-view itself belong to Phase D's scene render, which
-      // continues to depth-test scene geometry normally.
+      // depthTest is set per-phase: Phase A (stencil mark) wants
+      // depth-test ON so foreground geometry (swords, debris) can
+      // correctly occlude the mark and prevent the through-view from
+      // overwriting their pixels. Phase F (stencil decrement) wants
+      // depth-test OFF — by then the depth buffer holds vCam-space
+      // values that are meaningless to compare against parentCam-space
+      // surface-plane depth. The initial value here is what Phase A
+      // assumes when first reading the material; Phases A and F both
+      // set it explicitly each frame.
       const surfaceMaterial = new MeshBasicMaterial({
         side: DoubleSide,
         colorWrite: false,
         depthWrite: false,
-        depthTest: false,
+        depthTest: true,
         stencilWrite: true,
         stencilFunc: EqualStencilFunc,
         stencilRef: 0,
@@ -204,13 +198,12 @@ export function PortalCascade(): JSX.Element {
     const bobY = floatOffset(time, MAIN_CUBE_BOB);
 
     // Per-route visibility filter: only portals tagged with the
-    // avatar's current route render. Without this, a player inside
-    // a section room would still see the formation portals'
-    // cutouts ghost through the room walls — the surface planes
-    // have `depthTest: false` for deep-cascade reasons, so their
-    // stencil marks aren't naturally occluded. We hide the entire
-    // group (surface plane + rim) for off-route portals so neither
-    // Phase 1 (main render) nor any cascade phase touches them.
+    // avatar's current route render. Hides off-route portals so
+    // neither Phase 1 (main render) nor any cascade phase touches
+    // them. Saves the per-portal cascade work (Phase A→F per portal,
+    // recursing up to MAX_PORTAL_RECURSION) for portals the player
+    // can't see anyway, and keeps cross-route stencil bookkeeping
+    // out of the picture entirely.
     const currentRoute = useWorldStore.getState().currentRoute;
     for (const ps of portalStates) {
       const group = ps.groupRef.current;
@@ -431,6 +424,17 @@ function drawPortalRecursive(
   ps.surfaceMaterial.stencilFunc = EqualStencilFunc;
   ps.surfaceMaterial.stencilRef = stencilRef;
   ps.surfaceMaterial.stencilZPass = IncrementStencilOp;
+  // Depth-test ON. Foreground geometry between parentCam and the
+  // portal (swords sticking out of the wall, debris in flight)
+  // correctly occludes the stencil mark, so Phase D's through-view
+  // doesn't overwrite those pixels. The mark pass writes no color
+  // and no depth (`colorWrite: false`, `depthWrite: false`); the
+  // depth buffer it consults was just written by Phase 1 (depth 0)
+  // or Phase D pass 1 of the parent level (depth ≥ 1), and in both
+  // cases its values are meaningful for "what's in front of this
+  // portal from this camera's POV?" — exactly the question we
+  // want answered.
+  ps.surfaceMaterial.depthTest = true;
   ps.surfaceMaterial.needsUpdate = true;
 
   for (const other of allPortals) {
@@ -582,6 +586,16 @@ function drawPortalRecursive(
   ps.surfaceMaterial.stencilFunc = EqualStencilFunc;
   ps.surfaceMaterial.stencilRef = stencilRef + 1;
   ps.surfaceMaterial.stencilZPass = DecrementStencilOp;
+  // depthTest OFF for this pass. Phase F is pure stencil bookkeeping
+  // — its job is to undo the mark Phase A wrote. The stencil-equal
+  // check on (stencilRef+1) already gates the decrement to exactly
+  // the pixels Phase A marked, so depth-test isn't needed for
+  // correctness. Worse: the depth buffer here holds Phase D's
+  // through-view depth (vCam-space), not parentCam-space, so a
+  // depth-test against the surface plane's parentCam-space depth
+  // could fail unpredictably and leave stencil residue across
+  // frames.
+  ps.surfaceMaterial.depthTest = false;
   ps.surfaceMaterial.needsUpdate = true;
 
   for (const other of allPortals) {
@@ -885,59 +899,37 @@ const PORTAL_APPROACH_RANGE = 140;
 const PORTAL_INTERACT_RANGE = PORTAL_APPROACH_RANGE;
 
 function PortalMesh({ endpoint, material, meshRef, groupRef }: PortalMeshProps): JSX.Element {
-  // Register a click handler with the central InteractionController.
-  // The controller raycasts from screen-centre each frame (independent
-  // of pointer-lock state), updates `hoveredInteractableId` based on
-  // the nearest mesh tagged via `userData.interactable`, and fires
-  // the registered handler on **mouseup** when press- and release-
-  // targets match.
+  // Wire interaction via the unified hook: registers the click
+  // handler with `InteractionController`, tags the surface plane's
+  // userData so the per-frame raycast picks it up, and animates a
+  // hover/press scale on the parent group (which contains both the
+  // surface plane AND the rim — so the rim "pops" when crosshaired).
   //
-  // The handler doesn't compute the leap target — it just queues a
-  // click on this portal id. CursorAvatar consumes the request next
-  // frame, runs `planPortalLeap` with bob-compensated source +
-  // current avatar position, and either kicks off a leap (valid) or
-  // discards (e.g. avatar standing behind a single-sided portal).
-  // Splitting it this way keeps active-side validation in the one
-  // place that has live avatar position; the click site stays a
-  // pure "register intent" callback.
-  useEffect(() => {
-    const handler = (): void => {
-      useWorldStore.getState().setPendingPortalClick(endpoint.id);
-    };
-    interactableHandlers.set(endpoint.id, handler);
-    return () => {
-      interactableHandlers.delete(endpoint.id);
-    };
-  }, [endpoint.id]);
+  // The handler queues a portal click; CursorAvatar consumes the
+  // request next frame, runs `planPortalLeap` with the live avatar
+  // position + bob compensation, and either kicks off a leap or
+  // discards the click (e.g. avatar behind a single-sided portal).
+  // Keeping active-side validation in the consume site means the
+  // click handler stays a pure "register intent" callback.
+  useInteractable({
+    id: endpoint.id,
+    range: PORTAL_INTERACT_RANGE,
+    ref: meshRef,
+    visualRef: groupRef,
+    onInteract: () => useWorldStore.getState().setPendingPortalClick(endpoint.id),
+  });
 
+  // The surface plane needs to be on PORTAL_SURFACE_LAYER (the
+  // cascade targets that layer specifically for stencil-mark
+  // passes); the userData / interactable wiring is fully handled
+  // by `useInteractable` above.
   useEffect(() => {
     const mesh = meshRef.current;
-    if (!mesh) {
+    if (!mesh || !mesh.layers || typeof mesh.layers.set !== 'function') {
       return;
     }
-    if (mesh.layers && typeof mesh.layers.set === 'function') {
-      mesh.layers.set(PORTAL_SURFACE_LAYER);
-    }
-    // Tag the surface plane for the InteractionController's raycast.
-    // The controller reads `userData.interactable / interactableId /
-    // interactableRange` to decide what's hoverable. Even though the
-    // material has `colorWrite: false`, R3F/Three's raycaster uses
-    // geometry, so the invisible plane is still a valid hit target.
-    // The userData guard mirrors the test-env layer guard above —
-    // jsdom mocks don't construct a real Three.js Mesh.
-    if (mesh.userData) {
-      mesh.userData.interactable = true;
-      mesh.userData.interactableId = endpoint.id;
-      mesh.userData.interactableRange = PORTAL_INTERACT_RANGE;
-    }
-    return () => {
-      if (mesh.userData) {
-        delete mesh.userData.interactable;
-        delete mesh.userData.interactableId;
-        delete mesh.userData.interactableRange;
-      }
-    };
-  }, [meshRef, endpoint.id]);
+    mesh.layers.set(PORTAL_SURFACE_LAYER);
+  }, [meshRef]);
 
   return (
     <group

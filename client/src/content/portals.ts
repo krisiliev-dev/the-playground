@@ -149,6 +149,45 @@ export const FORMATION_QUADRANT_OFFSET = 6;
  *  cube/room wall it sits flush against. */
 const WALL_INSET = 0.5;
 
+/** Threshold for treating a wall-normal vector as "essentially
+ *  vertical" — clicked floor / ceiling. When `abs(normal · worldUp)`
+ *  exceeds this, the standard `worldUp × normal` cross product
+ *  collapses (cross of near-parallel vectors is near-zero), so
+ *  `wallBasis` falls back to world +X for the wall's "right" axis.
+ *  0.99 ≈ 8° tilt — generous enough to reliably trigger on horizontal
+ *  surfaces without flickering on side-wall clicks. */
+export const NEARLY_VERTICAL_DOT = 0.99;
+
+/** Build orthonormal `right` and `up` axes for a wall identified by
+ *  `normal`, mutating the caller's output vectors in place (zero
+ *  allocation). The shared formula:
+ *    - normal-axis is the input (passed by the caller as a tuple).
+ *    - right = (worldUp × normal) normalized, with a fallback to
+ *      world +X when the wall is nearly horizontal (normal ≈ ±worldUp,
+ *      where the cross collapses).
+ *    - up = (normal × right) normalized.
+ *
+ *  Used by the formation portal factory, the room-exit factory, and
+ *  the avatar's clamp-hole helper — three places that previously
+ *  duplicated the same math. Centralising the threshold + fallback
+ *  here means a future change to one (e.g. tightening the vertical
+ *  threshold) flows to all consumers. */
+const WALL_BASIS_TMP_NORMAL = new Vector3();
+const WALL_BASIS_WORLD_UP = new Vector3(0, 1, 0);
+export function wallBasis(
+  normal: readonly [number, number, number],
+  rightOut: Vector3,
+  upOut: Vector3,
+): void {
+  const n = WALL_BASIS_TMP_NORMAL.set(normal[0], normal[1], normal[2]).normalize();
+  if (Math.abs(n.dot(WALL_BASIS_WORLD_UP)) > NEARLY_VERTICAL_DOT) {
+    rightOut.set(1, 0, 0);
+  } else {
+    rightOut.crossVectors(WALL_BASIS_WORLD_UP, n).normalize();
+  }
+  upOut.crossVectors(n, rightOut).normalize();
+}
+
 /** Section-portal palette. Mirrors the rim colors used on the
  *  matching `<RoomBox>` so each portal reads as "the door to that
  *  colored room." */
@@ -161,23 +200,18 @@ const PORTAL_COLORS = {
 
 /**
  * Build a quaternion that orients a portal so its local +Z aligns
- * with `normal` (the active-side direction). Width/height (local
- * +X / +Y) are anchored to the wall plane via a `worldUp`-based
- * basis. If the wall normal is nearly parallel to world up (player
- * clicked the floor or ceiling), falls back to world +X for "right"
- * — otherwise the cross product collapses and the basis is
- * undefined.
+ * with `normal` (the active-side direction). Right + up axes come
+ * from `wallBasis`, normal stays as supplied; the resulting
+ * (right, up, normal) basis is converted to a rotation matrix and
+ * then to a quaternion.
  */
 function quatFromWallNormal(
   normal: [number, number, number],
 ): readonly [number, number, number, number] {
+  const right = new Vector3();
+  const up = new Vector3();
+  wallBasis(normal, right, up);
   const n = new Vector3(...normal).normalize();
-  const worldUp = new Vector3(0, 1, 0);
-  const right =
-    Math.abs(n.dot(worldUp)) > 0.99
-      ? new Vector3(1, 0, 0)
-      : new Vector3().crossVectors(worldUp, n).normalize();
-  const up = new Vector3().crossVectors(n, right).normalize();
   const m = new Matrix4().makeBasis(right, up, n);
   const q = new Quaternion().setFromRotationMatrix(m);
   return [q.x, q.y, q.z, q.w];
@@ -285,16 +319,13 @@ export function buildPortalEndpoints(clickHit: ClickHit, scale = 1): ReadonlyArr
   const portalSize = DEFAULT_PORTAL_SIZE * scale;
   const quadrantOffset = FORMATION_QUADRANT_OFFSET * scale;
 
-  // Wall basis at the click point. The portal-quaternion utility
-  // gives the active-side normal alignment; we re-derive `right`
-  // and `up` here so we can lay out the 2x2 quadrant offsets.
+  // Wall basis at the click point: right + up axes anchored to the
+  // wall plane, used to lay out the 2×2 quadrant portal offsets.
+  // `wallBasis` mutates the passed-in vectors in place.
+  const right = new Vector3();
+  const up = new Vector3();
+  wallBasis(clickHit.normal, right, up);
   const normal = new Vector3(...clickHit.normal).normalize();
-  const worldUp = new Vector3(0, 1, 0);
-  const right =
-    Math.abs(normal.dot(worldUp)) > 0.99
-      ? new Vector3(1, 0, 0)
-      : new Vector3().crossVectors(worldUp, normal).normalize();
-  const up = new Vector3().crossVectors(normal, right).normalize();
 
   const formationCenter = new Vector3(...clickHit.point).addScaledVector(normal, WALL_INSET);
   const formationQuat = quatFromWallNormal(clickHit.normal);

@@ -42,7 +42,8 @@ import {
 import { useWorldStore } from '@/store';
 import { useIsTouchPrimary } from '@/utils';
 import { sfx } from '../audio/SfxManager';
-import { interactableHandlers, setTouchInProgress } from './Interactable';
+import { getInteractableUserData, interactableHandlers, setTouchInProgress } from './Interactable';
+import { cursorWorldPosition } from './cursorWorldPosition';
 import { SWING_PRE } from './reveal/constants';
 import {
   clampToBoxInterior,
@@ -66,6 +67,7 @@ import {
   DEFAULT_PORTAL_SIZE,
   FORMATION_QUADRANT_OFFSET,
   type PortalEndpoint,
+  wallBasis,
 } from '@/content/portals';
 import type { ClickHit } from '@/store';
 import {
@@ -79,6 +81,7 @@ import { getScene } from '@/scenes/sceneRegistry';
 const MODEL_URL = '/models/3d_icon_cursor.glb';
 
 import { CASCADE_OVERLAY_LAYER, CURSOR_LAYER } from './sceneLayers';
+import { RENDER_ORDER_CURSOR_BODY, RENDER_ORDER_CURSOR_OUTLINE } from './renderOrder';
 
 // ─── Pointer-mode constants ───────────────────────────────────────────
 /** Distance in front of the camera at which the pointer-mode cursor sits.
@@ -187,6 +190,44 @@ const OUTLINE_SHIFT_Y_FRACTION = 0.012;
  *  from mainCam.layers). */
 const INSCENE_CURSOR_SCALE = 5;
 
+/**
+ * Factory: cursor body material (MeshStandardMaterial) used for both
+ * the main-view always-on-top cursor and the in-scene depth-tested
+ * copy. The two only differ in `depthTest`; everything else (color,
+ * emissive, metalness, roughness, depthWrite, transparency) is
+ * shared. Extracting the factory removes ~12 lines of duplication
+ * and means a future change to e.g. emissiveIntensity flows to both
+ * cursors at once.
+ */
+function createCursorBodyMaterial(opts: { depthTest: boolean }): MeshStandardMaterial {
+  return new MeshStandardMaterial({
+    color: new Color(BODY_COLOR_HEX),
+    emissive: new Color(EMISSIVE_HEX),
+    emissiveIntensity: EMISSIVE_INTENSITY,
+    metalness: 0.4,
+    roughness: 0.35,
+    depthTest: opts.depthTest,
+    // depthWrite must be off too: the cursor renders inside the
+    // portal cascade's through-view passes; any depth value it
+    // leaves in the framebuffer would block the next recursion
+    // level's surface-plane stencil mark via depth-LESS rejection.
+    depthWrite: false,
+    transparent: true,
+  });
+}
+
+/** Factory: cursor outline shell material (MeshBasicMaterial,
+ *  BackSide). Same depthTest split as the body factory. */
+function createCursorOutlineMaterial(opts: { depthTest: boolean }): MeshBasicMaterial {
+  return new MeshBasicMaterial({
+    color: new Color(OUTLINE_COLOR_HEX),
+    side: BackSide,
+    depthTest: opts.depthTest,
+    depthWrite: false,
+    transparent: true,
+  });
+}
+
 useGLTF.preload(MODEL_URL);
 
 const FORMATION_ROUTE = '/';
@@ -231,18 +272,13 @@ function portalHoleForRoute(
     if (!clickHit) {
       return undefined;
     }
-    // Wall basis at the click point, mirroring the factory in
-    // `content/portals.ts`. The clamp helper tests `|abs(localX) -
-    // quadrantOffset| < radius` for both axes, so radius =
-    // half-portal and quadrantOffset = formation-quadrant-offset.
-    const normal = normalOut.set(...clickHit.normal).normalize();
-    const worldUp = TMP_WORLD_UP;
-    if (Math.abs(normal.dot(worldUp)) > 0.99) {
-      rightOut.set(1, 0, 0);
-    } else {
-      rightOut.crossVectors(worldUp, normal).normalize();
-    }
-    upOut.crossVectors(normal, rightOut).normalize();
+    // The clamp helper tests `|abs(localX) - quadrantOffset| < radius`
+    // for both axes, so radius = half-portal and quadrantOffset =
+    // formation-quadrant-offset. Right/up basis comes from the
+    // shared `wallBasis` helper to stay consistent with the portal
+    // factory's layout math.
+    wallBasis(clickHit.normal, rightOut, upOut);
+    normalOut.set(...clickHit.normal).normalize();
     centerOut.set(...clickHit.point);
     centerOut.y += bobY;
     return {
@@ -283,7 +319,6 @@ function portalHoleForRoute(
   };
 }
 
-const TMP_WORLD_UP = new Vector3(0, 1, 0);
 const TMP_LOCAL_Z = new Vector3();
 
 /**
@@ -455,32 +490,13 @@ function ActiveCursor(): JSX.Element {
     const outlineMeshes: Mesh[] = [];
 
     targetMeshes.forEach((mesh) => {
-      mesh.material = new MeshStandardMaterial({
-        color: new Color(BODY_COLOR_HEX),
-        emissive: new Color(EMISSIVE_HEX),
-        emissiveIntensity: EMISSIVE_INTENSITY,
-        metalness: 0.4,
-        roughness: 0.35,
-        // Always draw above haze (and any other 3D geometry) — the
-        // cursor is a foreground UI affordance, not part of the scene.
-        depthTest: false,
-        // depthWrite must be off too: the cursor renders inside the
-        // portal cascade's through-view passes (CURSOR_LAYER is in
-        // each vCam's layer mask), and any depth value it leaves in
-        // the framebuffer will block the *next* recursion level's
-        // surface-plane stencil mark via depth-LESS rejection. With
-        // depthWrite=true, deep-cascade pixels covered by the cursor
-        // turn black — Phase A of level N+1 fails wherever cursor
-        // depth from level N's Phase D was closer than surface_A's
-        // projected depth.
-        depthWrite: false,
-        transparent: true,
-      });
+      // Main-view cursor body: always-on-top via depthTest=false.
+      mesh.material = createCursorBodyMaterial({ depthTest: false });
       // Cursor body must draw AFTER the (BackSide) outline shell so
       // the body covers the outline's interior and only the
-      // silhouette halo remains. Both stay above haze (which is at
-      // renderOrder 100).
-      mesh.renderOrder = 102;
+      // silhouette halo remains. Both stay above haze — see
+      // `renderOrder.ts` for the band layout.
+      mesh.renderOrder = RENDER_ORDER_CURSOR_BODY;
       // Cursor mesh on its own layer (enabled by SceneHost on the
       // main camera). The layer + `depthTest: false` is what keeps
       // it visually on top in the player's view.
@@ -495,18 +511,7 @@ function ActiveCursor(): JSX.Element {
       outlineGeom.boundingBox?.getCenter(outlineCenter);
       outlineGeom.boundingBox?.getSize(outlineSize);
       outlineGeom.center();
-      const outlineMesh = new Mesh(
-        outlineGeom,
-        new MeshBasicMaterial({
-          color: new Color(OUTLINE_COLOR_HEX),
-          side: BackSide,
-          depthTest: false,
-          // Same rationale as the cursor body: don't pollute the depth
-          // buffer inside the portal cascade's through-view passes.
-          depthWrite: false,
-          transparent: true,
-        }),
-      );
+      const outlineMesh = new Mesh(outlineGeom, createCursorOutlineMaterial({ depthTest: false }));
       outlineMesh.position
         .copy(outlineCenter)
         .add(
@@ -517,7 +522,7 @@ function ActiveCursor(): JSX.Element {
           ),
         );
       outlineMesh.scale.setScalar(OUTLINE_SCALE);
-      outlineMesh.renderOrder = 101;
+      outlineMesh.renderOrder = RENDER_ORDER_CURSOR_OUTLINE;
       outlineMesh.layers.disable(0);
       outlineMesh.layers.enable(CURSOR_LAYER);
       mesh.add(outlineMesh);
@@ -548,21 +553,10 @@ function ActiveCursor(): JSX.Element {
       // recognisable through the portal without affecting main view
       // (CASCADE_OVERLAY_LAYER is excluded from mainCam.layers). The
       // outline shell uses the same multiplier so it stays in proportion.
-      const inSceneBody = new Mesh(
-        mesh.geometry,
-        new MeshStandardMaterial({
-          color: new Color(BODY_COLOR_HEX),
-          emissive: new Color(EMISSIVE_HEX),
-          emissiveIntensity: EMISSIVE_INTENSITY,
-          metalness: 0.4,
-          roughness: 0.35,
-          depthTest: true,
-          depthWrite: false,
-          transparent: true,
-        }),
-      );
+      // In-scene depth-tested copy for the cascade overlay layer.
+      const inSceneBody = new Mesh(mesh.geometry, createCursorBodyMaterial({ depthTest: true }));
       inSceneBody.scale.setScalar(INSCENE_CURSOR_SCALE);
-      inSceneBody.renderOrder = 102;
+      inSceneBody.renderOrder = RENDER_ORDER_CURSOR_BODY;
       inSceneBody.layers.disable(0);
       inSceneBody.layers.enable(CASCADE_OVERLAY_LAYER);
       // Frustum-culling defaults to the geometry's bounding sphere
@@ -576,17 +570,11 @@ function ActiveCursor(): JSX.Element {
       inSceneBody.frustumCulled = false;
       const inSceneOutline = new Mesh(
         outlineGeom,
-        new MeshBasicMaterial({
-          color: new Color(OUTLINE_COLOR_HEX),
-          side: BackSide,
-          depthTest: true,
-          depthWrite: false,
-          transparent: true,
-        }),
+        createCursorOutlineMaterial({ depthTest: true }),
       );
       inSceneOutline.position.copy(outlineMesh.position);
       inSceneOutline.scale.copy(outlineMesh.scale);
-      inSceneOutline.renderOrder = 101;
+      inSceneOutline.renderOrder = RENDER_ORDER_CURSOR_OUTLINE;
       inSceneOutline.layers.disable(0);
       inSceneOutline.layers.enable(CASCADE_OVERLAY_LAYER);
       inSceneOutline.frustumCulled = false;
@@ -763,19 +751,14 @@ function ActiveCursor(): JSX.Element {
       touchRaycaster.setFromCamera(touchNDC, camera);
       const hits = touchRaycaster.intersectObjects(scene.children, true);
       for (const hit of hits) {
-        const data = hit.object.userData;
-        if (!data.interactable) {
+        const data = getInteractableUserData(hit.object);
+        if (!data) {
           continue;
         }
-        const range = (data.interactableRange as number | undefined) ?? 60;
-        if (hit.distance > range) {
+        if (hit.distance > data.interactableRange) {
           break;
         }
-        const id = data.interactableId as string | undefined;
-        if (!id) {
-          continue;
-        }
-        return { id, point: hit.point };
+        return { id: data.interactableId, point: hit.point };
       }
       return null;
     };
@@ -1622,6 +1605,13 @@ function AvatarCursor({ refs }: ModeProps): null {
       teleportSnapRef.current = false;
     }
     group.scale.setScalar(refs.renderedScale.current);
+
+    // Publish the final-for-this-frame avatar world position to the
+    // shared singleton. InteractionController reads it next frame as
+    // the raycast origin, so things between camera and cursor (i.e.
+    // behind the cursor in view direction) don't intercept the
+    // crosshair ray. See `cursorWorldPosition.ts`.
+    cursorWorldPosition.copy(refs.avatarPos.current);
   }, 2);
 
   return null;

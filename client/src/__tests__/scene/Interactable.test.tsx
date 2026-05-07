@@ -11,8 +11,17 @@
  * controller's behaviour is verified via the manual smoke test
  * (the test cube in the scene).
  */
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
+
+// `useInteractable` calls `useFrame` for the auto hover/press scale
+// animation, but R3F's hooks throw outside a `<Canvas>` context. The
+// store-subscription side of the hook is the only thing this test
+// suite is verifying, so stub `useFrame` to a no-op.
+vi.mock('@react-three/fiber', () => ({
+  useFrame: vi.fn(),
+}));
+
 import { useInteractable } from '@/components/scene/Interactable';
 import { useWorldStore } from '@/store';
 
@@ -82,6 +91,35 @@ describe('useInteractable', () => {
     expect(result.current.isPressed).toBe(false);
   });
 
+  it('accepts an optional visualRef without erroring', () => {
+    // The visualRef is the auto-scale target. The store-subscription
+    // path of the hook doesn't read it; we just verify wiring it up
+    // doesn't throw.
+    const visualRef = { current: null } as React.MutableRefObject<import('three').Object3D | null>;
+    expect(() => {
+      renderHook(() =>
+        useInteractable({
+          id: 'with-visual',
+          onInteract: () => undefined,
+          visualRef,
+        }),
+      );
+    }).not.toThrow();
+  });
+
+  it('honors an external ref via opts.ref instead of creating its own', () => {
+    const externalRef = { current: null } as React.MutableRefObject<import('three').Mesh | null>;
+    const { result } = renderHook(() =>
+      useInteractable({
+        id: 'cube-A',
+        onInteract: () => undefined,
+        ref: externalRef,
+      }),
+    );
+    // Hook returns the same ref instance the caller passed in.
+    expect(result.current.ref).toBe(externalRef);
+  });
+
   it('cleans up on unmount — re-renders with a new id do not leak old state', () => {
     const { result, rerender, unmount } = renderHook(
       ({ id }: { id: string }) => useInteractable({ id, onInteract: () => undefined }),
@@ -106,6 +144,74 @@ describe('useInteractable', () => {
     unmount();
     // Idempotent — unmount shouldn't throw or leave dangling subs.
     expect(() => useWorldStore.getState().setHoveredInteractable(null)).not.toThrow();
+  });
+});
+
+describe('userData accessors', () => {
+  // Pure functions — no React, no R3F. Import three's Mesh +
+  // geometry/material directly; vi.mock above only replaces R3F.
+  it('setInteractableUserData writes the three tagged fields', async () => {
+    const { Mesh, BoxGeometry, MeshBasicMaterial } = await import('three');
+    const { setInteractableUserData } = await import('@/components/scene/Interactable');
+    const mesh = new Mesh(new BoxGeometry(1, 1, 1), new MeshBasicMaterial());
+    setInteractableUserData(mesh, {
+      interactable: true,
+      interactableId: 'test-A',
+      interactableRange: 75,
+    });
+    expect(mesh.userData.interactable).toBe(true);
+    expect(mesh.userData.interactableId).toBe('test-A');
+    expect(mesh.userData.interactableRange).toBe(75);
+  });
+
+  it('clearInteractableUserData removes only the three tagged fields', async () => {
+    const { Mesh, BoxGeometry, MeshBasicMaterial } = await import('three');
+    const { setInteractableUserData, clearInteractableUserData } =
+      await import('@/components/scene/Interactable');
+    const mesh = new Mesh(new BoxGeometry(1, 1, 1), new MeshBasicMaterial());
+    mesh.userData.unrelated = 'keep me';
+    setInteractableUserData(mesh, {
+      interactable: true,
+      interactableId: 'test-A',
+      interactableRange: 60,
+    });
+    clearInteractableUserData(mesh);
+    expect(mesh.userData.interactable).toBeUndefined();
+    expect(mesh.userData.interactableId).toBeUndefined();
+    expect(mesh.userData.interactableRange).toBeUndefined();
+    expect(mesh.userData.unrelated).toBe('keep me');
+  });
+
+  it('getInteractableUserData returns the typed object when present', async () => {
+    const { Mesh, BoxGeometry, MeshBasicMaterial } = await import('three');
+    const { setInteractableUserData, getInteractableUserData } =
+      await import('@/components/scene/Interactable');
+    const mesh = new Mesh(new BoxGeometry(1, 1, 1), new MeshBasicMaterial());
+    setInteractableUserData(mesh, {
+      interactable: true,
+      interactableId: 'test-A',
+      interactableRange: 60,
+    });
+    expect(getInteractableUserData(mesh)).toEqual({
+      interactable: true,
+      interactableId: 'test-A',
+      interactableRange: 60,
+    });
+  });
+
+  it('getInteractableUserData returns null on untagged objects', async () => {
+    const { Mesh, BoxGeometry, MeshBasicMaterial } = await import('three');
+    const { getInteractableUserData } = await import('@/components/scene/Interactable');
+    const mesh = new Mesh(new BoxGeometry(1, 1, 1), new MeshBasicMaterial());
+    expect(getInteractableUserData(mesh)).toBeNull();
+  });
+
+  it('getInteractableUserData returns null when fields are partially missing', async () => {
+    const { Mesh, BoxGeometry, MeshBasicMaterial } = await import('three');
+    const { getInteractableUserData } = await import('@/components/scene/Interactable');
+    const mesh = new Mesh(new BoxGeometry(1, 1, 1), new MeshBasicMaterial());
+    mesh.userData.interactable = true; // missing the other two fields
+    expect(getInteractableUserData(mesh)).toBeNull();
   });
 });
 
