@@ -53,14 +53,15 @@ function readMenu(entity: Entity): string | null {
 // scale=1 (separate from the cursor's 0.03 scale chain), so we
 // can author dimensions directly without dividing by 0.03.
 
-/** Forward offset = world +Z direction. With the typical scene
- *  setup (cameras at z≈-360 looking toward origin) this puts the
- *  panel between observer and remote cursor for any observer on
- *  that same side — visually "in front of" the cursor from their
- *  POV. Static in world coords because the indicator group is
- *  position-only, so the panel never orbits or jitters with the
- *  remote cursor's rotation. */
-const PANEL_FORWARD_OFFSET = 6;
+/** Forward offset = world -Z direction (toward observer). The
+ *  scene's cameras spawn at z≈-360 looking at the origin, so
+ *  smaller (more negative) z is "closer to observer." Subtracting
+ *  from the cursor's z puts the panel between observer and
+ *  cursor — visually "in front of" the cursor from any observer
+ *  on the typical viewing side. Static in world coords because
+ *  the indicator group is position-only, so the panel never
+ *  orbits or jitters with the remote cursor's rotation. */
+const PANEL_FORWARD_OFFSET = -6;
 const PANEL_VERTICAL_OFFSET = 0.4;
 
 /** drei's <Html transform> scales by `distanceFactor / cameraDist`
@@ -94,11 +95,18 @@ function MenuPanel(): JSX.Element {
           the plate is invisible, which is correct: the back of
           the back plate is the *front* of the panel from the
           owner's POV. */}
-      <mesh position={[0, 0, -0.05]} frustumCulled={false}>
+      {/* Back plate — sits on the FAR side of the Html (toward
+          the cursor, away from the observer). Default
+          FrontSide front face points +Z (toward cursor) so a
+          viewer who walks around to the cursor side sees it as
+          a solid "back cover" — and the observer-side viewer
+          sees only its (invisible) back face, leaving the Html
+          unoccluded. */}
+      <mesh position={[0, 0, 0.05]} frustumCulled={false}>
         <planeGeometry args={[BACK_PLATE_WIDTH + 0.2, BACK_PLATE_HEIGHT + 0.2]} />
         <meshBasicMaterial color={BACK_PLATE_BORDER} transparent opacity={0.55} />
       </mesh>
-      <mesh position={[0, 0, -0.04]} frustumCulled={false}>
+      <mesh position={[0, 0, 0.04]} frustumCulled={false}>
         <planeGeometry args={[BACK_PLATE_WIDTH, BACK_PLATE_HEIGHT]} />
         <meshBasicMaterial color={BACK_PLATE_BG} transparent opacity={BACK_PLATE_OPACITY} />
       </mesh>
@@ -116,7 +124,16 @@ function MenuPanel(): JSX.Element {
         pointerEvents="none"
         zIndexRange={[0, 0]}
       >
-        <div style={{ pointerEvents: 'none', userSelect: 'none' }}>
+        {/* backfaceVisibility:hidden so a viewer on the cursor
+            side sees only the back plate (solid), not the
+            mirrored DOM behind it. */}
+        <div
+          style={{
+            pointerEvents: 'none',
+            userSelect: 'none',
+            backfaceVisibility: 'hidden',
+          }}
+        >
           <RemotePauseMenuView />
         </div>
       </Html>
