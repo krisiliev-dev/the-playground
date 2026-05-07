@@ -85,10 +85,10 @@ export function RevealOrchestrator(): JSX.Element {
     // Spatial low-frequency boom emitted at the wall hit point on the
     // moment of impact. The per-sword slams provide the higher-
     // frequency punch; this rumble adds weight to the wall itself.
+    // playWorld so other connected players hear it spatially-positioned
+    // at the impact (per ADR-006).
     if (revealState === 'impact' && clickHit) {
-      void sfx.play('impactRumble', {
-        position: { x: clickHit.point[0], y: clickHit.point[1], z: clickHit.point[2] },
-      });
+      sfx.playWorld('impactRumble', clickHit.point);
     }
   }, [revealState, clickHit]);
 
