@@ -21,7 +21,10 @@ mod tick;
 
 use std::net::SocketAddr;
 
-use axum::{routing::get, Router};
+use axum::{
+    routing::{get, post},
+    Router,
+};
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -88,6 +91,11 @@ async fn main() {
     let app = Router::new()
         .route("/health", get(handlers::health_check))
         .route("/ws", get(handlers::ws_upgrade))
+        // Admin-only HTTP trigger for one-shot SceneEvents — lets
+        // an operator fire any registered event variant at any
+        // position without joining the game (per ADR-006). Auth
+        // via Authorization: Bearer <ADMIN_TOKEN>.
+        .route("/api/admin/event", post(handlers::post_admin_event))
         .with_state(state)
         .layer(cors)
         .layer(TraceLayer::new_for_http());

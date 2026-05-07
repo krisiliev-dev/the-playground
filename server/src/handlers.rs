@@ -24,11 +24,12 @@ use axum::{
         ws::{Message, WebSocket, WebSocketUpgrade},
         ConnectInfo, Query, State,
     },
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::IntoResponse,
     Json,
 };
 use futures_util::{SinkExt, StreamExt};
+use serde::Deserialize;
 use tokio::sync::broadcast::error::RecvError;
 use tracing::{debug, info, warn};
 
@@ -40,6 +41,48 @@ use crate::state::AppState;
 
 pub async fn health_check() -> impl IntoResponse {
     Json(serde_json::json!({ "status": "ok" }))
+}
+
+#[derive(Deserialize)]
+pub struct AdminEventRequest {
+    pub event: SceneEventKind,
+}
+
+/// POST /api/admin/event — admin authenticates via Authorization
+/// Bearer token and triggers a one-shot SceneEvent at any
+/// position, fanned out to all connected clients.
+///
+/// Anonymous-actor (`actor_id: None`) so receivers know it came
+/// from outside any player's normal play loop. Bypasses the
+/// per-actor rate-limiter — the admin is trusted operator-side
+/// and is expected to manage their own send rates. Value clamps
+/// from `validate_event` are NOT applied; admin can author
+/// arbitrary parameters since they're triggering deliberate
+/// effects rather than relaying user input.
+pub async fn post_admin_event(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<AdminEventRequest>,
+) -> impl IntoResponse {
+    let presented = extract_bearer(&headers).unwrap_or("");
+    if !auth::is_admin_token(presented, &state.admin_token) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let _ = state.broadcast_tx.send(ServerMessage::SceneEvent {
+        actor_id: None,
+        event: req.event,
+    });
+    StatusCode::ACCEPTED.into_response()
+}
+
+/// Pull the bearer token from an `Authorization: Bearer <token>`
+/// header. Returns None if header missing, malformed, or doesn't
+/// start with the `Bearer ` prefix.
+fn extract_bearer(headers: &HeaderMap) -> Option<&str> {
+    headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.strip_prefix("Bearer "))
 }
 
 pub async fn ws_upgrade(

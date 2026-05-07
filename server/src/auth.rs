@@ -16,18 +16,30 @@
 //! exposed on the wire.
 use std::collections::HashMap;
 
-/// Decide whether a given upgrade request should receive admin
-/// permissions. Empty `expected` ⇒ admin is permanently disabled
-/// (any token attempt fails). Constant-time comparison guards
-/// against timing attacks on token discovery.
-pub fn is_admin(query: &HashMap<String, String>, expected: &str) -> bool {
+/// Compare a presented token against the configured admin token
+/// in constant time. Empty `expected` ⇒ admin is permanently
+/// disabled (any token attempt fails). Constant-time comparison
+/// guards against timing attacks on token discovery.
+///
+/// Polymorphic: the WebSocket upgrade extracts the token from
+/// `?token=` (see `is_admin`), HTTP routes extract from the
+/// Authorization header (see `extract_bearer` in handlers.rs).
+/// Both feed into this single comparison so the auth policy is
+/// in one place.
+pub fn is_admin_token(presented: &str, expected: &str) -> bool {
     if expected.is_empty() {
         return false;
     }
+    constant_time_eq(presented.as_bytes(), expected.as_bytes())
+}
+
+/// WebSocket-upgrade variant — extracts the token from the
+/// `?token=` query parameter and delegates to `is_admin_token`.
+pub fn is_admin(query: &HashMap<String, String>, expected: &str) -> bool {
     let Some(presented) = query.get("token") else {
         return false;
     };
-    constant_time_eq(presented.as_bytes(), expected.as_bytes())
+    is_admin_token(presented, expected)
 }
 
 /// Constant-time byte-string equality. Avoids the early-exit
@@ -85,5 +97,30 @@ mod tests {
         assert!(!constant_time_eq(b"abcd", b"abc"));
         assert!(constant_time_eq(b"abc", b"abc"));
         assert!(constant_time_eq(b"", b""));
+    }
+
+    #[test]
+    fn is_admin_token_matches_constant_time() {
+        assert!(is_admin_token("secret", "secret"));
+        assert!(!is_admin_token("wrong", "secret"));
+        assert!(!is_admin_token("", "secret"));
+    }
+
+    #[test]
+    fn is_admin_token_disabled_when_expected_empty() {
+        // Empty expected = admin permanently disabled. Any presented
+        // token (including an empty one) fails.
+        assert!(!is_admin_token("anything", ""));
+        assert!(!is_admin_token("", ""));
+    }
+
+    #[test]
+    fn is_admin_query_delegates_to_token_helper() {
+        // is_admin is now a thin wrapper extracting the token from
+        // the query map; verify the delegation.
+        let q = query_with(&[("token", "secret")]);
+        assert!(is_admin(&q, "secret"));
+        let wrong = query_with(&[("token", "nope")]);
+        assert!(!is_admin(&wrong, "secret"));
     }
 }
