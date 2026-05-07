@@ -142,6 +142,33 @@ describe('presenceEqual', () => {
     expect(presenceEqual({ near: 'portal-A' }, { near: 'portal-A' })).toBe(true);
     expect(presenceEqual({ near: 'portal-A' }, { near: 'portal-B' })).toBe(false);
   });
+
+  it('compares reveal_state', () => {
+    expect(presenceEqual({ reveal_state: 'armed' }, { reveal_state: 'armed' })).toBe(true);
+    expect(presenceEqual({ reveal_state: 'armed' }, { reveal_state: 'swinging' })).toBe(false);
+  });
+
+  it('compares click hit point referentially', () => {
+    const point: [number, number, number] = [10, 5, -3];
+    expect(
+      presenceEqual({ click_hit_point: point }, { click_hit_point: point }),
+    ).toBe(true);
+    expect(
+      presenceEqual(
+        { click_hit_point: [10, 5, -3] },
+        { click_hit_point: [10, 5, -3] },
+      ),
+    ).toBe(false);
+  });
+
+  it('returns false when reveal_state_entered_at diverges', () => {
+    expect(
+      presenceEqual(
+        { reveal_state_entered_at: 1000 },
+        { reveal_state_entered_at: 1001 },
+      ),
+    ).toBe(false);
+  });
 });
 
 describe('dispatchServerMessage — snapshot side effects', () => {

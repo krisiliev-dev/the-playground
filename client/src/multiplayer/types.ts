@@ -125,6 +125,34 @@ export interface PlayerPresence {
    *  globally (rim spinning faster, etc.) by aggregating
    *  nearness across all players. */
   near?: string | null;
+  /** Current reveal phase, broadcast continuously while a
+   *  cascade is in progress. Receivers drive the remote
+   *  cascade off this. Null/idle ⇒ no cascade. */
+  reveal_state?: string | null;
+  /** Wall-clock seconds (`performance.now() / 1000`) when the
+   *  player's `reveal_state` last changed. Receivers use the
+   *  *elapsed since first observation* to drive remote
+   *  animation rather than mixing wall clocks across machines
+   *  — the originator's `enteredAt` is opaque to us, but the
+   *  *change moment* is observable on this side. */
+  reveal_state_entered_at?: number | null;
+  /** World-space click point on the cube wall (the centre of
+   *  the impact ring). Frozen at click time, broadcast for the
+   *  duration of the cascade so late joiners can compute
+   *  geometry. Drives portal placement on receivers, too. */
+  click_hit_point?: [number, number, number] | null;
+  /** Inward-facing wall normal at the click. Pairs with
+   *  `click_hit_point` to give receivers everything they need
+   *  to construct the wall basis. */
+  click_hit_normal?: [number, number, number] | null;
+  /** Originator's camera world position at click time. The
+   *  cascade's spawn + mid positions are camera-relative, so
+   *  receivers must use the originator's POV (not their own) to
+   *  reproduce the geometry. */
+  click_cam_pos?: [number, number, number] | null;
+  /** Originator's camera world quaternion at click time
+   *  (x, y, z, w). Same rationale as `click_cam_pos`. */
+  click_cam_quat?: [number, number, number, number] | null;
 }
 
 export type ClientMessage =

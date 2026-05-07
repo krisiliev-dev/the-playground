@@ -32,11 +32,10 @@ import {
   type Sprite,
   Vector3,
 } from 'three';
-import { useWorldStore } from '@/store';
+import { useWorldStore, type ClickHit, type RevealState } from '@/store';
 import { triggerWorldImpactShake } from '../cameraShake';
 import { FORMATION_SCALE, type SwordSlot } from './vibeFormation';
 import { sfx, type PositionalLoopHandle } from '../../audio/SfxManager';
-import { emitSceneEvent } from '@/multiplayer/sceneEvents';
 import { useSwordKinematics } from './useSwordKinematics';
 import { MID_FORWARD, SWING_DURATION, SWING_DURATION_MS } from './constants';
 import { computeSpawnPoint } from './spawnGeometry';
@@ -168,15 +167,44 @@ function getStarTexture(): CanvasTexture {
   return starTextureCache;
 }
 
+/**
+ * When provided, drives the sword off external context instead
+ * of the local store + scene camera. Used by the multiplayer
+ * `RemotePlayerCascade` to render a remote player's reveal in
+ * the local scene with the originator's POV.
+ *
+ * `isRemote: true` flips the side-effect switches: no audio,
+ * no camera shake, no SceneEvent broadcasts. The originator
+ * already plays/broadcasts those locally; receivers shouldn't
+ * double-fire (would create infinite-broadcast loops).
+ */
+export interface SwordContext {
+  revealState: RevealState;
+  clickHit: ClickHit | null;
+  /** Originator's camera world position at click time, frozen
+   *  for the full cascade. */
+  cameraPos: [number, number, number];
+  /** Originator's camera world quaternion at click time
+   *  (x, y, z, w). */
+  cameraQuat: [number, number, number, number];
+  isRemote: true;
+}
+
 export interface SwordProps {
   slot: SwordSlot;
   /** Position in the spawn cascade. Sword `i` starts its swing
    *  `i × STAGGER_DELAY` seconds after the global 'swinging' state
    *  begins. Defaults to 0 (no stagger) for tests + back-compat. */
   staggerIndex?: number;
+  /** When set, the sword reads its driving state from `context`
+   *  instead of `useWorldStore`. The component is otherwise
+   *  unchanged — same animation, same visuals. Side effects
+   *  (audio, shake, broadcasts) are gated on
+   *  `context?.isRemote === true`. */
+  context?: SwordContext;
 }
 
-export function Sword({ slot, staggerIndex = 0 }: SwordProps): JSX.Element {
+export function Sword({ slot, staggerIndex = 0, context }: SwordProps): JSX.Element {
   const groupRef = useRef<Group>(null);
   const gltf = useGLTF(SWORD_URL);
 
@@ -194,8 +222,17 @@ export function Sword({ slot, staggerIndex = 0 }: SwordProps): JSX.Element {
     return cloned;
   }, [gltf.scene]);
 
-  const revealState = useWorldStore((s) => s.revealState);
-  const clickHit = useWorldStore((s) => s.clickHit);
+  // When a context is provided (remote-driven cascade), the
+  // store reads collapse to constants — the active context
+  // wins. Otherwise the local cascade reads from the store as
+  // before. Subscriptions fire when either changes; a remote
+  // sword passes a fresh `context` reference per remote
+  // re-render so its state updates flow through.
+  const storeRevealState = useWorldStore((s) => s.revealState);
+  const storeClickHit = useWorldStore((s) => s.clickHit);
+  const revealState: RevealState = context?.revealState ?? storeRevealState;
+  const clickHit: ClickHit | null = context?.clickHit ?? storeClickHit;
+  const isRemote = context?.isRemote === true;
   const dimensions = useWorldStore((s) => s.environment.dimensions);
   const cubeHalf = useMemo(
     () => new Vector3(dimensions[0] / 2, dimensions[1] / 2, dimensions[2] / 2),
@@ -242,6 +279,13 @@ export function Sword({ slot, staggerIndex = 0 }: SwordProps): JSX.Element {
     flyingHandleRef.current = null;
     if (revealState === 'impact' && !impactFired.current && clickHit) {
       impactFired.current = true;
+      // Remote-driven cascades skip side effects: the originator
+      // already broadcasts swordSlam (via sfx.playWorld) and the
+      // remote impact-fired flag is just for visual book-keeping
+      // here.
+      if (isRemote) {
+        return;
+      }
       const SLAM_POS_JITTER = 20;
       // Use a moderate default velocity for catch-up slams since the
       // sword may not have completed its arc to peak speed.
@@ -256,12 +300,8 @@ export function Sword({ slot, staggerIndex = 0 }: SwordProps): JSX.Element {
         pitchJitter: computeSlamPitchJitter(fallbackVel),
         filterGain: jitterAxis(Math.random, 20),
       });
-      emitSceneEvent({
-        kind: 'sword_impact',
-        position: slamPos,
-      });
     }
-  }, [revealState, clickHit]);
+  }, [revealState, clickHit, isRemote]);
   useEffect(() => {
     if (previousState.current !== revealState) {
       stateEnteredAt.current = performance.now() / 1000;
@@ -410,9 +450,25 @@ export function Sword({ slot, staggerIndex = 0 }: SwordProps): JSX.Element {
 
     // Capture camera pose on the first frame we see `armed`. Once captured
     // the trajectory is fixed regardless of camera motion afterwards.
+    //
+    // Local mode: read from useThree's live camera at the moment
+    // of armed transition. Remote mode: copy the broadcast pose
+    // straight from context — receivers don't have access to the
+    // originator's camera, so the pose was captured at click time
+    // on their side and broadcast via PlayerInput presence.
     if (revealState === 'armed' && !captured.current) {
-      clickCamPos.copy(camera.position);
-      clickCamQuat.copy(camera.quaternion);
+      if (context) {
+        clickCamPos.set(...context.cameraPos);
+        clickCamQuat.set(
+          context.cameraQuat[0],
+          context.cameraQuat[1],
+          context.cameraQuat[2],
+          context.cameraQuat[3],
+        );
+      } else {
+        clickCamPos.copy(camera.position);
+        clickCamQuat.copy(camera.quaternion);
+      }
       captured.current = true;
     }
     if (revealState === 'idle') {
@@ -515,77 +571,63 @@ export function Sword({ slot, staggerIndex = 0 }: SwordProps): JSX.Element {
     // Fire this sword's flash exactly when its effective swing begins.
     if (revealState === 'swinging' && flashStartedAt.current < 0 && t >= 0) {
       flashStartedAt.current = state.clock.elapsedTime;
-      // Spawn punch: per-sword cue at the spawn point. Reverb is set
-      // in the manifest so the cube room "rings" each spawn.
-      const spawnAt = { x: spawnPos.x, y: spawnPos.y, z: spawnPos.z };
-      void sfx.play('spawnFlash', { volumeMultiplier: 0.5, position: spawnAt });
-      // Per-sword flying loop: starts at spawn, position is updated
-      // each frame below to track the sword's mesh. Distance falloff
-      // is handled by the panner so close-passing swords swell while
-      // far ones stay quiet — the "dynamicness" the user wanted from
-      // the cascade.
-      flyingHandleRef.current = sfx.playPositionalLoop('swordFlying', spawnAt, {
-        pitchJitter: 0.12,
-        volumeMultiplier: 0.7,
-      });
-      // Broadcast the streak so other players see it (per ADR-006).
-      // Optimistic-local: we already render this sword via the
-      // `useFrame` loop above; the wire event drives only remote
-      // viewers' `RemoteSwordCascade` receiver.
-      emitSceneEvent({
-        kind: 'sword_swing',
-        from: [spawnPos.x, spawnPos.y, spawnPos.z],
-        to: [endPos.x, endPos.y, endPos.z],
-        strength: 1,
-      });
+      // Audio is local-only: remote-driven swords skip the
+      // spawnFlash + flying loop. The originator already
+      // produced the audio on their side; for now receivers
+      // simply lack the spawn/flying cues (a future pass can
+      // promote those to broadcast cues if the audio absence
+      // reads as too quiet). The visual flash sprite still
+      // fires from the `flashStartedAt` timestamp above.
+      if (!isRemote) {
+        const spawnAt = { x: spawnPos.x, y: spawnPos.y, z: spawnPos.z };
+        void sfx.play('spawnFlash', { volumeMultiplier: 0.5, position: spawnAt });
+        // Per-sword flying loop: starts at spawn, position is updated
+        // each frame below to track the sword's mesh. Distance falloff
+        // is handled by the panner so close-passing swords swell while
+        // far ones stay quiet — the "dynamicness" the user wanted from
+        // the cascade.
+        flyingHandleRef.current = sfx.playPositionalLoop('swordFlying', spawnAt, {
+          pitchJitter: 0.12,
+          volumeMultiplier: 0.7,
+        });
+      }
     }
     // Fire this sword's IMPACT flash + shake when it reaches the end of
     // its swing (slams into the wall ring after the post leg).
     if (revealState === 'swinging' && !impactFired.current && t >= SWING_DURATION) {
       impactFlashStartedAt.current = state.clock.elapsedTime;
       impactFired.current = true;
-      // performance.now()/1000 (not state.clock.elapsedTime) — see
-      // ShakeGroup for why we standardise on the wall clock.
-      triggerWorldImpactShake(performance.now() / 1000, [hitPoint.x, hitPoint.y, hitPoint.z]);
-      // Stop this sword's flying loop with a short fade so the cut
-      // isn't an audible click — the slam's transient and the room's
-      // wet tail cover the silence.
-      flyingHandleRef.current?.stop(60);
-      flyingHandleRef.current = null;
-      // Velocity-driven slam + spatial jitter. Each slam:
-      //   - Volume scaled by impact velocity (harder hit → louder).
-      //   - Pitch jitter widened to ±40% (was ±25%) for distinctness
-      //     across the 12-cascade.
-      //   - Position offset by a small random vector around the wall
-      //     hit point so each slam emits from a slightly different
-      //     spatial location — the panner gives them slightly
-      //     different stereo positions, helping the ear separate
-      //     them instead of merging into a single block.
-      const v = slamVelocity.current;
-      // Wide jitter + spatial spread + per-fire EQ for cascade
-      // distinctness — see ./swordEffects for the velocity → volume
-      // and velocity → pitch envelopes. Math.random for the jittered
-      // values: each slam pans to a different stereo location and
-      // gets a slightly different per-fire high-shelf EQ.
-      const SLAM_POS_JITTER = 20;
-      const slamPos: [number, number, number] = [
-        hitPoint.x + jitterAxis(Math.random, SLAM_POS_JITTER),
-        hitPoint.y + jitterAxis(Math.random, SLAM_POS_JITTER),
-        hitPoint.z + jitterAxis(Math.random, SLAM_POS_JITTER),
-      ];
-      void sfx.playWorld('swordSlam', slamPos, {
-        volumeMultiplier: 0.55 * computeSlamVelocityFactor(v),
-        pitchJitter: computeSlamPitchJitter(v),
-        filterGain: jitterAxis(Math.random, 20),
-      });
-      // Broadcast the impact so remote viewers see a spark at the
-      // wall (per ADR-006). Position carries the same spatial
-      // jitter as the slam audio so the visual + audible impacts
-      // line up for receivers.
-      emitSceneEvent({
-        kind: 'sword_impact',
-        position: slamPos,
-      });
+      if (!isRemote) {
+        // performance.now()/1000 (not state.clock.elapsedTime) — see
+        // ShakeGroup for why we standardise on the wall clock.
+        triggerWorldImpactShake(performance.now() / 1000, [hitPoint.x, hitPoint.y, hitPoint.z]);
+        // Stop this sword's flying loop with a short fade so the cut
+        // isn't an audible click — the slam's transient and the room's
+        // wet tail cover the silence.
+        flyingHandleRef.current?.stop(60);
+        flyingHandleRef.current = null;
+        // Velocity-driven slam + spatial jitter. Each slam:
+        //   - Volume scaled by impact velocity (harder hit → louder).
+        //   - Pitch jitter widened to ±40% (was ±25%) for distinctness
+        //     across the 12-cascade.
+        //   - Position offset by a small random vector around the wall
+        //     hit point so each slam emits from a slightly different
+        //     spatial location — the panner gives them slightly
+        //     different stereo positions, helping the ear separate
+        //     them instead of merging into a single block.
+        const v = slamVelocity.current;
+        const SLAM_POS_JITTER = 20;
+        const slamPos: [number, number, number] = [
+          hitPoint.x + jitterAxis(Math.random, SLAM_POS_JITTER),
+          hitPoint.y + jitterAxis(Math.random, SLAM_POS_JITTER),
+          hitPoint.z + jitterAxis(Math.random, SLAM_POS_JITTER),
+        ];
+        void sfx.playWorld('swordSlam', slamPos, {
+          volumeMultiplier: 0.55 * computeSlamVelocityFactor(v),
+          pitchJitter: computeSlamPitchJitter(v),
+          filterGain: jitterAxis(Math.random, 20),
+        });
+      }
     }
 
     let opacityTarget = 0;

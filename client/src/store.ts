@@ -32,6 +32,22 @@ export interface ClickHit {
   normal: [number, number, number];
 }
 
+/**
+ * Camera pose captured at click time. Frozen for the rest of the
+ * reveal — the cascade's spawn/mid positions are camera-relative
+ * (per the click-time POV), so the geometry must not drift if
+ * the camera moves during the swing.
+ *
+ * Stored alongside `clickHit` so multiplayer broadcast can carry
+ * both via the `presence` channel — receivers replicate the
+ * cascade in their own scene using the originator's POV.
+ */
+export interface ClickCamPose {
+  position: [number, number, number];
+  /** (x, y, z, w) — Three.js convention. */
+  quaternion: [number, number, number, number];
+}
+
 // ─── Store Actions ───────────────────────────────────────────────────
 
 interface AppActions {
@@ -46,6 +62,17 @@ interface AppActions {
   resetReveal: () => void;
   /** Persist where the user clicked so the sword/cracks/VIBE land there. */
   setClickHit: (hit: ClickHit | null) => void;
+  /** Persist the camera pose at click time. Captured by the reveal
+   *  orchestrator's click handler; mirrored over multiplayer
+   *  presence so remote viewers can replicate the cascade with
+   *  the originator's POV. Cleared on `resetReveal`. */
+  setClickCamPose: (pose: ClickCamPose | null) => void;
+  /** Stamp the wall-clock moment a reveal phase began. Updated
+   *  whenever the reveal state advances; broadcast via presence
+   *  so remote receivers can compute "elapsed since this state
+   *  began" using their own clock relative to the wire-arrival
+   *  time. Stored as `performance.now() / 1000`. */
+  setRevealStateEnteredAt: (epochSeconds: number) => void;
   /** Toggle the Phase 5 cursor-avatar visibility on/off. */
   toggleCursorAvatar: () => void;
   /** Set the Phase 5 cursor-avatar visibility directly. */
@@ -142,6 +169,15 @@ interface RevealSlice {
   revealState: RevealState;
   /** Where the click landed, or null if no click yet. */
   clickHit: ClickHit | null;
+  /** Camera pose captured at click time, frozen through the
+   *  cascade. Null until the user clicks. */
+  clickCamPose: ClickCamPose | null;
+  /** `performance.now() / 1000` at the moment `revealState`
+   *  last advanced. Drives presence-broadcast timestamping so
+   *  late-joining remote viewers can compute "where is this
+   *  reveal in its phase" rather than seeing it restart. 0 when
+   *  no reveal is in progress (or has completed). */
+  revealStateEnteredAt: number;
   /** Whether the user has dismissed the post-impact controls hint.
    *  CursorAvatar gates its 3rd-person camera transition on this. */
   controlsDismissed: boolean;
@@ -319,6 +355,8 @@ export const useWorldStore = create<
   isReady: false,
   revealState: 'idle',
   clickHit: null,
+  clickCamPose: null,
+  revealStateEnteredAt: 0,
   controlsDismissed: false,
   menuOpen: false,
   documentMode: readPersistedDocumentMode(),
@@ -369,13 +407,18 @@ export const useWorldStore = create<
       if (!next) {
         return state;
       }
-      return { revealState: next };
+      return {
+        revealState: next,
+        revealStateEnteredAt: performance.now() / 1000,
+      };
     }),
 
   resetReveal: () =>
     set({
       revealState: 'idle',
       clickHit: null,
+      clickCamPose: null,
+      revealStateEnteredAt: 0,
       controlsDismissed: false,
       portalEndpoints: [],
     }),
@@ -398,6 +441,10 @@ export const useWorldStore = create<
   setMuted: (muted) => set({ muted }),
 
   setClickHit: (hit) => set({ clickHit: hit }),
+
+  setClickCamPose: (pose) => set({ clickCamPose: pose }),
+
+  setRevealStateEnteredAt: (epochSeconds) => set({ revealStateEnteredAt: epochSeconds }),
 
   toggleCursorAvatar: () => set((state) => ({ cursorAvatarActive: !state.cursorAvatarActive })),
 

@@ -23,6 +23,8 @@ export function RevealOrchestrator(): JSX.Element {
   const revealState = useWorldStore((s) => s.revealState);
   const advanceReveal = useWorldStore((s) => s.advanceReveal);
   const setClickHit = useWorldStore((s) => s.setClickHit);
+  const setClickCamPose = useWorldStore((s) => s.setClickCamPose);
+  const setRevealStateEnteredAt = useWorldStore((s) => s.setRevealStateEnteredAt);
   const dimensions = useWorldStore((s) => s.environment.dimensions);
   const clickHit = useWorldStore((s) => s.clickHit);
 
@@ -72,12 +74,30 @@ export function RevealOrchestrator(): JSX.Element {
         point: [hit.point.x, hit.point.y, hit.point.z],
         normal: [hit.normal.x, hit.normal.y, hit.normal.z],
       });
+      // Capture the click-time camera pose so remote viewers can
+      // replicate the cascade with the originator's POV. Local
+      // Sword.tsx still does its own first-frame capture from
+      // useThree's camera; this store value exists for the wire
+      // broadcast (rides on PlayerInput presence).
+      setClickCamPose({
+        position: [camera.position.x, camera.position.y, camera.position.z],
+        quaternion: [
+          camera.quaternion.x,
+          camera.quaternion.y,
+          camera.quaternion.z,
+          camera.quaternion.w,
+        ],
+      });
+      // Stamp the click moment so the receiver-side cascade can
+      // compute "elapsed since click" using its own clock relative
+      // to the wire-arrival timestamp.
+      setRevealStateEnteredAt(performance.now() / 1000);
       useWorldStore.getState().advanceReveal();
     };
 
     window.addEventListener('click', onClick, { once: true });
     return () => window.removeEventListener('click', onClick);
-  }, [revealState, camera, setClickHit, cubeHalf]);
+  }, [revealState, camera, setClickHit, setClickCamPose, setRevealStateEnteredAt, cubeHalf]);
 
   useEffect(() => {
     // eslint-disable-next-line no-console

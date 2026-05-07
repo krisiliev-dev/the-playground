@@ -272,17 +272,49 @@ export function dispatchServerMessage(msg: ServerMessage, d: Dispatchers): void 
  *  based interactable highlights). */
 export function readLocalPresence(): PlayerPresence {
   const state = useWorldStore.getState();
+  // Only carry the reveal fields while the cascade is active.
+  // Once the local player resets to 'idle' or completes
+  // ('revealed'), we drop them so receivers can detect the
+  // end-of-cascade. We send through 'revealed' so receivers
+  // see the final settled state (portals appear there).
+  const sendingReveal = state.revealState !== 'idle';
+  const cascadePresence: Partial<PlayerPresence> = sendingReveal
+    ? {
+        reveal_state: state.revealState,
+        reveal_state_entered_at: state.revealStateEnteredAt,
+        click_hit_point: state.clickHit?.point ?? null,
+        click_hit_normal: state.clickHit?.normal ?? null,
+        click_cam_pos: state.clickCamPose?.position ?? null,
+        click_cam_quat: state.clickCamPose?.quaternion ?? null,
+      }
+    : {};
   return {
     menu: state.menuOpen ? 'pause' : null,
+    ...cascadePresence,
   };
 }
 
 /** Pure equality check on the presence bag — exported for tests.
  *  Compares only the keys the protocol cares about; new keys must
  *  be added here when introduced (the alternative — JSON.stringify
- *  comparison — is brittle to key ordering and silently expensive). */
+ *  comparison — is brittle to key ordering and silently expensive).
+ *
+ *  Vector fields use referential equality: presence is rebuilt
+ *  from the store each tick, but the underlying tuples come
+ *  straight from `clickHit` / `clickCamPose` and don't change
+ *  identity between renders — a referential check correctly
+ *  catches "same data" without per-tick array comparison cost. */
 export function presenceEqual(a: PlayerPresence, b: PlayerPresence): boolean {
-  return a.menu === b.menu && a.near === b.near;
+  return (
+    a.menu === b.menu &&
+    a.near === b.near &&
+    a.reveal_state === b.reveal_state &&
+    a.reveal_state_entered_at === b.reveal_state_entered_at &&
+    a.click_hit_point === b.click_hit_point &&
+    a.click_hit_normal === b.click_hit_normal &&
+    a.click_cam_pos === b.click_cam_pos &&
+    a.click_cam_quat === b.click_cam_quat
+  );
 }
 
 /** Read the current local cursor world pose into a Transform.
