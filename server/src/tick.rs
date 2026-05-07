@@ -94,3 +94,175 @@ async fn tick_once(state: &AppState, last_seen: &mut HashMap<EntityId, Entity>) 
         warn!(?err, "tick broadcast failed (no receivers)");
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::entity::{EntityKind, Transform};
+
+    fn portal() -> Entity {
+        Entity::new(
+            EntityKind::Portal,
+            Transform::identity(),
+            serde_json::json!({}),
+        )
+    }
+
+    /// `tick_once` is silent on an empty registry — no broadcast,
+    /// memory cleared, no errors.
+    #[tokio::test]
+    async fn empty_registry_silent() {
+        let state = AppState::new(String::new());
+        let mut rx = state.broadcast_tx.subscribe();
+        let mut last_seen = HashMap::new();
+        last_seen.insert(uuid::Uuid::new_v4(), portal()); // stale entry
+
+        tick_once(&state, &mut last_seen).await;
+
+        assert!(
+            last_seen.is_empty(),
+            "last_seen cleared when registry empty"
+        );
+        assert!(
+            rx.try_recv().is_err(),
+            "no broadcast sent for empty registry"
+        );
+    }
+
+    /// First tick after an entity is inserted broadcasts it.
+    #[tokio::test]
+    async fn first_tick_broadcasts_new_entity() {
+        let state = AppState::new(String::new());
+        let mut rx = state.broadcast_tx.subscribe();
+        let mut last_seen = HashMap::new();
+
+        let entity = portal();
+        let id = entity.id;
+        state.registry.write().await.insert(entity);
+
+        tick_once(&state, &mut last_seen).await;
+
+        let msg = rx.try_recv().expect("broadcast was sent");
+        match msg {
+            ServerMessage::EntityUpdates { entities } => {
+                assert_eq!(entities.len(), 1);
+                assert_eq!(entities[0].id, id);
+            }
+            other => panic!("expected EntityUpdates, got {other:?}"),
+        }
+        assert_eq!(last_seen.len(), 1);
+    }
+
+    /// Second consecutive tick with no changes broadcasts nothing.
+    /// This is the key invariant — idle scene = silent tick loop.
+    #[tokio::test]
+    async fn unchanged_entity_no_broadcast() {
+        let state = AppState::new(String::new());
+        let mut rx = state.broadcast_tx.subscribe();
+        let mut last_seen = HashMap::new();
+
+        state.registry.write().await.insert(portal());
+
+        tick_once(&state, &mut last_seen).await; // first tick — broadcasts
+        let _ = rx.try_recv(); // drain
+
+        tick_once(&state, &mut last_seen).await; // second tick — silent
+
+        assert!(
+            rx.try_recv().is_err(),
+            "second tick on unchanged registry should not broadcast"
+        );
+    }
+
+    /// Tick after a transform mutation broadcasts the (one) changed
+    /// entity, not the whole registry.
+    #[tokio::test]
+    async fn mutation_only_broadcasts_changed() {
+        let state = AppState::new(String::new());
+        let mut rx = state.broadcast_tx.subscribe();
+        let mut last_seen = HashMap::new();
+
+        let entity_a = portal();
+        let entity_b = portal();
+        let id_a = entity_a.id;
+        let id_b = entity_b.id;
+        {
+            let mut reg = state.registry.write().await;
+            reg.insert(entity_a);
+            reg.insert(entity_b);
+        }
+
+        // First tick seeds last_seen.
+        tick_once(&state, &mut last_seen).await;
+        let _ = rx.try_recv();
+
+        // Mutate only A.
+        state.registry.write().await.mutate(&id_a, |e| {
+            e.transform.position = [10.0, 0.0, 0.0];
+        });
+
+        tick_once(&state, &mut last_seen).await;
+
+        let msg = rx.try_recv().expect("broadcast was sent");
+        match msg {
+            ServerMessage::EntityUpdates { entities } => {
+                assert_eq!(
+                    entities.len(),
+                    1,
+                    "only the mutated entity should be in the diff"
+                );
+                assert_eq!(entities[0].id, id_a);
+                assert_eq!(entities[0].transform.position, [10.0, 0.0, 0.0]);
+                assert_ne!(entities[0].id, id_b);
+            }
+            other => panic!("expected EntityUpdates, got {other:?}"),
+        }
+    }
+
+    /// `last_seen` is pruned when an entity disappears from the
+    /// registry — otherwise long-running servers leak ids.
+    #[tokio::test]
+    async fn last_seen_prunes_deleted_entities() {
+        let state = AppState::new(String::new());
+        let _rx = state.broadcast_tx.subscribe(); // keep channel alive
+        let mut last_seen = HashMap::new();
+
+        let entity = portal();
+        let id = entity.id;
+        state.registry.write().await.insert(entity);
+
+        tick_once(&state, &mut last_seen).await;
+        assert!(last_seen.contains_key(&id));
+
+        // Remove the entity from the registry.
+        state.registry.write().await.remove(&id);
+
+        // Tick on a now-empty registry triggers the empty-clear
+        // path; tested in empty_registry_silent. To exercise the
+        // retain() path specifically, leave one other entity in.
+        let other = portal();
+        let other_id = other.id;
+        state.registry.write().await.insert(other);
+
+        tick_once(&state, &mut last_seen).await;
+
+        assert!(
+            !last_seen.contains_key(&id),
+            "removed entity pruned from last_seen"
+        );
+        assert!(last_seen.contains_key(&other_id));
+    }
+
+    /// No subscribers ⇒ no work, no error.
+    #[tokio::test]
+    async fn no_subscribers_skips_work() {
+        let state = AppState::new(String::new());
+        // Note: NOT subscribing.
+        let mut last_seen = HashMap::new();
+
+        state.registry.write().await.insert(portal());
+
+        // Should complete cleanly without panicking on send-error.
+        tick_once(&state, &mut last_seen).await;
+    }
+}

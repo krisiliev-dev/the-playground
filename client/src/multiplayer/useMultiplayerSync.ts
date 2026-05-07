@@ -185,14 +185,19 @@ export function useMultiplayerSync(opts: MultiplayerOptions): void {
   ]);
 }
 
-interface Dispatchers {
+export interface Dispatchers {
   upsertEntities: (entities: ReadonlyArray<Entity>) => void;
   removeEntities: (ids: ReadonlyArray<EntityId>) => void;
   setLocalPlayerId: (id: EntityId | null) => void;
   clearAllEntities: () => void;
 }
 
-function dispatchServerMessage(msg: ServerMessage, d: Dispatchers): void {
+/** Route an inbound `ServerMessage` to the correct dispatcher.
+ *  Pure — exported for direct testing without spinning up a
+ *  WebSocket. Errors are logged, not thrown, so a malformed
+ *  message from a future server version doesn't kill the
+ *  client (graceful degradation). */
+export function dispatchServerMessage(msg: ServerMessage, d: Dispatchers): void {
   switch (msg.type) {
     case 'full_state':
       d.upsertEntities(msg.entities);
@@ -223,8 +228,17 @@ function readLocalTransform(): Transform {
   };
 }
 
-const POSITION_EPSILON = 0.001;
-function transformsEqual(a: Transform, b: Transform): boolean {
+/** Sub-millimetre threshold so float jitter from `cursorWorldPosition`
+ *  reads doesn't trigger a network message every frame. The exact
+ *  value is unimportant — anywhere from 1e-4 to 1e-2 is fine; the
+ *  point is to coalesce "no actual movement" into "no message." */
+export const POSITION_EPSILON = 0.001;
+
+/** Pure equality check used by the outbound pump to skip sends
+ *  when nothing changed. Quaternion / scale not compared because
+ *  the hook doesn't (yet) source either from the client. Exported
+ *  for tests. */
+export function transformsEqual(a: Transform, b: Transform): boolean {
   return (
     Math.abs(a.position[0] - b.position[0]) <= POSITION_EPSILON &&
     Math.abs(a.position[1] - b.position[1]) <= POSITION_EPSILON &&

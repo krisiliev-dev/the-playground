@@ -15,7 +15,33 @@
  */
 import { useMemo } from 'react';
 import { useWorldStore } from '@/store';
-import type { Entity } from '@/multiplayer/types';
+import type { Entity, EntityId } from '@/multiplayer/types';
+
+/** Pure filter: which entities should render as remote-player
+ *  cubes for a viewer at `currentRoute` whose own entity id is
+ *  `localPlayerId`. Exported for direct testing — the rendering
+ *  side is a thin wrapper over this. */
+export function selectRemotePlayers(
+  entities: ReadonlyMap<EntityId, Entity>,
+  localPlayerId: EntityId | null,
+  currentRoute: string,
+): Entity[] {
+  const list: Entity[] = [];
+  for (const entity of entities.values()) {
+    if (entity.kind !== 'player') {
+      continue;
+    }
+    if (entity.id === localPlayerId) {
+      continue;
+    }
+    const route = (entity.props as { route?: string }).route ?? '/';
+    if (route !== currentRoute) {
+      continue;
+    }
+    list.push(entity);
+  }
+  return list;
+}
 
 // Placeholder marker for remote players — a small colored cube
 // while the proper GLB cursor reuse is on the follow-up slice.
@@ -30,23 +56,10 @@ export function RemotePlayers(): JSX.Element {
   const localPlayerId = useWorldStore((s) => s.localPlayerId);
   const currentRoute = useWorldStore((s) => s.currentRoute);
 
-  const remotePlayers = useMemo(() => {
-    const list: Entity[] = [];
-    for (const entity of entities.values()) {
-      if (entity.kind !== 'player') {
-        continue;
-      }
-      if (entity.id === localPlayerId) {
-        continue;
-      }
-      const route = (entity.props as { route?: string }).route ?? '/';
-      if (route !== currentRoute) {
-        continue;
-      }
-      list.push(entity);
-    }
-    return list;
-  }, [entities, localPlayerId, currentRoute]);
+  const remotePlayers = useMemo(
+    () => selectRemotePlayers(entities, localPlayerId, currentRoute),
+    [entities, localPlayerId, currentRoute],
+  );
 
   return (
     <>
