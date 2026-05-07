@@ -620,6 +620,16 @@ function ActiveCursor(): JSX.Element {
       keys.current.w || keys.current.a || keys.current.s || keys.current.d;
 
     const onDown = (e: KeyboardEvent): void => {
+      // Suppress movement input when the pause menu is open or
+      // we're in the Simple Experience document mode — both put
+      // the user "in chrome" and movement should freeze. Without
+      // this gate, holding W during a menu open continues walking
+      // the avatar even though mouselook is paused (pointer-lock
+      // released by PauseMenu).
+      const state = useWorldStore.getState();
+      if (state.menuOpen || state.documentMode) {
+        return;
+      }
       const k = e.key.toLowerCase();
       const wasMoving = anyKeyHeld();
       if (k === 'w') {
@@ -658,6 +668,23 @@ function ActiveCursor(): JSX.Element {
       window.removeEventListener('keyup', onUp);
     };
   }, []);
+
+  // Clear any held WASD keys + stop the move loop when chrome
+  // takes over (pause menu opens, document mode entered). Without
+  // this, a key held *during* the menu-open transition stays
+  // logically pressed because the keyup listener is still bound
+  // but the user might switch focus to the menu and never
+  // release. Result: avatar walks indefinitely while paused.
+  const movementChromeFlags = useWorldStore((s) => (s.menuOpen ? 1 : 0) | (s.documentMode ? 2 : 0));
+  useEffect(() => {
+    if (movementChromeFlags !== 0) {
+      keys.current.w = false;
+      keys.current.a = false;
+      keys.current.s = false;
+      keys.current.d = false;
+      sfx.stop('cursorMove', 80);
+    }
+  }, [movementChromeFlags]);
 
   /** World-space target the cursor leans toward while a press is
    *  active. Read each frame from the store; a non-null value pulls

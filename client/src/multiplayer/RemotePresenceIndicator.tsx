@@ -5,13 +5,28 @@
  * for presence keys (menu, etc.) and renders the corresponding
  * world-space affordance over that player's cursor.
  *
- * Slice 3a: only the menu plane is wired. Slice 3b will add
+ * The menu panel uses drei's `<Html transform>` to embed the
+ * actual pause-menu DOM in 3D space — this gives pixel-perfect
+ * fidelity with the local pause menu (same CSS, same layout, no
+ * hand-rolled 3D approximation). The DOM is rendered read-only
+ * (no click handlers, no state) since it's a presence indicator,
+ * not an interactive surface.
+ *
+ * A solid 3D back plate is parented behind the Html so an
+ * observer who walks around the remote cursor sees an opaque
+ * back — CSS3D backfaces would otherwise show the menu mirrored
+ * (or invisible if `backfaceVisibility: hidden` is set).
+ *
+ * Slice 3a: only the menu panel is wired. Slice 3b will add
  * proximity-based interactable highlights (the `near` prop is
  * surfaced into the world via the *target* object animating, not
  * a per-player overlay, so it doesn't render here).
  */
-import { Text } from '@react-three/drei';
+import { useRef } from 'react';
+import { Billboard, Html } from '@react-three/drei';
+import type { Group } from 'three';
 import type { Entity } from './types';
+import { RemotePauseMenuView } from './RemotePauseMenuView';
 
 interface RemotePresenceIndicatorProps {
   entity: Entity;
@@ -20,13 +35,7 @@ interface RemotePresenceIndicatorProps {
 export function RemotePresenceIndicator({ entity }: RemotePresenceIndicatorProps): JSX.Element {
   const menu = readMenu(entity);
 
-  return (
-    <>
-      {menu !== null && <MenuPanel />}
-      {/* Future slice 3b additions go here — but `near` is rendered on
-          the *target* object, not over the cursor, so it lives elsewhere. */}
-    </>
-  );
+  return <>{menu !== null && <MenuPanel />}</>;
 }
 
 /** Type-narrow the opaque entity.props.menu value into a string|null.
@@ -42,92 +51,64 @@ function readMenu(entity: Entity): string | null {
 }
 
 // ─── Menu panel ───────────────────────────────────────────────
-// All sizes are in the *pre-scale* frame — the parent cursor
-// group multiplies by REMOTE_AVATAR_SCALE (0.03), so a width
-// of 80 here ends up ~2.4 world units. Tuned so the menu
-// is comfortably readable a few units away from the remote
-// cursor without dwarfing the cursor model itself.
+// All offsets are in the *pre-scale* frame — the parent cursor
+// group multiplies by REMOTE_AVATAR_SCALE (0.03), so a vertical
+// offset of 60 here ends up ~1.8 world units above the cursor.
 
-const PANEL_WIDTH = 80;
-const PANEL_HEIGHT = 110;
-const PANEL_FORWARD_OFFSET = 90;
-const PANEL_VERTICAL_OFFSET = 30;
-const PANEL_BG_COLOR = '#0f1117';
-const PANEL_BORDER_COLOR = '#00ffcc';
-const PANEL_OPACITY = 0.92;
+const PANEL_VERTICAL_OFFSET = 60;
+const HTML_DISTANCE_FACTOR = 80;
 
-const TEXT_COLOR = '#e0e0e8';
-const TEXT_SIZE = 7.5;
-const TEXT_LINE_SPACING = 11;
+/** Solid back plate sized to fit roughly behind the rendered DOM
+ *  panel. Width/height are in pre-scale units; the cursor group's
+ *  0.03 scale brings them down to world dimensions. The Html element
+ *  pins itself to a 0,0,0 origin within the Billboard, with its CSS
+ *  size determining visible footprint — the back plate just needs
+ *  to be large enough to occlude that footprint from behind. */
+const BACK_PLATE_WIDTH = 90;
+const BACK_PLATE_HEIGHT = 130;
+const BACK_PLATE_BG = '#12121a';
+const BACK_PLATE_BORDER = '#00ffcc';
+const BACK_PLATE_OPACITY = 0.95;
 
-/** Items match the local PauseMenu's section list. Kept hand-
- *  synced rather than imported from `PauseMenu.tsx` because that
- *  module pulls in DOM-only dependencies (react-router); a quiet
- *  duplication is cheaper than a circular-dep workaround. Update
- *  both when the section list changes. */
-const MENU_ITEMS: readonly string[] = [
-  'Home',
-  'About',
-  'Projects',
-  'Writing',
-  'Contact',
-  'Simple Experience',
-];
-
-/**
- * The menu panel — a stylised 2D plane with the section list
- * rendered as 3D text. Orientation: rotated 180° around Y so
- * its front face points back at the remote cursor (i.e. the
- * "owner" of the menu reads it). Other viewers see it from
- * whatever angle they're at — walking around the remote cursor
- * naturally reveals the back/sides of the panel, like watching
- * someone read a book.
- */
 function MenuPanel(): JSX.Element {
-  // Total stack height for vertical centring.
-  const stackHeight = (MENU_ITEMS.length - 1) * TEXT_LINE_SPACING;
-  const topY = stackHeight / 2;
+  const groupRef = useRef<Group>(null);
 
+  // Billboard wraps the panel so it always faces the local viewer's
+  // camera, regardless of how the remote cursor's group is rotated.
+  // Without this, the panel would inherit the cursor's mouselook
+  // rotation and orbit visibly as the remote player turned.
   return (
-    <group
-      position={[0, PANEL_VERTICAL_OFFSET, PANEL_FORWARD_OFFSET]}
-      // 180° around Y: the panel's geometry default-faces local +Z;
-      // we want it facing local -Z so the cursor (at local origin,
-      // looking down +Z toward the panel) sees the FRONT of it.
-      rotation={[0, Math.PI, 0]}
-    >
-      {/* Background. Slight inset border via two stacked planes —
-          cheaper than a textured border and reads cleanly at the
-          panel's size. */}
-      <mesh frustumCulled={false}>
-        <planeGeometry args={[PANEL_WIDTH + 2, PANEL_HEIGHT + 2]} />
-        <meshBasicMaterial
-          color={PANEL_BORDER_COLOR}
-          transparent
-          opacity={PANEL_OPACITY * 0.55}
-        />
+    <Billboard ref={groupRef} position={[0, PANEL_VERTICAL_OFFSET, 0]} follow>
+      {/* Solid back plate — placed slightly behind the Html origin
+          so observers viewing from the back of the panel see an
+          opaque rectangle instead of the CSS3D backface (which
+          would otherwise show the DOM mirrored or transparent). */}
+      <mesh position={[0, 0, -1]} frustumCulled={false}>
+        <planeGeometry args={[BACK_PLATE_WIDTH + 4, BACK_PLATE_HEIGHT + 4]} />
+        <meshBasicMaterial color={BACK_PLATE_BORDER} transparent opacity={0.55} />
       </mesh>
-      <mesh frustumCulled={false} position={[0, 0, 0.05]}>
-        <planeGeometry args={[PANEL_WIDTH, PANEL_HEIGHT]} />
-        <meshBasicMaterial color={PANEL_BG_COLOR} transparent opacity={PANEL_OPACITY} />
+      <mesh position={[0, 0, -0.95]} frustumCulled={false}>
+        <planeGeometry args={[BACK_PLATE_WIDTH, BACK_PLATE_HEIGHT]} />
+        <meshBasicMaterial color={BACK_PLATE_BG} transparent opacity={BACK_PLATE_OPACITY} />
       </mesh>
 
-      {/* Section labels — top to bottom, line-spaced. Each item is
-          a separate <Text> — drei caches the font/SDF atlas, so
-          additional labels are cheap. The slight forward offset
-          (+0.1 z) keeps the text from z-fighting the bg plane. */}
-      {MENU_ITEMS.map((label, i) => (
-        <Text
-          key={label}
-          position={[0, topY - i * TEXT_LINE_SPACING, 0.1]}
-          fontSize={TEXT_SIZE}
-          color={TEXT_COLOR}
-          anchorX="center"
-          anchorY="middle"
-        >
-          {label}
-        </Text>
-      ))}
-    </group>
+      {/* Pixel-perfect pause-menu DOM, projected into 3D via
+          drei's Html transform. distanceFactor scales the CSS
+          pixels relative to world units; tuned with the cursor's
+          REMOTE_AVATAR_SCALE so the panel reads at a comfortable
+          size from typical viewing distances. */}
+      <Html
+        transform
+        sprite={false}
+        distanceFactor={HTML_DISTANCE_FACTOR}
+        occlude={false}
+        pointerEvents="none"
+        zIndexRange={[0, 0]}
+      >
+        <div style={{ pointerEvents: 'none', userSelect: 'none' }}>
+          <RemotePauseMenuView />
+        </div>
+      </Html>
+    </Billboard>
   );
 }
