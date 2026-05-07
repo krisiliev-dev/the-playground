@@ -32,6 +32,57 @@ import { useWorldStore } from '@/store';
 import { sfx } from '../audio/SfxManager';
 import { cursorWorldPosition } from './cursorWorldPosition';
 
+/**
+ * Shape of the interactable metadata stored on a mesh's
+ * `Three.Mesh.userData`. The userData prop is `Record<string,
+ * unknown>` upstream — using a branded interface + accessors gives
+ * us spell-check on field names and a single place to evolve the
+ * schema.
+ */
+export interface InteractableUserData {
+  readonly interactable: true;
+  readonly interactableId: string;
+  readonly interactableRange: number;
+}
+
+/** Tag a mesh's userData with the interactable fields the central
+ *  raycaster looks for. Mutates `mesh.userData` in place. */
+export function setInteractableUserData(mesh: Mesh, data: InteractableUserData): void {
+  mesh.userData.interactable = data.interactable;
+  mesh.userData.interactableId = data.interactableId;
+  mesh.userData.interactableRange = data.interactableRange;
+}
+
+/** Remove the interactable userData fields, e.g. on hook unmount.
+ *  Other userData entries are untouched. */
+export function clearInteractableUserData(mesh: Mesh): void {
+  delete mesh.userData.interactable;
+  delete mesh.userData.interactableId;
+  delete mesh.userData.interactableRange;
+}
+
+/** Read the typed interactable userData from any Object3D, or
+ *  return null if the object isn't tagged or is partially tagged
+ *  (e.g. the mesh outlived the hook's cleanup). The defensive
+ *  `typeof` checks act as the runtime type guard. */
+export function getInteractableUserData(obj: Object3D): InteractableUserData | null {
+  const ud = obj.userData;
+  if (ud.interactable !== true) {
+    return null;
+  }
+  if (typeof ud.interactableId !== 'string') {
+    return null;
+  }
+  if (typeof ud.interactableRange !== 'number') {
+    return null;
+  }
+  return {
+    interactable: true,
+    interactableId: ud.interactableId,
+    interactableRange: ud.interactableRange,
+  };
+}
+
 /** Maximum distance (world units) at which an object is considered
  *  interactable. The cube is 800 units across; 60 units puts the
  *  reach at "things in close visual proximity, not the entire room". */
@@ -221,23 +272,21 @@ export function useInteractable(opts: UseInteractableOpts): UseInteractableResul
     };
   }, [id, onInteract]);
 
-  // Tag the mesh's userData so the central raycaster knows which hits
-  // count + can read back the id. Re-applies whenever the ref settles
-  // on a new mesh (rare, but cheap).
+  // Tag the mesh's userData so the central raycaster knows which
+  // hits count + can read back the id. Set/clear via the typed
+  // accessors so all writes go through one schema-aware site.
   useEffect(() => {
     const mesh = ref.current;
     if (!mesh) {
       return;
     }
-    mesh.userData.interactable = true;
-    mesh.userData.interactableId = id;
-    mesh.userData.interactableRange = range;
+    setInteractableUserData(mesh, {
+      interactable: true,
+      interactableId: id,
+      interactableRange: range,
+    });
     return () => {
-      // Clear so the raycaster doesn't hold a stale reference if the
-      // mesh outlives the hook.
-      delete mesh.userData.interactable;
-      delete mesh.userData.interactableId;
-      delete mesh.userData.interactableRange;
+      clearInteractableUserData(mesh);
     };
   }, [id, range, ref]);
 
@@ -316,17 +365,16 @@ export function InteractionController(): null {
     let hoveredId: string | null = null;
     let hitPoint: Vector3 | null = null;
     for (const hit of hits) {
-      const data = hit.object.userData;
-      if (!data.interactable) {
+      const data = getInteractableUserData(hit.object);
+      if (!data) {
         continue;
       }
-      const range = (data.interactableRange as number | undefined) ?? INTERACT_RANGE;
-      if (hit.distance > range) {
+      if (hit.distance > data.interactableRange) {
         // Out of range — stop walking, nothing closer is interactable.
         // (Hits are sorted by distance.)
         break;
       }
-      hoveredId = (data.interactableId as string | undefined) ?? null;
+      hoveredId = data.interactableId;
       hitPoint = hit.point;
       break;
     }

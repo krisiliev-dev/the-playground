@@ -15,8 +15,77 @@
  */
 import { describe, it, expect } from 'vitest';
 import { Vector3 } from 'three';
-import { MAX_PORTAL_RECURSION, buildPortalEndpoints, getPaired } from '@/content/portals';
+import {
+  MAX_PORTAL_RECURSION,
+  NEARLY_VERTICAL_DOT,
+  buildPortalEndpoints,
+  getPaired,
+  wallBasis,
+} from '@/content/portals';
 import type { ClickHit } from '@/store';
+
+describe('wallBasis', () => {
+  it('produces orthonormal right + up axes for the -Z wall', () => {
+    // -Z wall click: inward normal is +Z. Expected right = +X
+    // (worldUp × +Z = +X), up = +Y.
+    const right = new Vector3();
+    const up = new Vector3();
+    wallBasis([0, 0, 1], right, up);
+    expect(right.x).toBeCloseTo(1, 6);
+    expect(right.y).toBeCloseTo(0, 6);
+    expect(right.z).toBeCloseTo(0, 6);
+    expect(up.x).toBeCloseTo(0, 6);
+    expect(up.y).toBeCloseTo(1, 6);
+    expect(up.z).toBeCloseTo(0, 6);
+  });
+
+  it('falls back to world +X for nearly-vertical normals (floor / ceiling)', () => {
+    // Floor click: inward normal points +Y. Cross of +Y × +Y = 0
+    // (collapses), so right falls back to (1, 0, 0).
+    const right = new Vector3();
+    const up = new Vector3();
+    wallBasis([0, 1, 0], right, up);
+    expect(right.x).toBeCloseTo(1, 6);
+    expect(right.y).toBeCloseTo(0, 6);
+    expect(right.z).toBeCloseTo(0, 6);
+    // up = normal × right = +Y × +X = -Z
+    expect(up.z).toBeCloseTo(-1, 6);
+  });
+
+  it('right and up are perpendicular to the normal', () => {
+    // Property check across multiple wall normals.
+    const cases: [number, number, number][] = [
+      [0, 0, 1],
+      [0, 0, -1],
+      [1, 0, 0],
+      [-1, 0, 0],
+      [0.5, 0.2, 0.85],
+    ];
+    const right = new Vector3();
+    const up = new Vector3();
+    for (const n of cases) {
+      wallBasis(n, right, up);
+      const normalized = new Vector3(...n).normalize();
+      expect(right.dot(normalized)).toBeCloseTo(0, 5);
+      expect(up.dot(normalized)).toBeCloseTo(0, 5);
+      expect(right.dot(up)).toBeCloseTo(0, 5);
+    }
+  });
+
+  it('writes into the caller-supplied vectors (no allocation in hot path)', () => {
+    const right = new Vector3(99, 99, 99);
+    const up = new Vector3(99, 99, 99);
+    wallBasis([0, 0, 1], right, up);
+    // Original values overwritten — same instances reused.
+    expect(right.x).toBeCloseTo(1, 6);
+    expect(up.y).toBeCloseTo(1, 6);
+  });
+
+  it('NEARLY_VERTICAL_DOT is in (0, 1] — sentinel for the fallback threshold', () => {
+    expect(NEARLY_VERTICAL_DOT).toBeGreaterThan(0);
+    expect(NEARLY_VERTICAL_DOT).toBeLessThanOrEqual(1);
+  });
+});
 
 describe('MAX_PORTAL_RECURSION', () => {
   it('is a positive integer', () => {
