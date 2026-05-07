@@ -28,7 +28,7 @@
  *   local Y axes agree on what "up" means.
  */
 import { Quaternion, Vector3 } from 'three';
-import type { PortalEndpoint } from '@/content/portals';
+import type { PortalEndpoint, PortalTrigger } from '@/content/portals';
 
 const SCRATCH_NORMAL = new Vector3();
 const SCRATCH_TO_PLAYER = new Vector3();
@@ -346,22 +346,41 @@ export function virtualCameraPose(
   };
 }
 
-/** Result of a successful walk-cross detection. */
-export interface PortalCrossing {
-  /** Endpoint the player walked through. */
-  readonly source: PortalEndpoint;
-  /** Endpoint they emerge from. */
-  readonly destination: PortalEndpoint;
-  /** New world position to snap the player to. */
-  readonly position: { x: number; y: number; z: number };
-  /** New world yaw. */
-  readonly yaw: number;
-}
+/** Result of a successful walk-cross detection.
+ *
+ * Discriminated by `kind`:
+ *   - `'teleport'`: standard portal — caller applies `teleportPose`
+ *     to land at `destination`.
+ *   - `'trigger'`: side-effect endpoint (Simple Experience portal) —
+ *     caller fires the matching action; no teleport happens.
+ *
+ * Splitting via the union keeps `destination` non-nullable on the
+ * teleport branch, so callers don't need to defensive-null-check it.
+ */
+export type PortalCrossing =
+  | {
+      readonly kind: 'teleport';
+      /** Endpoint the player walked through. */
+      readonly source: PortalEndpoint;
+      /** Endpoint they emerge from. */
+      readonly destination: PortalEndpoint;
+      /** New world position to snap the player to. */
+      readonly position: { x: number; y: number; z: number };
+      /** New world yaw. */
+      readonly yaw: number;
+    }
+  | {
+      readonly kind: 'trigger';
+      /** Endpoint the player walked through. */
+      readonly source: PortalEndpoint;
+      /** Which trigger to fire — mirrors `source.trigger`, lifted
+       *  here so consumers don't have to re-read the source. */
+      readonly trigger: PortalTrigger;
+    };
 
 /**
  * Per-frame walk-cross detection. Given the player's previous and
- * current positions, returns the portal crossing — if any —
- * together with the resolved teleport pose.
+ * current positions, returns the portal crossing — if any.
  *
  * Conditions for a crossing:
  *   1. Sign flip in the player's signed distance to the endpoint's
@@ -371,7 +390,9 @@ export interface PortalCrossing {
  *      be from the active side (prev > 0 → cur ≤ 0). Inactive-side
  *      crossings on single-sided endpoints return null — the
  *      player passes through with no teleport.
- *   4. The endpoint must have a valid paired endpoint.
+ *   4. For teleport endpoints, the paired endpoint must resolve.
+ *      Trigger endpoints (e.g. Simple Experience) skip this check
+ *      since there's no destination.
  *
  * Returns the first matching crossing. Endpoints on coplanar walls
  * are unlikely to overlap in our config, so order is unambiguous
@@ -409,11 +430,17 @@ export function findCrossedPortal(
       continue;
     }
 
-    // Pairing must be valid. We don't reach into the registry here
-    // (these helpers are pure); the caller passes the full endpoint
-    // list, so we can resolve the pair locally. Reciprocity is NOT
-    // required — chain-style pairing (A→B→C→A) is a valid graph and
-    // all three exits are well-defined even though no edge is two-way.
+    // Trigger endpoints short-circuit the teleport path — no pairing
+    // required, no pose computation. The caller dispatches on
+    // `source.trigger` to run whatever side effect the trigger names.
+    if (ep.trigger) {
+      return { kind: 'trigger', source: ep, trigger: ep.trigger };
+    }
+
+    // Pairing must be valid for teleport endpoints. Reciprocity is
+    // NOT required — chain-style pairing (A→B→C→A) is a valid graph
+    // and all three exits are well-defined even though no edge is
+    // two-way.
     const paired = endpoints.find((other) => other.id === ep.pairedWith);
     if (!paired) {
       continue;
@@ -423,11 +450,10 @@ export function findCrossedPortal(
     // here — that's a per-call argument when the avatar applies the
     // transform. For the cross detection function, we expose yaw=0
     // and let the caller re-derive yaw using `teleportPose` with
-    // the avatar's actual yaw. (We could plumb yaw through this
-    // function too, but keeping the cross-detection API minimal
-    // avoids leaking avatar concerns into pure portal math.)
+    // the avatar's actual yaw.
     const { position } = teleportPose(curPos, 0, ep, paired);
     return {
+      kind: 'teleport',
       source: ep,
       destination: paired,
       position,

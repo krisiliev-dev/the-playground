@@ -27,6 +27,28 @@ export const RIM_PARTICLE_SPEED_MAX = 9;
  *  while still letting some particles drift along the rim. */
 export const RIM_PARTICLE_OUTWARD_BIAS = 0.6;
 
+/** Which of a portal rectangle's 4 edges are allowed to spawn
+ *  particles. Formation portals (the 2x2 cluster on the formation
+ *  wall) only spawn on their *outer* edges so the inter-portal gaps
+ *  stay clean of particle clutter; standalone portals spawn on all
+ *  four edges by default. */
+export interface RimEdgeMask {
+  readonly top: boolean;
+  readonly right: boolean;
+  readonly bottom: boolean;
+  readonly left: boolean;
+}
+
+/** Default mask — every edge active. Pure helper so the factory and
+ *  tests have a canonical "all edges" value without re-creating
+ *  object literals. */
+export const RIM_ALL_EDGES: RimEdgeMask = {
+  top: true,
+  right: true,
+  bottom: true,
+  left: true,
+};
+
 export interface RimParticle {
   /** Spawn position in the rim's local frame. */
   readonly origin: Vector3;
@@ -64,9 +86,18 @@ export function buildRimPalette(rimColor: string): Color[] {
  * already looks like a steady-state cloud rather than a synchronized
  * burst at full size.
  *
+ * `edges` restricts which edges of the rectangle are allowed to
+ * spawn — defaults to all four. Disabled edges contribute zero
+ * length to the perimeter walk, so the random pick is uniformly
+ * distributed across only the enabled edges.
+ *
  * The `random` parameter defaults to `Math.random` and exists so
  * tests can pass a deterministic generator and pin spawn positions /
  * velocities exactly.
+ *
+ * If `edges` has no enabled edges, falls back to all 4 edges — the
+ * caller almost certainly meant the default but we don't want a
+ * silently zero-length perimeter to NaN out the whole pool.
  */
 export function respawnRimParticle(
   p: RimParticle,
@@ -75,28 +106,41 @@ export function respawnRimParticle(
   palette: ReadonlyArray<Color>,
   stagger: boolean,
   random: () => number = Math.random,
+  edges: RimEdgeMask = RIM_ALL_EDGES,
 ): void {
   const halfW = width / 2;
   const halfH = height / 2;
-  const perimeter = 2 * width + 2 * height;
+  const effective = edgesOrDefault(edges);
+
+  // Each edge contributes its own length to the active perimeter,
+  // gated by the mask. Walking the random `t` across only the
+  // enabled segments keeps the spawn distribution uniform across
+  // whichever edges are turned on.
+  const lengths = {
+    top: effective.top ? width : 0,
+    right: effective.right ? height : 0,
+    bottom: effective.bottom ? width : 0,
+    left: effective.left ? height : 0,
+  };
+  const perimeter = lengths.top + lengths.right + lengths.bottom + lengths.left;
   const t = random() * perimeter;
 
-  // Walk the perimeter to pick a spawn point and remember which
-  // edge it landed on so we can bias velocity toward that edge's
-  // outward normal.
   let edgeNormalX = 0;
   let edgeNormalY = 0;
-  if (t < width) {
+  if (t < lengths.top) {
     p.origin.set(-halfW + t, halfH, 0);
     edgeNormalY = 1;
-  } else if (t < width + height) {
-    p.origin.set(halfW, halfH - (t - width), 0);
+  } else if (t < lengths.top + lengths.right) {
+    const u = t - lengths.top;
+    p.origin.set(halfW, halfH - u, 0);
     edgeNormalX = 1;
-  } else if (t < 2 * width + height) {
-    p.origin.set(halfW - (t - width - height), -halfH, 0);
+  } else if (t < lengths.top + lengths.right + lengths.bottom) {
+    const u = t - lengths.top - lengths.right;
+    p.origin.set(halfW - u, -halfH, 0);
     edgeNormalY = -1;
   } else {
-    p.origin.set(-halfW, -halfH + (t - 2 * width - height), 0);
+    const u = t - lengths.top - lengths.right - lengths.bottom;
+    p.origin.set(-halfW, -halfH + u, 0);
     edgeNormalX = -1;
   }
 
@@ -126,4 +170,15 @@ export function respawnRimParticle(
   const idx = Math.floor(random() * palette.length);
   const picked = palette[idx]!;
   p.color.copy(picked);
+}
+
+/** Defensive fallback: a mask with all 4 edges off would collapse
+ *  the perimeter to 0 and produce NaN positions. Treat that as a
+ *  caller error and fall back to all-edges so the pool keeps
+ *  rendering rather than silently exploding. */
+function edgesOrDefault(edges: RimEdgeMask): RimEdgeMask {
+  if (!edges.top && !edges.right && !edges.bottom && !edges.left) {
+    return RIM_ALL_EDGES;
+  }
+  return edges;
 }

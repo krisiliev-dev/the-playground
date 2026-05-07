@@ -37,7 +37,8 @@ const A: PortalEndpoint = {
   quaternion: [0, 0, 0, 1],
   size: { width: 60, height: 80 },
   sidedness: 'single',
-  rim: { color: '#00ffcc', particleCount: 0 },
+  rim: { color: '#00ffcc' },
+  route: '/',
 };
 const B: PortalEndpoint = {
   id: 'B',
@@ -46,7 +47,8 @@ const B: PortalEndpoint = {
   quaternion: [0, 0, 0, 1],
   size: { width: 60, height: 80 },
   sidedness: 'single',
-  rim: { color: '#ff6ec7', particleCount: 0 },
+  rim: { color: '#ff6ec7' },
+  route: '/',
 };
 const PAIR: ReadonlyArray<PortalEndpoint> = [A, B];
 
@@ -216,9 +218,33 @@ describe('findCrossedPortal', () => {
       { x: -100, y: 0, z: -390 }, // 10 past A's plane on the inactive side
       PAIR,
     );
-    expect(result?.source.id).toBe('A');
-    expect(result?.destination.id).toBe('B');
-    expect(result?.position.x).toBeCloseTo(100, 5);
+    expect(result?.kind).toBe('teleport');
+    if (result?.kind !== 'teleport') {
+      throw new Error('expected teleport crossing');
+    }
+    expect(result.source.id).toBe('A');
+    expect(result.destination.id).toBe('B');
+    expect(result.position.x).toBeCloseTo(100, 5);
+  });
+
+  it('returns a trigger crossing for endpoints with `trigger` set', () => {
+    // A trigger endpoint (e.g. the Simple Experience portal) returns
+    // a trigger-kind crossing instead of a teleport — no destination
+    // computation, no pair lookup.
+    const triggerA: PortalEndpoint = {
+      ...A,
+      pairedWith: '',
+      trigger: 'simple-experience',
+    };
+    const result = findCrossedPortal({ x: -100, y: 0, z: -370 }, { x: -100, y: 0, z: -390 }, [
+      triggerA,
+    ]);
+    expect(result?.kind).toBe('trigger');
+    if (result?.kind !== 'trigger') {
+      throw new Error('expected trigger crossing');
+    }
+    expect(result.source.id).toBe('A');
+    expect(result.trigger).toBe('simple-experience');
   });
 
   it('does NOT teleport on a single-sided endpoint crossed from the inactive side', () => {
@@ -495,7 +521,8 @@ describe('virtualCameraPose — same-portal cascade chain', () => {
     quaternion: [0, SQRT_HALF, 0, SQRT_HALF], // +90° Y → local +Z = world +X
     size: { width: 60, height: 80 },
     sidedness: 'single',
-    rim: { color: '#00ffcc', particleCount: 0 },
+    rim: { color: '#00ffcc' },
+    route: '/',
   };
   const B_X: PortalEndpoint = {
     id: 'B',
@@ -504,7 +531,8 @@ describe('virtualCameraPose — same-portal cascade chain', () => {
     quaternion: [0, -SQRT_HALF, 0, SQRT_HALF], // -90° Y → local +Z = world -X
     size: { width: 60, height: 80 },
     sidedness: 'single',
-    rim: { color: '#ff6ec7', particleCount: 0 },
+    rim: { color: '#ff6ec7' },
+    route: '/',
   };
   const STEP = B_X.position[0] - A_X.position[0]; // +300 along world X
 
@@ -571,7 +599,8 @@ describe('bobbedEndpoint', () => {
     quaternion: [0, 0, 0, 1],
     size: { width: 60, height: 80 },
     sidedness: 'single',
-    rim: { color: '#00ffcc', particleCount: 0 },
+    rim: { color: '#00ffcc' },
+    route: '/',
   };
 
   it('shifts only Y by the given offset', () => {
