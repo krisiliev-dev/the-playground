@@ -152,6 +152,16 @@ pub fn validate_event(
                 duration_ms: duration_ms.min(1500),
             })
         }
+        SceneEventKind::AssetAvailable { .. } => {
+            // AssetAvailable is server-originated only — never
+            // sent by a player. If a player tries to forge one
+            // (which only matters if they somehow bypassed our
+            // wire-format types), drop it: clients shouldn't
+            // trust asset URLs that didn't come from a verified
+            // upload. No rate-limit, no clamps; this branch is
+            // pure rejection.
+            ValidationOutcome::Drop
+        }
     }
 }
 

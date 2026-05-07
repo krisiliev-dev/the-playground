@@ -68,8 +68,44 @@ async fn main() {
             "failed to ensure assets directory exists"
         );
     }
+    // Asset metadata index lives next to the assets directory.
+    // ASSET_INDEX env var overrides for deploys that want index +
+    // assets in different locations (e.g. index on local disk,
+    // assets on a remote volume).
+    let asset_index_path: std::path::PathBuf = std::env::var("ASSET_INDEX")
+        .unwrap_or_else(|_| {
+            assets_dir
+                .parent()
+                .unwrap_or(std::path::Path::new("."))
+                .join("assets.json")
+                .display()
+                .to_string()
+        })
+        .into();
 
-    let state = AppState::new(admin_token, assets_dir.clone());
+    let state = AppState::new(admin_token, assets_dir.clone(), asset_index_path.clone());
+
+    // Restore the asset registry from disk. Same graceful policy
+    // as the entity snapshot — missing file is cold start, parse
+    // errors are logged and we proceed with an empty index.
+    {
+        match assets::load_index(&asset_index_path).await {
+            Ok(loaded) => {
+                let n = loaded.len();
+                *state.asset_registry.write().await = loaded;
+                tracing::info!(
+                    restored = n,
+                    path = %asset_index_path.display(),
+                    "loaded asset index"
+                );
+            }
+            Err(e) => tracing::warn!(
+                error = %e,
+                path = %asset_index_path.display(),
+                "asset index load failed; starting empty"
+            ),
+        }
+    }
 
     // Restore prior admin-authored scene state from disk. Missing
     // file is OK (cold start). Corrupt or version-mismatched file
@@ -116,6 +152,9 @@ async fn main() {
         // bytes; ?ext=mp3 query param sets the file extension.
         // Returns the content-addressed URL.
         .route("/api/admin/assets", post(handlers::post_admin_asset))
+        // Admin-only listing of all uploaded assets — admin UI's
+        // asset picker reads from here.
+        .route("/api/admin/assets", get(handlers::get_admin_assets))
         // Public static serving of uploaded assets. Content-
         // addressed URLs mean these are safe to cache aggressively;
         // ServeDir handles MIME types + byte-range requests.

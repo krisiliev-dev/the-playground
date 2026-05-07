@@ -103,7 +103,7 @@ pub async fn post_admin_asset(
         return StatusCode::UNAUTHORIZED.into_response();
     }
     let extension = q.get("ext").map(|s| s.as_str()).unwrap_or("bin");
-    match assets::save_upload(
+    let meta = match assets::save_upload(
         &body,
         extension,
         &state.assets_dir,
@@ -111,14 +111,68 @@ pub async fn post_admin_asset(
     )
     .await
     {
-        Ok(meta) => (StatusCode::CREATED, Json(meta)).into_response(),
-        Err(assets::UploadError::Oversized { .. }) => StatusCode::PAYLOAD_TOO_LARGE.into_response(),
-        Err(assets::UploadError::InvalidExtension) => StatusCode::BAD_REQUEST.into_response(),
+        Ok(meta) => meta,
+        Err(assets::UploadError::Oversized { .. }) => {
+            return StatusCode::PAYLOAD_TOO_LARGE.into_response();
+        }
+        Err(assets::UploadError::InvalidExtension) => {
+            return StatusCode::BAD_REQUEST.into_response();
+        }
         Err(e) => {
             tracing::error!(error = %e, "asset upload failed");
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
+    };
+
+    // Insert into the in-memory registry + persist to disk + broadcast
+    // an AssetAvailable event so connected clients can pre-warm cache.
+    // Idempotent: re-uploading the same content (same id) skips the
+    // insert and the broadcast — no spam from "save same file twice."
+    let did_insert = {
+        let mut registry = state.asset_registry.write().await;
+        registry.insert(meta.clone())
+    };
+    if did_insert {
+        // Snapshot the registry while we hold the lock briefly, then
+        // release before the disk write so we don't hold an async
+        // lock across IO.
+        let snapshot = {
+            let registry = state.asset_registry.read().await;
+            assets::AssetRegistry {
+                version: registry.version,
+                assets: registry.assets.clone(),
+            }
+        };
+        if let Err(e) = assets::save_index(&state.asset_index_path, &snapshot).await {
+            tracing::warn!(error = %e, "asset index persist failed (asset still served from disk)");
+        }
+        let _ = state.broadcast_tx.send(ServerMessage::SceneEvent {
+            actor_id: None,
+            event: SceneEventKind::AssetAvailable {
+                id: meta.id.clone(),
+                url: meta.url.clone(),
+                extension: meta.extension.clone(),
+                size: meta.size,
+            },
+        });
     }
+    (StatusCode::CREATED, Json(meta)).into_response()
+}
+
+/// GET /api/admin/assets — admin-only listing endpoint that
+/// returns the current asset registry. Powers the future admin
+/// UI's "available assets" picker; today serves as a debugging
+/// aid (curl it to see what's been uploaded).
+pub async fn get_admin_assets(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    let presented = extract_bearer(&headers).unwrap_or("");
+    if !auth::is_admin_token(presented, &state.admin_token) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let registry = state.asset_registry.read().await;
+    Json(registry.assets.clone()).into_response()
 }
 
 /// Pull the bearer token from an `Authorization: Bearer <token>`

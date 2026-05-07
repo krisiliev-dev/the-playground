@@ -112,7 +112,11 @@ mod tests {
     /// memory cleared, no errors.
     #[tokio::test]
     async fn empty_registry_silent() {
-        let state = AppState::new(String::new(), std::path::PathBuf::from("./test-assets"));
+        let state = AppState::new(
+            String::new(),
+            std::path::PathBuf::from("./test-assets"),
+            std::path::PathBuf::from("./test-assets.json"),
+        );
         let mut rx = state.broadcast_tx.subscribe();
         let mut last_seen = HashMap::new();
         last_seen.insert(uuid::Uuid::new_v4(), portal()); // stale entry
@@ -132,7 +136,11 @@ mod tests {
     /// First tick after an entity is inserted broadcasts it.
     #[tokio::test]
     async fn first_tick_broadcasts_new_entity() {
-        let state = AppState::new(String::new(), std::path::PathBuf::from("./test-assets"));
+        let state = AppState::new(
+            String::new(),
+            std::path::PathBuf::from("./test-assets"),
+            std::path::PathBuf::from("./test-assets.json"),
+        );
         let mut rx = state.broadcast_tx.subscribe();
         let mut last_seen = HashMap::new();
 
@@ -157,7 +165,11 @@ mod tests {
     /// This is the key invariant — idle scene = silent tick loop.
     #[tokio::test]
     async fn unchanged_entity_no_broadcast() {
-        let state = AppState::new(String::new(), std::path::PathBuf::from("./test-assets"));
+        let state = AppState::new(
+            String::new(),
+            std::path::PathBuf::from("./test-assets"),
+            std::path::PathBuf::from("./test-assets.json"),
+        );
         let mut rx = state.broadcast_tx.subscribe();
         let mut last_seen = HashMap::new();
 
@@ -178,7 +190,11 @@ mod tests {
     /// entity, not the whole registry.
     #[tokio::test]
     async fn mutation_only_broadcasts_changed() {
-        let state = AppState::new(String::new(), std::path::PathBuf::from("./test-assets"));
+        let state = AppState::new(
+            String::new(),
+            std::path::PathBuf::from("./test-assets"),
+            std::path::PathBuf::from("./test-assets.json"),
+        );
         let mut rx = state.broadcast_tx.subscribe();
         let mut last_seen = HashMap::new();
 
@@ -223,7 +239,11 @@ mod tests {
     /// registry — otherwise long-running servers leak ids.
     #[tokio::test]
     async fn last_seen_prunes_deleted_entities() {
-        let state = AppState::new(String::new(), std::path::PathBuf::from("./test-assets"));
+        let state = AppState::new(
+            String::new(),
+            std::path::PathBuf::from("./test-assets"),
+            std::path::PathBuf::from("./test-assets.json"),
+        );
         let _rx = state.broadcast_tx.subscribe(); // keep channel alive
         let mut last_seen = HashMap::new();
 
@@ -256,7 +276,11 @@ mod tests {
     /// No subscribers ⇒ no work, no error.
     #[tokio::test]
     async fn no_subscribers_skips_work() {
-        let state = AppState::new(String::new(), std::path::PathBuf::from("./test-assets"));
+        let state = AppState::new(
+            String::new(),
+            std::path::PathBuf::from("./test-assets"),
+            std::path::PathBuf::from("./test-assets.json"),
+        );
         // Note: NOT subscribing.
         let mut last_seen = HashMap::new();
 

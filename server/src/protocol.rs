@@ -151,4 +151,16 @@ pub enum SceneEventKind {
         intensity: f32,
         duration_ms: u32,
     },
+    /// A new asset has been uploaded and is ready to fetch from
+    /// `url`. Per ADR-007: lets connected clients pre-warm their
+    /// HTTP cache so the first reference (e.g. an admin-triggered
+    /// `audio` event citing the asset) plays without a cold-fetch
+    /// hitch. Anonymous-actor (broadcast to everyone, not echoed
+    /// from a player).
+    AssetAvailable {
+        id: String,
+        url: String,
+        extension: String,
+        size: u64,
+    },
 }

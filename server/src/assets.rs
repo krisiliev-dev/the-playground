@@ -34,6 +34,105 @@ const ID_HASH_BYTES: usize = 6;
 /// this function.
 pub const DEFAULT_MAX_UPLOAD_BYTES: usize = 50 * 1024 * 1024;
 
+/// Persistent registry of uploaded assets. Loaded on server boot
+/// from `assets.json`, written atomically after each successful
+/// upload. Survives restarts so admin-uploaded assets aren't lost.
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct AssetRegistry {
+    pub version: u32,
+    pub assets: Vec<AssetMeta>,
+}
+
+const REGISTRY_VERSION: u32 = 1;
+
+impl AssetRegistry {
+    pub fn new() -> Self {
+        Self {
+            version: REGISTRY_VERSION,
+            assets: Vec::new(),
+        }
+    }
+
+    /// Insert a new asset, ignoring duplicates by id. Content-
+    /// addressed ids mean re-uploading the same bytes is naturally
+    /// idempotent — same hash → same id → no-op here.
+    pub fn insert(&mut self, meta: AssetMeta) -> bool {
+        if self.assets.iter().any(|a| a.id == meta.id) {
+            return false;
+        }
+        self.assets.push(meta);
+        true
+    }
+
+    pub fn list(&self) -> &[AssetMeta] {
+        &self.assets
+    }
+
+    pub fn len(&self) -> usize {
+        self.assets.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.assets.is_empty()
+    }
+}
+
+#[derive(Debug)]
+pub enum IndexLoadError {
+    Io(std::io::Error),
+    Parse(serde_json::Error),
+    UnsupportedVersion { found: u32, expected: u32 },
+}
+
+impl std::fmt::Display for IndexLoadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io(e) => write!(f, "io error: {e}"),
+            Self::Parse(e) => write!(f, "parse error: {e}"),
+            Self::UnsupportedVersion { found, expected } => {
+                write!(
+                    f,
+                    "unsupported asset registry version {found} (expected {expected})"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for IndexLoadError {}
+
+/// Load the asset registry from disk. Missing file ⇒ empty
+/// registry (cold start). Corrupt or version-mismatched file
+/// returns a typed error so the caller can decide whether to
+/// abort or proceed with an empty registry.
+pub async fn load_index(path: &Path) -> Result<AssetRegistry, IndexLoadError> {
+    let bytes = match tokio::fs::read(path).await {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(AssetRegistry::new()),
+        Err(e) => return Err(IndexLoadError::Io(e)),
+    };
+    let registry: AssetRegistry = serde_json::from_slice(&bytes).map_err(IndexLoadError::Parse)?;
+    if registry.version != REGISTRY_VERSION {
+        return Err(IndexLoadError::UnsupportedVersion {
+            found: registry.version,
+            expected: REGISTRY_VERSION,
+        });
+    }
+    Ok(registry)
+}
+
+/// Persist the asset registry to disk via atomic tmp+rename. The
+/// caller is expected to hold the registry lock while preparing
+/// the snapshot but release it before this disk write to avoid
+/// holding async locks across IO.
+pub async fn save_index(path: &Path, registry: &AssetRegistry) -> Result<(), std::io::Error> {
+    let json = serde_json::to_vec_pretty(registry).map_err(std::io::Error::other)?;
+    let tmp_path: PathBuf = path.with_extension("json.tmp");
+    tokio::fs::write(&tmp_path, &json).await?;
+    tokio::fs::rename(&tmp_path, path).await?;
+    Ok(())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AssetMeta {
     /// `ast_<12-hex>` — content-addressed identifier.
@@ -248,5 +347,79 @@ mod tests {
         assert!(nested.exists());
         let filename = format!("{}.bin", meta.id);
         assert!(nested.join(&filename).exists());
+    }
+
+    fn meta(id: &str) -> AssetMeta {
+        AssetMeta {
+            id: id.to_string(),
+            url: format!("/assets/{id}.bin"),
+            size: 4,
+            extension: "bin".to_string(),
+        }
+    }
+
+    #[test]
+    fn registry_insert_is_idempotent_per_id() {
+        let mut reg = AssetRegistry::new();
+        assert!(reg.insert(meta("ast_a")));
+        assert!(!reg.insert(meta("ast_a")));
+        assert!(reg.insert(meta("ast_b")));
+        assert_eq!(reg.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn load_index_returns_empty_when_file_missing() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("does-not-exist.json");
+        let reg = load_index(&path).await.unwrap();
+        assert!(reg.is_empty());
+        assert_eq!(reg.version, REGISTRY_VERSION);
+    }
+
+    #[tokio::test]
+    async fn save_then_load_round_trip_preserves_assets() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("assets.json");
+        let mut reg = AssetRegistry::new();
+        reg.insert(meta("ast_111111111111"));
+        reg.insert(meta("ast_222222222222"));
+        save_index(&path, &reg).await.unwrap();
+
+        let loaded = load_index(&path).await.unwrap();
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded.assets[0].id, "ast_111111111111");
+        assert_eq!(loaded.assets[1].id, "ast_222222222222");
+    }
+
+    #[tokio::test]
+    async fn load_index_rejects_unsupported_version() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("assets.json");
+        // Write a registry with a version we don't know how to read.
+        let body = serde_json::json!({
+            "version": 999,
+            "assets": [],
+        });
+        tokio::fs::write(&path, serde_json::to_vec(&body).unwrap())
+            .await
+            .unwrap();
+        match load_index(&path).await {
+            Err(IndexLoadError::UnsupportedVersion {
+                found: 999,
+                expected: 1,
+            }) => {}
+            other => panic!("expected UnsupportedVersion, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn load_index_returns_parse_error_for_garbage() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("assets.json");
+        tokio::fs::write(&path, b"this is not json").await.unwrap();
+        match load_index(&path).await {
+            Err(IndexLoadError::Parse(_)) => {}
+            other => panic!("expected Parse error, got {other:?}"),
+        }
     }
 }

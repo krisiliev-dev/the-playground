@@ -15,6 +15,7 @@ use std::sync::Arc;
 
 use tokio::sync::{broadcast, RwLock};
 
+use crate::assets::AssetRegistry;
 use crate::protocol::ServerMessage;
 use crate::registry::EntityRegistry;
 use crate::scene_event::RateTracker;
@@ -52,10 +53,19 @@ pub struct AppState {
     /// (per ADR-007). Configured via env var in main.rs;
     /// defaults to `./assets/` next to the binary.
     pub assets_dir: PathBuf,
+    /// Persistent index of uploaded assets. Loaded from
+    /// `assets.json` on boot, written atomically after each
+    /// successful upload so admin-authored assets survive
+    /// restarts. Wrapped in RwLock for concurrent reads (list
+    /// endpoint) + exclusive writes (upload handler).
+    pub asset_registry: Arc<RwLock<AssetRegistry>>,
+    /// Path to the on-disk asset index file. Sibling to
+    /// `assets_dir` itself by default.
+    pub asset_index_path: PathBuf,
 }
 
 impl AppState {
-    pub fn new(admin_token: String, assets_dir: PathBuf) -> Self {
+    pub fn new(admin_token: String, assets_dir: PathBuf, asset_index_path: PathBuf) -> Self {
         let (broadcast_tx, _) = broadcast::channel(BROADCAST_CAPACITY);
         Self {
             registry: Arc::new(RwLock::new(EntityRegistry::new())),
@@ -64,6 +74,8 @@ impl AppState {
             admin_token,
             event_rate: Arc::new(RwLock::new(RateTracker::new())),
             assets_dir,
+            asset_registry: Arc::new(RwLock::new(AssetRegistry::new())),
+            asset_index_path,
         }
     }
 

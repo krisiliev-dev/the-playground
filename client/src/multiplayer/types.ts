@@ -63,6 +63,13 @@ export type SceneEventKind =
       radius: number;
       intensity: number;
       duration_ms: number;
+    }
+  | {
+      kind: 'asset_available';
+      id: string;
+      url: string;
+      extension: string;
+      size: number;
     };
 
 /** String-tagged subset for `useSceneEvent`'s typed subscription. */
