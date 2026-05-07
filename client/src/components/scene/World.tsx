@@ -32,25 +32,46 @@ export function World(): JSX.Element {
   const isTouch = useIsTouchPrimary();
   const { camera } = useThree();
 
-  // Where OrbitControls aims its target. In multiplayer the
-  // target is the local player's assigned section center, so
-  // the camera looks at *their* patch of wall on connect /
-  // reload. In single-player there's no slot, fall back to the
-  // legacy "back wall center" target.
+  // Camera framing: match the legacy single-player setup but
+  // anchored to the player's slot. Original layout was:
+  //   camera position [0, 0, -360]
+  //   OrbitControls target [0, 0, -360.01]
+  // i.e. camera 40 units inward from the back wall (cube is 800
+  // wide, half=400; back wall at z=-400), with target 0.01
+  // units past the camera in the look direction. The 0.01-unit
+  // orbit radius makes OrbitControls a "look-around in place"
+  // rig rather than a true orbital camera — preserving that
+  // micro-radius is what keeps the user from drifting through
+  // the wall while rotating their view.
+  //
+  // Generalised:
+  //   camera = slot.point + 40 * slot.normal
+  //   target = slot.point + 39.99 * slot.normal
+  //          = camera - 0.01 * slot.normal
+  // For back-wall slot 0 (slot.point on -Z wall, normal +Z) the
+  // numbers reduce exactly to the original (0, 0, -360) /
+  // (0, 0, -360.01) framing.
+  const CAMERA_BACK_OFF = 40;
+  const TARGET_INSET = 0.01;
+
   const orbitTarget = useMemo<[number, number, number]>(() => {
     if (localPlayerId !== null && revealSlotIndex !== null) {
       const slot = getSpawnSlot(revealSlotIndex);
-      return [slot.clickHit.point[0], slot.clickHit.point[1], slot.clickHit.point[2]];
+      const t = CAMERA_BACK_OFF - TARGET_INSET;
+      return [
+        slot.clickHit.point[0] + slot.clickHit.normal[0] * t,
+        slot.clickHit.point[1] + slot.clickHit.normal[1] * t,
+        slot.clickHit.point[2] + slot.clickHit.normal[2] * t,
+      ];
     }
     return [0, 0, -360.01];
   }, [localPlayerId, revealSlotIndex]);
 
-  // Pull the camera onto the section's normal axis so the
-  // section sits centred in view, not off in a corner. Without
-  // this, OrbitControls keeps the camera at its initial pose
-  // and just retargets — which works for back-wall slots (the
-  // default) but reads as a strange diagonal view for slots
-  // on side / front walls.
+  // Reposition the camera onto the section's normal axis so
+  // OrbitControls doesn't end up with a weird off-axis radius
+  // when the slot is on a non-back wall. Doing this in a
+  // useEffect (rather than a Canvas prop) is necessary because
+  // the slot is computed *after* mount.
   useEffect(() => {
     if (localPlayerId === null || revealSlotIndex === null) {
       return;
@@ -59,16 +80,14 @@ export function World(): JSX.Element {
       return; // don't yank the camera mid-reveal
     }
     const slot = getSpawnSlot(revealSlotIndex);
-    // Camera distance from the wall — roughly matches the
-    // legacy 365-unit target offset so the framing reads the
-    // same as before. Position is slot center pulled inward
-    // along the wall normal.
-    const BACK_OFF = 365;
     camera.position.set(
-      slot.clickHit.point[0] + slot.clickHit.normal[0] * BACK_OFF,
-      slot.clickHit.point[1] + slot.clickHit.normal[1] * BACK_OFF,
-      slot.clickHit.point[2] + slot.clickHit.normal[2] * BACK_OFF,
+      slot.clickHit.point[0] + slot.clickHit.normal[0] * CAMERA_BACK_OFF,
+      slot.clickHit.point[1] + slot.clickHit.normal[1] * CAMERA_BACK_OFF,
+      slot.clickHit.point[2] + slot.clickHit.normal[2] * CAMERA_BACK_OFF,
     );
+    // Look toward the wall — i.e. anti-normal direction. Using
+    // a point inside the wall (slot.point) as the lookAt target
+    // keeps the camera direction stable.
     camera.lookAt(
       slot.clickHit.point[0],
       slot.clickHit.point[1],
