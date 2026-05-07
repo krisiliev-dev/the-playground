@@ -72,45 +72,15 @@ const PANEL_VERTICAL_OFFSET = 0.4;
  *  it feels overwhelming. */
 const HTML_DISTANCE_FACTOR = 8;
 
-const BACK_PLATE_WIDTH = 6;
-const BACK_PLATE_HEIGHT = 8;
-const BACK_PLATE_BG = '#12121a';
-const BACK_PLATE_BORDER = '#00ffcc';
-const BACK_PLATE_OPACITY = 0.95;
-
 function MenuPanel(): JSX.Element {
-  // No Billboard, no useFrame — the panel is parented to the
-  // cursor's local frame and stays at its local position +
-  // orientation. As the remote cursor moves and rotates, the
-  // panel moves and rotates with it, like an object physically
-  // attached to the cursor. From a stationary observer's POV,
-  // the panel is "still" in the sense that no per-frame
-  // billboard math is reorienting it.
+  // Position-only group, no Billboard, no useFrame. The panel
+  // travels with the remote cursor's world position but stays
+  // at fixed world orientation. No back plate — the Html alone
+  // reads correctly from the typical viewing side, and a
+  // backside-cover plane was empirically more occlusion trouble
+  // than it was worth.
   return (
     <group position={[0, PANEL_VERTICAL_OFFSET, PANEL_FORWARD_OFFSET]}>
-      {/* Solid back plate — sits slightly behind the Html origin
-          so observers who walk around to the cursor's other side
-          see an opaque rectangle instead of the CSS3D backface.
-          Plane geometry's default FrontSide means the back of
-          the plate is invisible, which is correct: the back of
-          the back plate is the *front* of the panel from the
-          owner's POV. */}
-      {/* Back plate — sits on the FAR side of the Html (toward
-          the cursor, away from the observer). Default
-          FrontSide front face points +Z (toward cursor) so a
-          viewer who walks around to the cursor side sees it as
-          a solid "back cover" — and the observer-side viewer
-          sees only its (invisible) back face, leaving the Html
-          unoccluded. */}
-      <mesh position={[0, 0, 0.05]} frustumCulled={false}>
-        <planeGeometry args={[BACK_PLATE_WIDTH + 0.2, BACK_PLATE_HEIGHT + 0.2]} />
-        <meshBasicMaterial color={BACK_PLATE_BORDER} transparent opacity={0.55} />
-      </mesh>
-      <mesh position={[0, 0, 0.04]} frustumCulled={false}>
-        <planeGeometry args={[BACK_PLATE_WIDTH, BACK_PLATE_HEIGHT]} />
-        <meshBasicMaterial color={BACK_PLATE_BG} transparent opacity={BACK_PLATE_OPACITY} />
-      </mesh>
-
       <Html
         transform
         sprite={false}

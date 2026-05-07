@@ -68,6 +68,7 @@ import { MAX_PORTAL_RECURSION, getPaired, type PortalEndpoint } from '@/content/
 import { MAIN_CUBE_BOB } from '@/content/routes';
 import { useWorldStore } from '@/store';
 import { minPlayerDistance } from '@/multiplayer/playerProximity';
+import { cursorWorldPosition } from '../cursorWorldPosition';
 import { useInteractable } from '../Interactable';
 import { floatOffset } from '../floatBob';
 import {
@@ -1166,7 +1167,6 @@ const RIM_FRAGMENT_SHADER = /* glsl */ `
  */
 function PortalRim({ width, height, color, portalPosition }: PortalRimProps): JSX.Element {
   const groupRef = useRef<Group | null>(null);
-  const camera = useThree((s) => s.camera);
 
   const portalCenter = useMemo(
     () => new Vector3(portalPosition[0], portalPosition[1], portalPosition[2]),
@@ -1260,16 +1260,18 @@ function PortalRim({ width, height, color, portalPosition }: PortalRimProps): JS
   const phaseClockRef = useRef(0);
 
   useFrame((state, delta) => {
-    // Aggregate proximity across local + remote players: the rim
-    // reacts when *any* connected player is in range, not just the
-    // local viewer (per ADR-006 §"near"). Reads from the store via
-    // getState() so this runs without subscribing the component to
-    // every entity tick — the store update has already happened
-    // by the time the next frame fires.
+    // Aggregate proximity across local + remote players. Local
+    // position sources from `cursorWorldPosition` (the avatar's
+    // world position, written each frame by CursorAvatar) rather
+    // than `camera.position` — in 3rd-person rig the camera sits
+    // ~30 units behind the avatar, so using camera position here
+    // would make the LOCAL proximity threshold trip later than
+    // the remote threshold (which uses entity-cursor positions).
+    // Both sides now measure from the cursor.
     const { entities, localPlayerId } = useWorldStore.getState();
     const dist = minPlayerDistance(
       [portalCenter.x, portalCenter.y, portalCenter.z],
-      [camera.position.x, camera.position.y, camera.position.z],
+      [cursorWorldPosition.x, cursorWorldPosition.y, cursorWorldPosition.z],
       entities,
       localPlayerId,
     );
