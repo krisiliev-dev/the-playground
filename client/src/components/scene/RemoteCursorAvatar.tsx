@@ -38,6 +38,7 @@ import {
 } from 'three';
 import type { Entity } from '@/multiplayer/types';
 import { INTERP_DELAY_MS, sampleSnapshot } from '@/multiplayer/snapshotInterpolation';
+import { RemotePresenceIndicator } from '@/multiplayer/RemotePresenceIndicator';
 import { CASCADE_OVERLAY_LAYER } from './sceneLayers';
 import { RENDER_ORDER_CURSOR_BODY, RENDER_ORDER_CURSOR_OUTLINE } from './renderOrder';
 
@@ -124,6 +125,11 @@ export function RemoteCursorAvatar({ entity }: RemoteCursorAvatarProps): JSX.Ele
   return (
     <group ref={groupRef} scale={REMOTE_AVATAR_SCALE}>
       <primitive object={cloned} />
+      {/* Third-person presence indicators (menu plane, etc.).
+          Inherits the cursor group's scale, so its geometry is
+          authored in the pre-scale frame and ends up at REMOTE_
+          AVATAR_SCALE × the values it specifies. */}
+      <RemotePresenceIndicator entity={entity} />
     </group>
   );
 }

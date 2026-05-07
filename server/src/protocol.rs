@@ -27,6 +27,16 @@ pub enum ClientMessage {
         /// Currently active route, e.g. "/" or "/about". Drives
         /// per-route portal visibility for remote viewers.
         route: String,
+        /// Optional presence-state bag (per ADR-006). Free-form
+        /// JSON object whose keys merge into the player entity's
+        /// `props` so other clients can render third-person
+        /// indicators (menu plane, near-interactable highlight,
+        /// etc.). Server treats this opaquely — typed validation
+        /// of individual presence fields would couple the server
+        /// to the client's UI vocabulary, which the architecture
+        /// deliberately avoids.
+        #[serde(default)]
+        presence: Option<serde_json::Value>,
     },
     /// Admin-authored entity mutation. Requires admin token at
     /// WebSocket upgrade time; the server rejects this variant

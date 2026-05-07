@@ -174,12 +174,28 @@ async fn handle_client_message(
     msg: ClientMessage,
 ) {
     match msg {
-        ClientMessage::PlayerInput { transform, route } => {
+        ClientMessage::PlayerInput {
+            transform,
+            route,
+            presence,
+        } => {
             let mut registry = state.registry.write().await;
             registry.mutate(&player_id, |entity| {
                 entity.transform = transform;
                 if let Some(props) = entity.props.as_object_mut() {
                     props.insert("route".to_string(), serde_json::Value::String(route));
+                    // Merge presence keys into the entity's props
+                    // bag. A null value for a key means "clear that
+                    // presence" — explicit nulls intentionally pass
+                    // through so the receiver-side observers see the
+                    // transition (menu opened → null → menu closed).
+                    if let Some(presence) = presence {
+                        if let Some(presence_obj) = presence.as_object() {
+                            for (key, value) in presence_obj {
+                                props.insert(key.clone(), value.clone());
+                            }
+                        }
+                    }
                 }
             });
         }

@@ -16,7 +16,14 @@
 import { useEffect, useRef } from 'react';
 import { cursorWorldPosition, cursorWorldQuaternion } from '@/components/scene/cursorWorldPosition';
 import { useWorldStore } from '@/store';
-import type { ClientMessage, Entity, EntityId, ServerMessage, Transform } from './types';
+import type {
+  ClientMessage,
+  Entity,
+  EntityId,
+  PlayerPresence,
+  ServerMessage,
+  Transform,
+} from './types';
 import { IDENTITY_TRANSFORM } from './types';
 import { dropAllSnapshots, dropSnapshot, recordSnapshot } from './snapshotInterpolation';
 import { dispatchSceneEvent, drainOutboundQueue } from './sceneEvents';
@@ -55,6 +62,7 @@ export function useMultiplayerSync(opts: MultiplayerOptions): void {
   const outboundTimer = useRef<number | null>(null);
   const lastSentTransform = useRef<Transform>(IDENTITY_TRANSFORM);
   const lastSentRoute = useRef<string>('/');
+  const lastSentPresence = useRef<PlayerPresence>({});
 
   useEffect(() => {
     if (!enabled) {
@@ -148,13 +156,20 @@ export function useMultiplayerSync(opts: MultiplayerOptions): void {
       // Player input — only when something changed.
       const current = readLocalTransform();
       const route = useWorldStore.getState().currentRoute;
-      if (!transformsEqual(current, lastSentTransform.current) || route !== lastSentRoute.current) {
+      const presence = readLocalPresence();
+      if (
+        !transformsEqual(current, lastSentTransform.current) ||
+        route !== lastSentRoute.current ||
+        !presenceEqual(presence, lastSentPresence.current)
+      ) {
         lastSentTransform.current = current;
         lastSentRoute.current = route;
+        lastSentPresence.current = presence;
         const inputMsg: ClientMessage = {
           type: 'player_input',
           transform: current,
           route,
+          presence,
         };
         ws.send(JSON.stringify(inputMsg));
       }
@@ -248,6 +263,26 @@ export function dispatchServerMessage(msg: ServerMessage, d: Dispatchers): void 
       console.warn('[multiplayer] server error:', msg.message);
       break;
   }
+}
+
+/** Read the local player's current presence state from the
+ *  central store. Per ADR-006: continuous duration-style state
+ *  the receiver renders as third-person indicators. New fields
+ *  add here as they're needed (slice 3b: `near` for proximity-
+ *  based interactable highlights). */
+export function readLocalPresence(): PlayerPresence {
+  const state = useWorldStore.getState();
+  return {
+    menu: state.menuOpen ? 'pause' : null,
+  };
+}
+
+/** Pure equality check on the presence bag — exported for tests.
+ *  Compares only the keys the protocol cares about; new keys must
+ *  be added here when introduced (the alternative — JSON.stringify
+ *  comparison — is brittle to key ordering and silently expensive). */
+export function presenceEqual(a: PlayerPresence, b: PlayerPresence): boolean {
+  return a.menu === b.menu && a.near === b.near;
 }
 
 /** Read the current local cursor world pose into a Transform.

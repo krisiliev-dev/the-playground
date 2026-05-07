@@ -99,11 +99,33 @@ export type ServerMessage =
 
 // ─── Outbound (client → server) ───────────────────────────────
 
+/**
+ * Presence-state bag that rides along on `PlayerInput`. Per
+ * ADR-006: continuous duration-style state — what the player is
+ * doing right now — that other clients render as third-person
+ * indicators. Distinct from transient `SceneEvent`s.
+ *
+ * Open-ended object: new fields add without protocol changes.
+ * Server treats this opaquely, merging into the player entity's
+ * `props` bag. Receivers read specific fields off `entity.props`.
+ */
+export interface PlayerPresence {
+  /** Pause/settings/etc. — non-null means the menu indicator
+   *  should render in front of this player's cursor. */
+  menu?: string | null;
+  /** Reserved for slice 3b — id of the interactable the player
+   *  is within proximity range of, so the *object* can react
+   *  globally (rim spinning faster, etc.) by aggregating
+   *  nearness across all players. */
+  near?: string | null;
+}
+
 export type ClientMessage =
   | {
       type: 'player_input';
       transform: Transform;
       route: string;
+      presence?: PlayerPresence | null;
     }
   | {
       type: 'entity_mutation';

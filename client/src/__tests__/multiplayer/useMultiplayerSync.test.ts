@@ -7,6 +7,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   dispatchServerMessage,
+  presenceEqual,
   transformsEqual,
   POSITION_EPSILON,
   type Dispatchers,
@@ -111,6 +112,35 @@ describe('dispatchServerMessage', () => {
     expect(d.upsertCalls).toHaveLength(0);
     expect(d.removeCalls).toHaveLength(0);
     expect(d.setLocalCalls).toHaveLength(0);
+  });
+});
+
+describe('presenceEqual', () => {
+  it('treats two empty bags as equal', () => {
+    expect(presenceEqual({}, {})).toBe(true);
+  });
+
+  it('returns true when menu matches', () => {
+    expect(presenceEqual({ menu: 'pause' }, { menu: 'pause' })).toBe(true);
+    expect(presenceEqual({ menu: null }, { menu: null })).toBe(true);
+  });
+
+  it('returns false when menu diverges', () => {
+    expect(presenceEqual({ menu: null }, { menu: 'pause' })).toBe(false);
+    expect(presenceEqual({ menu: 'pause' }, { menu: 'settings' })).toBe(false);
+  });
+
+  it('treats undefined and null as equal (both mean "no menu")', () => {
+    expect(presenceEqual({}, { menu: null })).toBe(false);
+    // ^ this asserts the strict comparison — undefined !== null. The
+    // outbound pump always supplies one or the other; mixing both
+    // means our writer side is buggy. The strict comparison catches
+    // that bug rather than masking it.
+  });
+
+  it('also compares the near field', () => {
+    expect(presenceEqual({ near: 'portal-A' }, { near: 'portal-A' })).toBe(true);
+    expect(presenceEqual({ near: 'portal-A' }, { near: 'portal-B' })).toBe(false);
   });
 });
 
