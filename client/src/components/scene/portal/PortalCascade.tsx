@@ -123,26 +123,20 @@ export function PortalCascade(): JSX.Element {
       // colorWrite + depthWrite stay false so the surface plane
       // never produces visible pixels or interferes with depth.
       //
-      // `depthTest: false` is load-bearing for deep cascade levels.
-      // The stencil mark is supposed to be a *screen-region selector*
-      // — "where does this portal project on the framebuffer?" — not
-      // a depth-occlusion query. With depthTest=true, scene geometry
-      // closer to the cascade's parentCam (e.g. the *other* portal's
-      // rim particles, which become foreground objects relative to
-      // the surface plane at deep recursion levels) blocks surface_A
-      // by depth-LESS and the stencil never gets marked. The
-      // through-view then renders nothing where the rim was, which
-      // visually looks like "interior of the nested portal goes
-      // black." The mark pass writes no color or depth either way
-      // (`colorWrite: false`, `depthWrite: false`), so disabling
-      // depth-test here is safe — depth-occlusion semantics for the
-      // through-view itself belong to Phase D's scene render, which
-      // continues to depth-test scene geometry normally.
+      // depthTest is set per-phase: Phase A (stencil mark) wants
+      // depth-test ON so foreground geometry (swords, debris) can
+      // correctly occlude the mark and prevent the through-view from
+      // overwriting their pixels. Phase F (stencil decrement) wants
+      // depth-test OFF — by then the depth buffer holds vCam-space
+      // values that are meaningless to compare against parentCam-space
+      // surface-plane depth. The initial value here is what Phase A
+      // assumes when first reading the material; Phases A and F both
+      // set it explicitly each frame.
       const surfaceMaterial = new MeshBasicMaterial({
         side: DoubleSide,
         colorWrite: false,
         depthWrite: false,
-        depthTest: false,
+        depthTest: true,
         stencilWrite: true,
         stencilFunc: EqualStencilFunc,
         stencilRef: 0,
@@ -204,13 +198,12 @@ export function PortalCascade(): JSX.Element {
     const bobY = floatOffset(time, MAIN_CUBE_BOB);
 
     // Per-route visibility filter: only portals tagged with the
-    // avatar's current route render. Without this, a player inside
-    // a section room would still see the formation portals'
-    // cutouts ghost through the room walls — the surface planes
-    // have `depthTest: false` for deep-cascade reasons, so their
-    // stencil marks aren't naturally occluded. We hide the entire
-    // group (surface plane + rim) for off-route portals so neither
-    // Phase 1 (main render) nor any cascade phase touches them.
+    // avatar's current route render. Hides off-route portals so
+    // neither Phase 1 (main render) nor any cascade phase touches
+    // them. Saves the per-portal cascade work (Phase A→F per portal,
+    // recursing up to MAX_PORTAL_RECURSION) for portals the player
+    // can't see anyway, and keeps cross-route stencil bookkeeping
+    // out of the picture entirely.
     const currentRoute = useWorldStore.getState().currentRoute;
     for (const ps of portalStates) {
       const group = ps.groupRef.current;
@@ -431,6 +424,17 @@ function drawPortalRecursive(
   ps.surfaceMaterial.stencilFunc = EqualStencilFunc;
   ps.surfaceMaterial.stencilRef = stencilRef;
   ps.surfaceMaterial.stencilZPass = IncrementStencilOp;
+  // Depth-test ON. Foreground geometry between parentCam and the
+  // portal (swords sticking out of the wall, debris in flight)
+  // correctly occludes the stencil mark, so Phase D's through-view
+  // doesn't overwrite those pixels. The mark pass writes no color
+  // and no depth (`colorWrite: false`, `depthWrite: false`); the
+  // depth buffer it consults was just written by Phase 1 (depth 0)
+  // or Phase D pass 1 of the parent level (depth ≥ 1), and in both
+  // cases its values are meaningful for "what's in front of this
+  // portal from this camera's POV?" — exactly the question we
+  // want answered.
+  ps.surfaceMaterial.depthTest = true;
   ps.surfaceMaterial.needsUpdate = true;
 
   for (const other of allPortals) {
@@ -582,6 +586,16 @@ function drawPortalRecursive(
   ps.surfaceMaterial.stencilFunc = EqualStencilFunc;
   ps.surfaceMaterial.stencilRef = stencilRef + 1;
   ps.surfaceMaterial.stencilZPass = DecrementStencilOp;
+  // depthTest OFF for this pass. Phase F is pure stencil bookkeeping
+  // — its job is to undo the mark Phase A wrote. The stencil-equal
+  // check on (stencilRef+1) already gates the decrement to exactly
+  // the pixels Phase A marked, so depth-test isn't needed for
+  // correctness. Worse: the depth buffer here holds Phase D's
+  // through-view depth (vCam-space), not parentCam-space, so a
+  // depth-test against the surface plane's parentCam-space depth
+  // could fail unpredictably and leave stencil residue across
+  // frames.
+  ps.surfaceMaterial.depthTest = false;
   ps.surfaceMaterial.needsUpdate = true;
 
   for (const other of allPortals) {

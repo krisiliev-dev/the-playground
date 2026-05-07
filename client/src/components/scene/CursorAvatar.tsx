@@ -81,6 +81,7 @@ import { getScene } from '@/scenes/sceneRegistry';
 const MODEL_URL = '/models/3d_icon_cursor.glb';
 
 import { CASCADE_OVERLAY_LAYER, CURSOR_LAYER } from './sceneLayers';
+import { RENDER_ORDER_CURSOR_BODY, RENDER_ORDER_CURSOR_OUTLINE } from './renderOrder';
 
 // ─── Pointer-mode constants ───────────────────────────────────────────
 /** Distance in front of the camera at which the pointer-mode cursor sits.
@@ -493,9 +494,9 @@ function ActiveCursor(): JSX.Element {
       mesh.material = createCursorBodyMaterial({ depthTest: false });
       // Cursor body must draw AFTER the (BackSide) outline shell so
       // the body covers the outline's interior and only the
-      // silhouette halo remains. Both stay above haze (which is at
-      // renderOrder 100).
-      mesh.renderOrder = 102;
+      // silhouette halo remains. Both stay above haze — see
+      // `renderOrder.ts` for the band layout.
+      mesh.renderOrder = RENDER_ORDER_CURSOR_BODY;
       // Cursor mesh on its own layer (enabled by SceneHost on the
       // main camera). The layer + `depthTest: false` is what keeps
       // it visually on top in the player's view.
@@ -521,7 +522,7 @@ function ActiveCursor(): JSX.Element {
           ),
         );
       outlineMesh.scale.setScalar(OUTLINE_SCALE);
-      outlineMesh.renderOrder = 101;
+      outlineMesh.renderOrder = RENDER_ORDER_CURSOR_OUTLINE;
       outlineMesh.layers.disable(0);
       outlineMesh.layers.enable(CURSOR_LAYER);
       mesh.add(outlineMesh);
@@ -555,7 +556,7 @@ function ActiveCursor(): JSX.Element {
       // In-scene depth-tested copy for the cascade overlay layer.
       const inSceneBody = new Mesh(mesh.geometry, createCursorBodyMaterial({ depthTest: true }));
       inSceneBody.scale.setScalar(INSCENE_CURSOR_SCALE);
-      inSceneBody.renderOrder = 102;
+      inSceneBody.renderOrder = RENDER_ORDER_CURSOR_BODY;
       inSceneBody.layers.disable(0);
       inSceneBody.layers.enable(CASCADE_OVERLAY_LAYER);
       // Frustum-culling defaults to the geometry's bounding sphere
@@ -573,7 +574,7 @@ function ActiveCursor(): JSX.Element {
       );
       inSceneOutline.position.copy(outlineMesh.position);
       inSceneOutline.scale.copy(outlineMesh.scale);
-      inSceneOutline.renderOrder = 101;
+      inSceneOutline.renderOrder = RENDER_ORDER_CURSOR_OUTLINE;
       inSceneOutline.layers.disable(0);
       inSceneOutline.layers.enable(CASCADE_OVERLAY_LAYER);
       inSceneOutline.frustumCulled = false;
