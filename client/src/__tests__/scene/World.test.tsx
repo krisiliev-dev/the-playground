@@ -33,6 +33,13 @@ vi.mock('@/components/scene/RemoteCursorAvatar', () => ({
   RemoteCursorAvatar: () => null,
 }));
 
+// In-canvas remote cascade receiver subscribes to scene events;
+// stub it so the World test doesn't have to mount the bus or
+// produce sword streaks for visual checks here.
+vi.mock('@/multiplayer/RemoteSwordCascade', () => ({
+  RemoteSwordCascade: () => null,
+}));
+
 // OrbitControls from drei uses R3F hooks under the hood — stub it out.
 vi.mock('@react-three/drei', () => ({
   OrbitControls: () => null,

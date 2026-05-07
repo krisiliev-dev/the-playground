@@ -101,13 +101,20 @@ pub fn validate_event(
 
     match event {
         SceneEventKind::SwordSwing { .. } => {
-            if !tracker.allow(id, "sword_swing", 5, Duration::from_secs(1), now) {
+            // 30/sec accommodates the 12-sword reveal cascade (12
+            // events fired within ~0.6s = 20/sec peak) with margin.
+            // The originator is bounded by the reveal state machine's
+            // ~10s cycle, so a steady-state attacker can't sustain
+            // anywhere near 30/sec.
+            if !tracker.allow(id, "sword_swing", 30, Duration::from_secs(1), now) {
                 return ValidationOutcome::Drop;
             }
             ValidationOutcome::Pass(event)
         }
         SceneEventKind::SwordImpact { .. } => {
-            if !tracker.allow(id, "sword_impact", 5, Duration::from_secs(1), now) {
+            // Mirrors sword_swing — the cascade fires one impact per
+            // sword at the wall, in the same ~0.6s window.
+            if !tracker.allow(id, "sword_impact", 30, Duration::from_secs(1), now) {
                 return ValidationOutcome::Drop;
             }
             ValidationOutcome::Pass(event)
@@ -320,6 +327,46 @@ mod tests {
         assert!(matches!(
             validate_event(Some(actor_b), dummy_audio(), &mut tracker, now),
             ValidationOutcome::Pass(_)
+        ));
+    }
+
+    fn dummy_swing() -> SceneEventKind {
+        SceneEventKind::SwordSwing {
+            from: [0.0, 0.0, 0.0],
+            to: [1.0, 1.0, 1.0],
+            strength: 1.0,
+        }
+    }
+
+    #[test]
+    fn sword_swing_cascade_fits_under_rate_limit() {
+        let mut tracker = RateTracker::new();
+        let actor = fresh_actor();
+        let now = Instant::now();
+        // Cascade is 12 swings in ~0.6s. All should pass.
+        for _ in 0..12 {
+            assert!(matches!(
+                validate_event(Some(actor), dummy_swing(), &mut tracker, now),
+                ValidationOutcome::Pass(_)
+            ));
+        }
+    }
+
+    #[test]
+    fn sword_swing_drops_after_thirty_per_window() {
+        let mut tracker = RateTracker::new();
+        let actor = fresh_actor();
+        let now = Instant::now();
+        for _ in 0..30 {
+            assert!(matches!(
+                validate_event(Some(actor), dummy_swing(), &mut tracker, now),
+                ValidationOutcome::Pass(_)
+            ));
+        }
+        // 31st in the same window: dropped.
+        assert!(matches!(
+            validate_event(Some(actor), dummy_swing(), &mut tracker, now),
+            ValidationOutcome::Drop
         ));
     }
 

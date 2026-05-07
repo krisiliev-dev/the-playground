@@ -19,6 +19,7 @@ import { RouteBoxes } from './RouteBoxes';
 import { RouteContent3D } from './RouteContent3D';
 import { Portals } from './portal/Portals';
 import { RemotePlayers } from './RemotePlayers';
+import { RemoteSwordCascade } from '@/multiplayer/RemoteSwordCascade';
 
 export function World(): JSX.Element {
   const environment = useWorldStore((s) => s.environment);
@@ -33,6 +34,7 @@ export function World(): JSX.Element {
       <RouteContent3D />
       <Portals />
       <RemotePlayers />
+      <RemoteSwordCascade />
       <RevealOrchestrator />
       <InteractionController />
       <SkyBackground dimensions={environment.dimensions} />

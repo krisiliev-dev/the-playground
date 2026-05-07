@@ -36,6 +36,7 @@ import { useWorldStore } from '@/store';
 import { triggerWorldImpactShake } from '../cameraShake';
 import { FORMATION_SCALE, type SwordSlot } from './vibeFormation';
 import { sfx, type PositionalLoopHandle } from '../../audio/SfxManager';
+import { emitSceneEvent } from '@/multiplayer/sceneEvents';
 import { useSwordKinematics } from './useSwordKinematics';
 import { MID_FORWARD, SWING_DURATION, SWING_DURATION_MS } from './constants';
 import { computeSpawnPoint } from './spawnGeometry';
@@ -254,6 +255,10 @@ export function Sword({ slot, staggerIndex = 0 }: SwordProps): JSX.Element {
         volumeMultiplier: 0.55,
         pitchJitter: computeSlamPitchJitter(fallbackVel),
         filterGain: jitterAxis(Math.random, 20),
+      });
+      emitSceneEvent({
+        kind: 'sword_impact',
+        position: slamPos,
       });
     }
   }, [revealState, clickHit]);
@@ -523,6 +528,16 @@ export function Sword({ slot, staggerIndex = 0 }: SwordProps): JSX.Element {
         pitchJitter: 0.12,
         volumeMultiplier: 0.7,
       });
+      // Broadcast the streak so other players see it (per ADR-006).
+      // Optimistic-local: we already render this sword via the
+      // `useFrame` loop above; the wire event drives only remote
+      // viewers' `RemoteSwordCascade` receiver.
+      emitSceneEvent({
+        kind: 'sword_swing',
+        from: [spawnPos.x, spawnPos.y, spawnPos.z],
+        to: [endPos.x, endPos.y, endPos.z],
+        strength: 1,
+      });
     }
     // Fire this sword's IMPACT flash + shake when it reaches the end of
     // its swing (slams into the wall ring after the post leg).
@@ -562,6 +577,14 @@ export function Sword({ slot, staggerIndex = 0 }: SwordProps): JSX.Element {
         volumeMultiplier: 0.55 * computeSlamVelocityFactor(v),
         pitchJitter: computeSlamPitchJitter(v),
         filterGain: jitterAxis(Math.random, 20),
+      });
+      // Broadcast the impact so remote viewers see a spark at the
+      // wall (per ADR-006). Position carries the same spatial
+      // jitter as the slam audio so the visual + audible impacts
+      // line up for receivers.
+      emitSceneEvent({
+        kind: 'sword_impact',
+        position: slamPos,
       });
     }
 
