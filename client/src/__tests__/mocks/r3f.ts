@@ -62,11 +62,25 @@ function makeState(): R3FState {
   };
 }
 
+interface R3FMock {
+  useFrame: ReturnType<typeof vi.fn>;
+  useThree: (selector?: (s: R3FState) => unknown) => unknown;
+  createPortal: (children: unknown) => unknown;
+  Canvas: (props: { children?: unknown }) => unknown;
+}
+
+interface DreiMock {
+  useGLTF: () => { scene: { clone: () => Record<string, unknown>; traverse: () => void } };
+  useFBO: () => { texture: null; setSize: () => void; dispose: () => void };
+  OrbitControls: () => null;
+  Trail: (props: { children?: unknown }) => unknown;
+}
+
 /**
  * Default `@react-three/fiber` mock. Returns a factory result
  * suitable for `vi.mock('@react-three/fiber', () => createR3FMock())`.
  */
-export function createR3FMock() {
+export function createR3FMock(): R3FMock {
   return {
     useFrame: vi.fn(),
     useThree: (selector?: (s: R3FState) => unknown) => {
@@ -85,7 +99,7 @@ export function createR3FMock() {
  * Default `@react-three/drei` mock. Covers the surface our scene
  * components actually call: useGLTF, useFBO, OrbitControls, Trail.
  */
-export function createDreiMock() {
+export function createDreiMock(): DreiMock {
   return {
     useGLTF: () => ({ scene: { clone: () => ({}), traverse: () => {} } }),
     useFBO: () => ({ texture: null, setSize: () => {}, dispose: () => {} }),

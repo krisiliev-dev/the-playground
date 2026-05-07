@@ -60,6 +60,8 @@ import {
   Quaternion,
   Scene,
   ShaderMaterial,
+  type StencilFunc,
+  type StencilOp,
   Vector3,
   type Vector3Tuple,
   type WebGLRenderer,
@@ -183,9 +185,9 @@ export function PortalCascade(): JSX.Element {
   // cascade's render pass until the *next* frame, producing a one-
   // frame rubber-band visible on every teleport.
   useFrame((state) => {
-    const gl = state.gl as WebGLRenderer;
+    const gl = state.gl;
     const mainCam = state.camera as PerspectiveCamera;
-    const sceneRef = state.scene as Scene;
+    const sceneRef = state.scene;
     const time = state.clock.elapsedTime;
 
     if (portalStates.length === 0) {
@@ -743,9 +745,9 @@ function ensureDepthClearScene(): void {
  */
 function setSceneStencilTest(
   scene: Scene,
-  func: number,
+  func: StencilFunc,
   ref: number,
-  zPassOp: number,
+  zPassOp: StencilOp,
   exclude: Set<Material>,
 ): void {
   scene.traverse((obj) => {
@@ -759,31 +761,32 @@ function setSceneStencilTest(
         applyStencilToMaterial(m, func, ref, zPassOp, exclude);
       }
     } else {
-      applyStencilToMaterial(mat as Material, func, ref, zPassOp, exclude);
+      applyStencilToMaterial(mat, func, ref, zPassOp, exclude);
     }
   });
 }
 
 function applyStencilToMaterial(
   mat: Material,
-  func: number,
+  func: StencilFunc,
   ref: number,
-  zPassOp: number,
+  zPassOp: StencilOp,
   exclude: Set<Material>,
 ): void {
   if (exclude.has(mat)) {
     return;
   }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const m = mat as any;
-  m.stencilWrite = true;
-  m.stencilFunc = func;
-  m.stencilRef = ref;
-  m.stencilFuncMask = 0xff;
-  m.stencilWriteMask = 0xff;
-  m.stencilFail = KeepStencilOp;
-  m.stencilZFail = KeepStencilOp;
-  m.stencilZPass = zPassOp;
+  // Three.js's `Material` type exposes all stencil properties — no
+  // cast needed. Setting them in place is the standard way to drive
+  // the stencil state from the cascade per pass.
+  mat.stencilWrite = true;
+  mat.stencilFunc = func;
+  mat.stencilRef = ref;
+  mat.stencilFuncMask = 0xff;
+  mat.stencilWriteMask = 0xff;
+  mat.stencilFail = KeepStencilOp;
+  mat.stencilZFail = KeepStencilOp;
+  mat.stencilZPass = zPassOp;
 }
 
 /**
@@ -801,12 +804,12 @@ function setSceneStencilDisabled(scene: Scene, exclude: Set<Material>): void {
     }
     if (Array.isArray(mat)) {
       for (const m of mat) {
-        if (!exclude.has(m as Material)) {
-          (m as Material & { stencilWrite: boolean }).stencilWrite = false;
+        if (!exclude.has(m)) {
+          m.stencilWrite = false;
         }
       }
-    } else if (!exclude.has(mat as Material)) {
-      (mat as Material & { stencilWrite: boolean }).stencilWrite = false;
+    } else if (!exclude.has(mat)) {
+      mat.stencilWrite = false;
     }
   });
 }

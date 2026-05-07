@@ -472,8 +472,8 @@ describe('virtualCameraPose — recursive camera transform', () => {
   });
 
   it('does not mutate the source/destination endpoint objects', () => {
-    const sourceSnapshot = JSON.parse(JSON.stringify(A));
-    const destSnapshot = JSON.parse(JSON.stringify(B));
+    const sourceSnapshot: PortalEndpoint = JSON.parse(JSON.stringify(A)) as PortalEndpoint;
+    const destSnapshot: PortalEndpoint = JSON.parse(JSON.stringify(B)) as PortalEndpoint;
     virtualCameraPose(CAM_AT_A_FRONT, IDENTITY, A, B);
     expect(A).toEqual(sourceSnapshot);
     expect(B).toEqual(destSnapshot);
@@ -585,7 +585,7 @@ describe('bobbedEndpoint', () => {
   });
 
   it('returns a fresh endpoint object — input is unchanged', () => {
-    const before = JSON.parse(JSON.stringify(BASE));
+    const before: PortalEndpoint = JSON.parse(JSON.stringify(BASE)) as PortalEndpoint;
     const lifted = bobbedEndpoint(BASE, 0.6);
     expect(BASE).toEqual(before);
     expect(lifted).not.toBe(BASE);

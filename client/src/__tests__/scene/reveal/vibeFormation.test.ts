@@ -59,10 +59,15 @@ describe('vibeFormation', () => {
     const counts = { right: 0, top: 0, left: 0, bottom: 0 };
     VIBE_SLOTS.forEach((s) => {
       const [x, y] = s.endOffset;
-      if (Math.abs(x - half) < 1e-3) counts.right++;
-      else if (Math.abs(x + half) < 1e-3) counts.left++;
-      else if (Math.abs(y - half) < 1e-3) counts.top++;
-      else if (Math.abs(y + half) < 1e-3) counts.bottom++;
+      if (Math.abs(x - half) < 1e-3) {
+        counts.right++;
+      } else if (Math.abs(x + half) < 1e-3) {
+        counts.left++;
+      } else if (Math.abs(y - half) < 1e-3) {
+        counts.top++;
+      } else if (Math.abs(y + half) < 1e-3) {
+        counts.bottom++;
+      }
     });
     expect(counts.right).toBe(3);
     expect(counts.top).toBe(3);
