@@ -1,22 +1,23 @@
-//! Portfolio World Server
+//! Portfolio World server — authoritative multiplayer with admin
+//! tooling. Per ADR-004:
+//!   - entity-component scene state
+//!   - 30 Hz tick loop + state diff broadcasts        (slice 2)
+//!   - two-channel WebSocket (player + admin)         (slice 2)
+//!   - bearer-token admin auth                        (slice 2)
+//!   - periodic snapshot persistence                  (slice 3)
 //!
-//! A lightweight server that handles:
-//! - **Multiplayer sync**: Relays player positions between connected clients
-//! - **Live editing**: Broadcasts environment config changes to all clients
-//! - **Session management**: Tracks connections, enforces rate limits
-//! - **Admin video pipeline**: Converts YouTube 360° videos for the sky background
-
+//! Slice 1 stands up the entity model, registry, and connection
+//! lifecycle so the rest can build on a compiling foundation.
 mod config;
+mod entity;
 mod handlers;
+mod protocol;
+mod registry;
 mod state;
-mod video;
 
-use axum::{
-    routing::{get, post},
-    Router,
-};
 use std::net::SocketAddr;
-use std::path::PathBuf;
+
+use axum::{routing::get, Router};
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -27,24 +28,17 @@ use crate::state::AppState;
 async fn main() {
     tracing_subscriber::registry()
         .with(tracing_subscriber::EnvFilter::new(
-            std::env::var("RUST_LOG").unwrap_or_else(|_| "info,tower_http=debug".into()),
+            std::env::var("RUST_LOG").unwrap_or_else(|_| "info,tower_http=info".into()),
         ))
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    let videos_dir =
-        PathBuf::from(std::env::var("VIDEOS_DIR").unwrap_or_else(|_| "/home/ubuntu/videos".into()));
-    let videos_public_prefix = std::env::var("VIDEOS_PUBLIC_PREFIX")
-        .unwrap_or_else(|_| "https://krisiliev.dev/videos".into());
     let admin_token = std::env::var("ADMIN_TOKEN").unwrap_or_default();
-
     if admin_token.is_empty() {
-        tracing::warn!(
-            "ADMIN_TOKEN is not set — video conversion endpoints will reject all requests"
-        );
+        tracing::warn!("ADMIN_TOKEN is not set — admin mutations will be rejected");
     }
 
-    let state = AppState::new(videos_dir, videos_public_prefix, admin_token).await;
+    let state = AppState::new(admin_token);
 
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -54,12 +48,6 @@ async fn main() {
     let app = Router::new()
         .route("/health", get(handlers::health_check))
         .route("/ws", get(handlers::ws_upgrade))
-        .route("/api/environment", get(handlers::get_environment))
-        // Video pipeline
-        .route("/api/video/convert", post(handlers::convert_video))
-        .route("/api/video/jobs", get(handlers::list_video_jobs))
-        .route("/api/video/jobs/:id", get(handlers::get_video_job))
-        .route("/api/video/list", get(handlers::list_ready_videos))
         .with_state(state)
         .layer(cors)
         .layer(TraceLayer::new_for_http());
@@ -68,9 +56,8 @@ async fn main() {
         .ok()
         .and_then(|p| p.parse().ok())
         .unwrap_or(8080);
-
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    tracing::info!("🌍 Portfolio World server listening on {}", addr);
+    tracing::info!("portfolio-world server listening on {}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     axum::serve(
