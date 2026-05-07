@@ -22,9 +22,7 @@
  * surfaced into the world via the *target* object animating, not
  * a per-player overlay, so it doesn't render here).
  */
-import { useRef } from 'react';
-import { Billboard, Html } from '@react-three/drei';
-import type { Group } from 'three';
+import { Html } from '@react-three/drei';
 import type { Entity } from './types';
 import { RemotePauseMenuView } from './RemotePauseMenuView';
 
@@ -52,37 +50,54 @@ function readMenu(entity: Entity): string | null {
 
 // ─── Menu panel ───────────────────────────────────────────────
 // All offsets are in the *pre-scale* frame — the parent cursor
-// group multiplies by REMOTE_AVATAR_SCALE (0.03), so a vertical
-// offset of 60 here ends up ~1.8 world units above the cursor.
+// group multiplies by REMOTE_AVATAR_SCALE (0.03), so a forward
+// offset of 70 here ends up ~2.1 world units in front of the
+// cursor.
 
-const PANEL_VERTICAL_OFFSET = 60;
-const HTML_DISTANCE_FACTOR = 80;
+/** Position the panel in the cursor's local +Z direction —
+ *  which (because cursor.quaternion mirrors the camera that
+ *  follows it) is the direction "behind the cursor's facing"
+ *  but visually "in front of the cursor" from any observer
+ *  whose own camera is on that same side. The plane's default
+ *  front face also points in +Z, so it naturally faces the
+ *  observer with no rotation needed.
+ *
+ *  Slight Y lift so the panel doesn't collide with the cursor
+ *  geometry; tune up for "menu floats above" vs. tune to 0 for
+ *  "menu sits in line with cursor's facing." */
+const PANEL_FORWARD_OFFSET = 70;
+const PANEL_VERTICAL_OFFSET = 8;
 
-/** Solid back plate sized to fit roughly behind the rendered DOM
- *  panel. Width/height are in pre-scale units; the cursor group's
- *  0.03 scale brings them down to world dimensions. The Html element
- *  pins itself to a 0,0,0 origin within the Billboard, with its CSS
- *  size determining visible footprint — the back plate just needs
- *  to be large enough to occlude that footprint from behind. */
-const BACK_PLATE_WIDTH = 90;
-const BACK_PLATE_HEIGHT = 130;
+/** Larger distance-factor on drei's `<Html transform>` makes the
+ *  CSS pixels span fewer world units — i.e. the panel appears
+ *  bigger relative to the rest of the scene. Tuned so the panel
+ *  reads from a few units away without dwarfing the cursor model
+ *  itself. Slice 3a default (80) felt undersized in playtest. */
+const HTML_DISTANCE_FACTOR = 50;
+
+const BACK_PLATE_WIDTH = 130;
+const BACK_PLATE_HEIGHT = 180;
 const BACK_PLATE_BG = '#12121a';
 const BACK_PLATE_BORDER = '#00ffcc';
 const BACK_PLATE_OPACITY = 0.95;
 
 function MenuPanel(): JSX.Element {
-  const groupRef = useRef<Group>(null);
-
-  // Billboard wraps the panel so it always faces the local viewer's
-  // camera, regardless of how the remote cursor's group is rotated.
-  // Without this, the panel would inherit the cursor's mouselook
-  // rotation and orbit visibly as the remote player turned.
+  // No Billboard, no useFrame — the panel is parented to the
+  // cursor's local frame and stays at its local position +
+  // orientation. As the remote cursor moves and rotates, the
+  // panel moves and rotates with it, like an object physically
+  // attached to the cursor. From a stationary observer's POV,
+  // the panel is "still" in the sense that no per-frame
+  // billboard math is reorienting it.
   return (
-    <Billboard ref={groupRef} position={[0, PANEL_VERTICAL_OFFSET, 0]} follow>
-      {/* Solid back plate — placed slightly behind the Html origin
-          so observers viewing from the back of the panel see an
-          opaque rectangle instead of the CSS3D backface (which
-          would otherwise show the DOM mirrored or transparent). */}
+    <group position={[0, PANEL_VERTICAL_OFFSET, PANEL_FORWARD_OFFSET]}>
+      {/* Solid back plate — sits slightly behind the Html origin
+          so observers who walk around to the cursor's other side
+          see an opaque rectangle instead of the CSS3D backface.
+          Plane geometry's default FrontSide means the back of
+          the plate is invisible, which is correct: the back of
+          the back plate is the *front* of the panel from the
+          owner's POV. */}
       <mesh position={[0, 0, -1]} frustumCulled={false}>
         <planeGeometry args={[BACK_PLATE_WIDTH + 4, BACK_PLATE_HEIGHT + 4]} />
         <meshBasicMaterial color={BACK_PLATE_BORDER} transparent opacity={0.55} />
@@ -92,11 +107,6 @@ function MenuPanel(): JSX.Element {
         <meshBasicMaterial color={BACK_PLATE_BG} transparent opacity={BACK_PLATE_OPACITY} />
       </mesh>
 
-      {/* Pixel-perfect pause-menu DOM, projected into 3D via
-          drei's Html transform. distanceFactor scales the CSS
-          pixels relative to world units; tuned with the cursor's
-          REMOTE_AVATAR_SCALE so the panel reads at a comfortable
-          size from typical viewing distances. */}
       <Html
         transform
         sprite={false}
@@ -109,6 +119,6 @@ function MenuPanel(): JSX.Element {
           <RemotePauseMenuView />
         </div>
       </Html>
-    </Billboard>
+    </group>
   );
 }
