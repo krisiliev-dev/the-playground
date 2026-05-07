@@ -4,7 +4,7 @@
  * StrictMode interactions) but the transport-agnostic parts —
  * message routing, transform equality — should be locked down.
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   dispatchServerMessage,
   transformsEqual,
@@ -13,6 +13,11 @@ import {
 } from '@/multiplayer/useMultiplayerSync';
 import type { Entity, ServerMessage, Transform } from '@/multiplayer/types';
 import { IDENTITY_TRANSFORM } from '@/multiplayer/types';
+import {
+  _bufferCountForTest,
+  dropAllSnapshots,
+  sampleSnapshot,
+} from '@/multiplayer/snapshotInterpolation';
 
 function makeDispatchers(): Dispatchers & {
   upsertCalls: Entity[][];
@@ -106,6 +111,42 @@ describe('dispatchServerMessage', () => {
     expect(d.upsertCalls).toHaveLength(0);
     expect(d.removeCalls).toHaveLength(0);
     expect(d.setLocalCalls).toHaveLength(0);
+  });
+});
+
+describe('dispatchServerMessage — snapshot side effects', () => {
+  beforeEach(() => {
+    dropAllSnapshots();
+  });
+
+  it('records a snapshot per entity in full_state', () => {
+    const d = makeDispatchers();
+    dispatchServerMessage(
+      {
+        type: 'full_state',
+        entities: [sampleEntity, { ...sampleEntity, id: 'other' }],
+        your_player_id: sampleEntity.id,
+      },
+      d,
+    );
+    // Two entities → two buffers in the registry.
+    expect(_bufferCountForTest()).toBe(2);
+    expect(sampleSnapshot(sampleEntity.id, performance.now() + 1)).not.toBeNull();
+  });
+
+  it('records a snapshot per entity in entity_updates', () => {
+    const d = makeDispatchers();
+    dispatchServerMessage({ type: 'entity_updates', entities: [sampleEntity] }, d);
+    expect(_bufferCountForTest()).toBe(1);
+  });
+
+  it('drops snapshots on entity_deleted', () => {
+    const d = makeDispatchers();
+    dispatchServerMessage({ type: 'entity_updates', entities: [sampleEntity] }, d);
+    expect(_bufferCountForTest()).toBe(1);
+
+    dispatchServerMessage({ type: 'entity_deleted', ids: [sampleEntity.id] }, d);
+    expect(_bufferCountForTest()).toBe(0);
   });
 });
 

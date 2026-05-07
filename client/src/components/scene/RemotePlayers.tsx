@@ -13,9 +13,12 @@
  *   - currentRoute matches        (only render players who are
  *                                  in this client's current room)
  */
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
+import { useFrame } from '@react-three/fiber';
+import type { Mesh } from 'three';
 import { useWorldStore } from '@/store';
 import type { Entity, EntityId } from '@/multiplayer/types';
+import { INTERP_DELAY_MS, sampleSnapshot } from '@/multiplayer/snapshotInterpolation';
 
 /** Pure filter: which entities should render as remote-player
  *  cubes for a viewer at `currentRoute` whose own entity id is
@@ -75,10 +78,41 @@ interface RemotePlayerCubeProps {
 }
 
 function RemotePlayerCube({ entity }: RemotePlayerCubeProps): JSX.Element {
-  const [px, py, pz] = entity.transform.position;
+  const meshRef = useRef<Mesh>(null);
   const color = (entity.props as { cursor_color?: string }).cursor_color ?? REMOTE_CUBE_COLOR;
+
+  // Per-frame interpolation: sample the snapshot buffer at
+  // `now - INTERP_DELAY_MS` so we always lerp between two known
+  // snapshots rather than extrapolate forward. Updates the mesh
+  // imperatively — bypasses React's render cycle entirely, which
+  // is the only way to hit 144 Hz with 30 Hz network input.
+  useFrame(() => {
+    const mesh = meshRef.current;
+    if (!mesh) {
+      return;
+    }
+    const sampled = sampleSnapshot(entity.id, performance.now() - INTERP_DELAY_MS);
+    if (sampled) {
+      mesh.position.set(sampled.position[0], sampled.position[1], sampled.position[2]);
+      mesh.quaternion.set(
+        sampled.quaternion[0],
+        sampled.quaternion[1],
+        sampled.quaternion[2],
+        sampled.quaternion[3],
+      );
+    } else {
+      // No snapshots yet (entity just arrived in this frame's
+      // FullState but interpolation buffer hasn't been written
+      // because the WS dispatch and render races). Fall back to
+      // the entity's reported position to avoid a one-frame
+      // flash at world origin.
+      const [px, py, pz] = entity.transform.position;
+      mesh.position.set(px, py, pz);
+    }
+  });
+
   return (
-    <mesh position={[px, py, pz]} frustumCulled={false}>
+    <mesh ref={meshRef} frustumCulled={false}>
       <boxGeometry args={[REMOTE_CUBE_SIZE, REMOTE_CUBE_SIZE, REMOTE_CUBE_SIZE]} />
       <meshBasicMaterial color={color} />
     </mesh>

@@ -18,6 +18,7 @@ import { cursorWorldPosition } from '@/components/scene/cursorWorldPosition';
 import { useWorldStore } from '@/store';
 import type { ClientMessage, Entity, EntityId, ServerMessage, Transform } from './types';
 import { IDENTITY_TRANSFORM } from './types';
+import { dropAllSnapshots, dropSnapshot, recordSnapshot } from './snapshotInterpolation';
 
 /** How often we push our local player transform to the server.
  *  Matches the server's tick rate; sending more often is just
@@ -100,6 +101,7 @@ export function useMultiplayerSync(opts: MultiplayerOptions): void {
 
       const scheduleReconnect = (): void => {
         clearAllEntities();
+        dropAllSnapshots();
         socketRef.current = null;
         if (cancelled) {
           return;
@@ -173,6 +175,7 @@ export function useMultiplayerSync(opts: MultiplayerOptions): void {
         socketRef.current = null;
       }
       clearAllEntities();
+      dropAllSnapshots();
     };
   }, [
     url,
@@ -196,18 +199,36 @@ export interface Dispatchers {
  *  Pure — exported for direct testing without spinning up a
  *  WebSocket. Errors are logged, not thrown, so a malformed
  *  message from a future server version doesn't kill the
- *  client (graceful degradation). */
+ *  client (graceful degradation).
+ *
+ *  Also records snapshots into the interpolation buffer
+ *  (side effect on the `snapshotInterpolation` module) when
+ *  entities arrive, so remote rendering can sample smoothed
+ *  transforms each frame. Snapshot recording uses
+ *  `performance.now()` if available — otherwise `Date.now()` —
+ *  so this function works in both the browser and (jsdom) tests.
+ */
 export function dispatchServerMessage(msg: ServerMessage, d: Dispatchers): void {
+  const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
   switch (msg.type) {
     case 'full_state':
       d.upsertEntities(msg.entities);
       d.setLocalPlayerId(msg.your_player_id);
+      for (const e of msg.entities) {
+        recordSnapshot(e.id, now, e.transform.position, e.transform.quaternion);
+      }
       break;
     case 'entity_updates':
       d.upsertEntities(msg.entities);
+      for (const e of msg.entities) {
+        recordSnapshot(e.id, now, e.transform.position, e.transform.quaternion);
+      }
       break;
     case 'entity_deleted':
       d.removeEntities(msg.ids);
+      for (const id of msg.ids) {
+        dropSnapshot(id);
+      }
       break;
     case 'error':
       // eslint-disable-next-line no-console
