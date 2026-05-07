@@ -39,8 +39,8 @@ export function RemotePresenceIndicator({ entity }: RemotePresenceIndicatorProps
 /** Type-narrow the opaque entity.props.menu value into a string|null.
  *  Defensive: anything other than a non-empty string is treated as
  *  "no menu," so a buggy sender can't make us render based on, say,
- *  `42` or an empty string. */
-function readMenu(entity: Entity): string | null {
+ *  `42` or an empty string. Exported for tests. */
+export function readMenu(entity: Entity): string | null {
   const value = (entity.props as { menu?: unknown }).menu;
   if (typeof value === 'string' && value.length > 0) {
     return value;
