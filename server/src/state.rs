@@ -10,6 +10,7 @@
 //! the tick loop, and the snapshot writer can all touch state
 //! concurrently.
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use tokio::sync::{broadcast, RwLock};
@@ -47,10 +48,14 @@ pub struct AppState {
     /// rebroadcast. Cleared per-actor on disconnect via
     /// `RateTracker::forget`.
     pub event_rate: Arc<RwLock<RateTracker>>,
+    /// Filesystem directory where admin-uploaded assets land
+    /// (per ADR-007). Configured via env var in main.rs;
+    /// defaults to `./assets/` next to the binary.
+    pub assets_dir: PathBuf,
 }
 
 impl AppState {
-    pub fn new(admin_token: String) -> Self {
+    pub fn new(admin_token: String, assets_dir: PathBuf) -> Self {
         let (broadcast_tx, _) = broadcast::channel(BROADCAST_CAPACITY);
         Self {
             registry: Arc::new(RwLock::new(EntityRegistry::new())),
@@ -58,6 +63,7 @@ impl AppState {
             broadcast_tx,
             admin_token,
             event_rate: Arc::new(RwLock::new(RateTracker::new())),
+            assets_dir,
         }
     }
 

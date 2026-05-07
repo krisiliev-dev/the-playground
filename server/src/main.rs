@@ -8,6 +8,7 @@
 //!
 //! Slice 1 stands up the entity model, registry, and connection
 //! lifecycle so the rest can build on a compiling foundation.
+mod assets;
 mod auth;
 mod config;
 mod entity;
@@ -26,6 +27,7 @@ use axum::{
     Router,
 };
 use tower_http::cors::{Any, CorsLayer};
+use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -52,8 +54,22 @@ async fn main() {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(snapshot::DEFAULT_SNAPSHOT_INTERVAL_SECS);
+    // Per ADR-007: admin uploads land here at runtime. Defaults to
+    // ./assets next to the binary; production deploys override
+    // via env var to a persistent volume — content-addressed
+    // filenames make this safe to back up + restore.
+    let assets_dir: std::path::PathBuf = std::env::var("ASSETS_DIR")
+        .unwrap_or_else(|_| "assets".to_string())
+        .into();
+    if let Err(e) = tokio::fs::create_dir_all(&assets_dir).await {
+        tracing::warn!(
+            error = %e,
+            path = %assets_dir.display(),
+            "failed to ensure assets directory exists"
+        );
+    }
 
-    let state = AppState::new(admin_token);
+    let state = AppState::new(admin_token, assets_dir.clone());
 
     // Restore prior admin-authored scene state from disk. Missing
     // file is OK (cold start). Corrupt or version-mismatched file
@@ -96,6 +112,14 @@ async fn main() {
         // position without joining the game (per ADR-006). Auth
         // via Authorization: Bearer <ADMIN_TOKEN>.
         .route("/api/admin/event", post(handlers::post_admin_event))
+        // Admin-only asset upload (per ADR-007). Body is raw
+        // bytes; ?ext=mp3 query param sets the file extension.
+        // Returns the content-addressed URL.
+        .route("/api/admin/assets", post(handlers::post_admin_asset))
+        // Public static serving of uploaded assets. Content-
+        // addressed URLs mean these are safe to cache aggressively;
+        // ServeDir handles MIME types + byte-range requests.
+        .nest_service("/assets", ServeDir::new(&assets_dir))
         .with_state(state)
         .layer(cors)
         .layer(TraceLayer::new_for_http());

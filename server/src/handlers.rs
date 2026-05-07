@@ -20,6 +20,7 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 
 use axum::{
+    body::Bytes,
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
         ConnectInfo, Query, State,
@@ -33,6 +34,7 @@ use serde::Deserialize;
 use tokio::sync::broadcast::error::RecvError;
 use tracing::{debug, info, warn};
 
+use crate::assets::{self, DEFAULT_MAX_UPLOAD_BYTES};
 use crate::auth;
 use crate::entity::{Entity, EntityId, EntityKind, Transform};
 use crate::protocol::{ClientMessage, EntityOp, SceneEventKind, ServerMessage};
@@ -73,6 +75,50 @@ pub async fn post_admin_event(
         event: req.event,
     });
     StatusCode::ACCEPTED.into_response()
+}
+
+/// POST /api/admin/assets — admin uploads bytes to be stored at
+/// a content-addressed URL. Auth via Authorization Bearer token.
+///
+/// Wire format:
+///   - Body: raw asset bytes (no multipart wrapper).
+///   - `?ext=<extension>` query param sets the file extension
+///     used in the URL. Defaults to `bin`. Sanitised against
+///     path traversal + non-alphanumeric chars.
+///
+/// Response:
+///   - 201 Created with `{ id, url, size, extension }` on success.
+///   - 401 Unauthorized on bad/missing token.
+///   - 413 Payload Too Large if body exceeds the cap.
+///   - 400 Bad Request on invalid extension.
+///   - 500 on disk I/O failure.
+pub async fn post_admin_asset(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<HashMap<String, String>>,
+    body: Bytes,
+) -> impl IntoResponse {
+    let presented = extract_bearer(&headers).unwrap_or("");
+    if !auth::is_admin_token(presented, &state.admin_token) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let extension = q.get("ext").map(|s| s.as_str()).unwrap_or("bin");
+    match assets::save_upload(
+        &body,
+        extension,
+        &state.assets_dir,
+        DEFAULT_MAX_UPLOAD_BYTES,
+    )
+    .await
+    {
+        Ok(meta) => (StatusCode::CREATED, Json(meta)).into_response(),
+        Err(assets::UploadError::Oversized { .. }) => StatusCode::PAYLOAD_TOO_LARGE.into_response(),
+        Err(assets::UploadError::InvalidExtension) => StatusCode::BAD_REQUEST.into_response(),
+        Err(e) => {
+            tracing::error!(error = %e, "asset upload failed");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
 }
 
 /// Pull the bearer token from an `Authorization: Bearer <token>`

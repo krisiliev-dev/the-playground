@@ -194,7 +194,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("state.json");
 
-        let state = AppState::new(String::new());
+        let state = AppState::new(String::new(), std::path::PathBuf::from("./test-assets"));
         let portal_a_id = {
             let mut reg = state.registry.write().await;
             let id = reg.insert(portal());
