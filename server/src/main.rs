@@ -8,12 +8,14 @@
 //!
 //! Slice 1 stands up the entity model, registry, and connection
 //! lifecycle so the rest can build on a compiling foundation.
+mod auth;
 mod config;
 mod entity;
 mod handlers;
 mod protocol;
 mod registry;
 mod state;
+mod tick;
 
 use std::net::SocketAddr;
 
@@ -39,6 +41,11 @@ async fn main() {
     }
 
     let state = AppState::new(admin_token);
+
+    // Spawn the 30 Hz authoritative tick loop. Returns a JoinHandle
+    // we deliberately drop — the task lives for the lifetime of
+    // the process; tokio cancels it on graceful shutdown.
+    let _tick_handle = tick::spawn(state.clone());
 
     let cors = CorsLayer::new()
         .allow_origin(Any)
