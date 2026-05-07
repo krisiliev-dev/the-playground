@@ -43,7 +43,11 @@ describe('emitSceneEvent', () => {
     expect(drained[0]).toMatchObject({ kind: 'audio', sound_id: 'click' });
   });
 
-  it('runs local subscribers synchronously before queuing', () => {
+  it('does NOT run local subscribers — wrappers handle local trigger directly', () => {
+    // Critical: emitSceneEvent must not double-fire the originator's
+    // own subscribers, otherwise wrappers like sfx.playWorld would
+    // play the local effect twice (once from the direct call, once
+    // from the receiver subscribing to its own emit).
     const fired: SceneEventKind[] = [];
     const { unmount } = renderHook(() =>
       useSceneEvent('audio', (event) => {
@@ -52,21 +56,7 @@ describe('emitSceneEvent', () => {
     );
 
     emitSceneEvent(audio({ sound_id: 'tick' }));
-    // Synchronous: handler ran *during* the emitSceneEvent call.
-    expect(fired).toHaveLength(1);
-    expect(fired[0]).toMatchObject({ kind: 'audio', sound_id: 'tick' });
-    unmount();
-  });
-
-  it('passes null actorId for locally-emitted events', () => {
-    let receivedActor: string | null | undefined;
-    const { unmount } = renderHook(() =>
-      useSceneEvent('audio', (_event, actorId) => {
-        receivedActor = actorId;
-      }),
-    );
-    emitSceneEvent(audio());
-    expect(receivedActor).toBeNull();
+    expect(fired).toHaveLength(0);
     unmount();
   });
 

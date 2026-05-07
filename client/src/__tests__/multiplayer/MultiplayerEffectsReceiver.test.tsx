@@ -20,6 +20,8 @@ import {
 } from '@/multiplayer/MultiplayerEffectsReceiver';
 import { dispatchSceneEvent, _resetSceneEventBusForTest } from '@/multiplayer/sceneEvents';
 import { sfx } from '@/components/audio/SfxManager';
+import { clearShake, computeShakeOffset } from '@/components/scene/cameraShake';
+import { cursorWorldPosition } from '@/components/scene/cursorWorldPosition';
 
 describe('isKnownSoundId', () => {
   it('returns true for ids that exist in the SFX manifest', () => {
@@ -131,5 +133,104 @@ describe('MultiplayerEffectsReceiver', () => {
   it('renders nothing (returns null)', () => {
     const { container } = render(<MultiplayerEffectsReceiver />);
     expect(container.firstChild).toBeNull();
+  });
+
+  describe('camera_shake events', () => {
+    beforeEach(() => {
+      _resetSceneEventBusForTest();
+      clearShake();
+      cursorWorldPosition.set(0, 0, 0);
+    });
+
+    it('shakes when impact is within radius', () => {
+      render(<MultiplayerEffectsReceiver />);
+      // Local cursor at origin; impact 10 units away within radius 60.
+      cursorWorldPosition.set(0, 0, 0);
+      const triggeredAt = performance.now() / 1000;
+      dispatchSceneEvent(
+        {
+          kind: 'camera_shake',
+          position: [10, 0, 0],
+          radius: 60,
+          intensity: 1.0,
+          duration_ms: 180,
+        },
+        'remote',
+      );
+      // Sample slightly after the trigger time (still within shake
+      // duration). Random jitter; sum-of-abs > 0 with overwhelming
+      // probability when an impulse is active.
+      const [x, y] = computeShakeOffset(triggeredAt + 0.01);
+      expect(Math.abs(x) + Math.abs(y)).toBeGreaterThan(0);
+    });
+
+    it('does not shake when impact is outside radius', () => {
+      render(<MultiplayerEffectsReceiver />);
+      cursorWorldPosition.set(0, 0, 0);
+      // Impact 100 units away, radius 60 — outside.
+      dispatchSceneEvent(
+        {
+          kind: 'camera_shake',
+          position: [100, 0, 0],
+          radius: 60,
+          intensity: 1.0,
+          duration_ms: 180,
+        },
+        'remote',
+      );
+      // No impulse recorded → offset is exactly [0, 0, 0].
+      expect(computeShakeOffset(performance.now() / 1000)).toEqual([0, 0, 0]);
+    });
+
+    it('skips shake events with zero radius', () => {
+      render(<MultiplayerEffectsReceiver />);
+      cursorWorldPosition.set(0, 0, 0);
+      dispatchSceneEvent(
+        {
+          kind: 'camera_shake',
+          position: [0, 0, 0],
+          radius: 0,
+          intensity: 1.0,
+          duration_ms: 180,
+        },
+        'remote',
+      );
+      expect(computeShakeOffset(performance.now() / 1000)).toEqual([0, 0, 0]);
+    });
+
+    it('skips shake events with zero intensity', () => {
+      render(<MultiplayerEffectsReceiver />);
+      cursorWorldPosition.set(0, 0, 0);
+      // Even at zero distance, intensity 0 means no shake.
+      dispatchSceneEvent(
+        {
+          kind: 'camera_shake',
+          position: [0, 0, 0],
+          radius: 60,
+          intensity: 0,
+          duration_ms: 180,
+        },
+        'remote',
+      );
+      expect(computeShakeOffset(performance.now() / 1000)).toEqual([0, 0, 0]);
+    });
+
+    it('unsubscribes camera_shake on unmount', () => {
+      const { unmount } = render(<MultiplayerEffectsReceiver />);
+      unmount();
+      cursorWorldPosition.set(0, 0, 0);
+      dispatchSceneEvent(
+        {
+          kind: 'camera_shake',
+          position: [0, 0, 0],
+          radius: 60,
+          intensity: 1.0,
+          duration_ms: 180,
+        },
+        'remote',
+      );
+      // No subscriber should have triggered an impulse.
+      expect(computeShakeOffset(performance.now() / 1000)).toEqual([0, 0, 0]);
+    });
   });
 });

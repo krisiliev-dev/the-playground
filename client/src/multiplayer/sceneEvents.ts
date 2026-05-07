@@ -80,22 +80,29 @@ export function dispatchSceneEvent(event: SceneEventKind, actorId: EntityId | nu
 }
 
 /**
- * Trigger a scene event. Per ADR-006 optimistic-local:
- *   1. Local subscribers run immediately (the originator's own
- *      components react without waiting for server round-trip).
- *   2. The event is queued for server forwarding; the next
- *      outbound tick of `useMultiplayerSync` sends it.
- *   3. Server validates, rebroadcasts to OTHER clients (the
- *      originator's self-echo is filtered server-side).
+ * Queue a scene event for broadcast to other connected clients.
+ *
+ * Critical contract: this does NOT run local subscribers. The
+ * caller is responsible for triggering the local effect directly
+ * (typically via a wrapper API like `sfx.playWorld` or
+ * `cameraShake.world` that does both jobs). Without this rule,
+ * the originator would double-trigger their own effect — once
+ * from the wrapper's direct call, once from the receiver
+ * subscribing to its own emitted event.
+ *
+ * Per ADR-006 optimistic-local: the originator already played
+ * the effect by the time this call happens. The server validates
+ * + fans out to others; receivers run their subscribers from
+ * inbound network events only (via `dispatchSceneEvent` called
+ * by `useMultiplayerSync`). The server's self-echo filter
+ * (`filter_self_echo` in handlers.rs) ensures the originator
+ * never receives their own event back.
  *
  * Calling this when multiplayer is disabled (no WS) is safe —
- * local subscribers run, the queue accumulates, and entries are
- * harmlessly drained when (if) a connection later opens.
+ * the queue accumulates harmlessly; entries are dropped when
+ * the dispatcher's cleanup runs.
  */
 export function emitSceneEvent(event: SceneEventKind): void {
-  // Local fan-out first so the originator's own effect lands
-  // synchronously with the call site (no async hop needed).
-  dispatchSceneEvent(event, null);
   outboundQueue.push(event);
 }
 

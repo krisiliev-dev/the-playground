@@ -33,7 +33,7 @@ import {
   Vector3,
 } from 'three';
 import { useWorldStore } from '@/store';
-import { triggerImpactShake } from '../cameraShake';
+import { triggerWorldImpactShake } from '../cameraShake';
 import { FORMATION_SCALE, type SwordSlot } from './vibeFormation';
 import { sfx, type PositionalLoopHandle } from '../../audio/SfxManager';
 import { useSwordKinematics } from './useSwordKinematics';
@@ -529,7 +529,9 @@ export function Sword({ slot, staggerIndex = 0 }: SwordProps): JSX.Element {
     if (revealState === 'swinging' && !impactFired.current && t >= SWING_DURATION) {
       impactFlashStartedAt.current = state.clock.elapsedTime;
       impactFired.current = true;
-      triggerImpactShake(state.clock.elapsedTime);
+      // performance.now()/1000 (not state.clock.elapsedTime) — see
+      // ShakeGroup for why we standardise on the wall clock.
+      triggerWorldImpactShake(performance.now() / 1000, [hitPoint.x, hitPoint.y, hitPoint.z]);
       // Stop this sword's flying loop with a short fade so the cut
       // isn't an audible click — the slam's transient and the room's
       // wet tail cover the silence.

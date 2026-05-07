@@ -5,7 +5,14 @@
  * "now" explicitly rather than relying on real time.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
-import { triggerImpactShake, computeShakeOffset, clearShake } from '@/components/scene/cameraShake';
+import {
+  attenuateByDistance,
+  clearShake,
+  computeShakeOffset,
+  triggerImpactShake,
+  triggerWorldImpactShake,
+} from '@/components/scene/cameraShake';
+import { drainOutboundQueue, _resetSceneEventBusForTest } from '@/multiplayer/sceneEvents';
 
 describe('cameraShake', () => {
   beforeEach(() => {
@@ -82,5 +89,110 @@ describe('cameraShake', () => {
   it('returns zero when all impulses are outside their decay window', () => {
     triggerImpactShake(0);
     expect(computeShakeOffset(10)).toEqual([0, 0, 0]);
+  });
+
+  describe('weighted impulses', () => {
+    it('weight=0 is a no-op (no impulse recorded)', () => {
+      triggerImpactShake(0, 0);
+      expect(computeShakeOffset(0.05)).toEqual([0, 0, 0]);
+    });
+
+    it('weight scales the per-impulse contribution to total intensity', () => {
+      // Half-weight impulse should produce noticeably less average
+      // magnitude than full-weight, even with random jitter.
+      const sample = (weight: number): number => {
+        clearShake();
+        triggerImpactShake(0, weight);
+        let sum = 0;
+        for (let i = 0; i < 500; i++) {
+          const [x, y] = computeShakeOffset(0.05);
+          sum += Math.abs(x) + Math.abs(y);
+        }
+        return sum / 500;
+      };
+      const fullAvg = sample(1.0);
+      const halfAvg = sample(0.5);
+      // Half-weight should be roughly half the average magnitude.
+      // Loose bounds because of stochastic jitter; want ≤ 0.7×.
+      expect(halfAvg).toBeLessThan(fullAvg * 0.7);
+    });
+
+    it('negative weight is a no-op (defensive)', () => {
+      triggerImpactShake(0, -1);
+      expect(computeShakeOffset(0.05)).toEqual([0, 0, 0]);
+    });
+  });
+});
+
+describe('attenuateByDistance', () => {
+  it('returns 1 when viewer is at the impact', () => {
+    expect(attenuateByDistance([5, 0, 0], [5, 0, 0], 10)).toBe(1);
+  });
+
+  it('returns 0 when viewer is at or beyond the radius', () => {
+    expect(attenuateByDistance([10, 0, 0], [0, 0, 0], 10)).toBe(0);
+    expect(attenuateByDistance([20, 0, 0], [0, 0, 0], 10)).toBe(0);
+  });
+
+  it('linear falloff: half radius → 0.5 weight', () => {
+    expect(attenuateByDistance([5, 0, 0], [0, 0, 0], 10)).toBeCloseTo(0.5, 6);
+  });
+
+  it('handles 3D distance correctly', () => {
+    // 3-4-5 right triangle in 3D: distance = 5.
+    expect(attenuateByDistance([3, 4, 0], [0, 0, 0], 10)).toBeCloseTo(0.5, 6);
+  });
+
+  it('returns 0 for non-positive radius', () => {
+    expect(attenuateByDistance([0, 0, 0], [0, 0, 0], 0)).toBe(0);
+    expect(attenuateByDistance([0, 0, 0], [0, 0, 0], -5)).toBe(0);
+  });
+});
+
+describe('triggerWorldImpactShake', () => {
+  beforeEach(() => {
+    clearShake();
+    _resetSceneEventBusForTest();
+  });
+
+  it('shakes the local camera at full strength', () => {
+    triggerWorldImpactShake(0, [10, 0, 0]);
+    const [x, y] = computeShakeOffset(0.05);
+    expect(Math.abs(x) + Math.abs(y)).toBeGreaterThan(0);
+  });
+
+  it('queues a camera_shake scene event with the impact position', () => {
+    triggerWorldImpactShake(0, [10, 4, -3]);
+    const drained = drainOutboundQueue();
+    expect(drained).toHaveLength(1);
+    expect(drained[0]).toMatchObject({
+      kind: 'camera_shake',
+      position: [10, 4, -3],
+    });
+  });
+
+  it('uses default radius/intensity/duration when no opts provided', () => {
+    triggerWorldImpactShake(0, [0, 0, 0]);
+    const event = drainOutboundQueue()[0];
+    expect(event).toMatchObject({
+      kind: 'camera_shake',
+      radius: 60,
+      intensity: 1,
+    });
+  });
+
+  it('honours custom opts', () => {
+    triggerWorldImpactShake(0, [0, 0, 0], {
+      radius: 25,
+      intensity: 0.6,
+      durationMs: 250,
+    });
+    const event = drainOutboundQueue()[0];
+    expect(event).toMatchObject({
+      kind: 'camera_shake',
+      radius: 25,
+      intensity: 0.6,
+      duration_ms: 250,
+    });
   });
 });

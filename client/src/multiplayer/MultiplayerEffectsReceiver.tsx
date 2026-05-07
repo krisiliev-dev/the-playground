@@ -15,6 +15,8 @@
  */
 import { sfx } from '@/components/audio/SfxManager';
 import { SFX, type SfxId } from '@/components/audio/sfxManifest';
+import { attenuateByDistance, triggerImpactShake } from '@/components/scene/cameraShake';
+import { cursorWorldPosition } from '@/components/scene/cursorWorldPosition';
 import { useSceneEvent } from './sceneEvents';
 
 export function MultiplayerEffectsReceiver(): null {
@@ -28,6 +30,25 @@ export function MultiplayerEffectsReceiver(): null {
         : undefined,
       volumeMultiplier: event.volume,
     });
+  });
+
+  // Camera shake from a remote actor's impact. Attenuate by distance
+  // from the local player (cursor position ≈ camera position in 3rd-
+  // person follow rig) to the impact point — close impacts shake
+  // hard, far impacts shake softly, beyond `radius` doesn't shake.
+  // Multiplies by event.intensity so server-clamped intensity values
+  // flow through.
+  useSceneEvent('camera_shake', (event) => {
+    const viewer: [number, number, number] = [
+      cursorWorldPosition.x,
+      cursorWorldPosition.y,
+      cursorWorldPosition.z,
+    ];
+    const falloff = attenuateByDistance(viewer, event.position, event.radius);
+    if (falloff <= 0) {
+      return;
+    }
+    triggerImpactShake(performance.now() / 1000, falloff * event.intensity);
   });
 
   return null;
