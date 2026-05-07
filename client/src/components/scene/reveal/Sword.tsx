@@ -279,29 +279,28 @@ export function Sword({ slot, staggerIndex = 0, context }: SwordProps): JSX.Elem
     flyingHandleRef.current = null;
     if (revealState === 'impact' && !impactFired.current && clickHit) {
       impactFired.current = true;
-      // Remote-driven cascades skip side effects: the originator
-      // already broadcasts swordSlam (via sfx.playWorld) and the
-      // remote impact-fired flag is just for visual book-keeping
-      // here.
-      if (isRemote) {
-        return;
-      }
+      // Slam audio fires *locally* on every viewer of the
+      // cascade — originator and receivers alike — using the
+      // per-cascade replication rather than the wire broadcast.
+      // This keeps audio synchronised to each viewer's local
+      // visual cascade and avoids the audio rate-limit (the
+      // 12-sword cascade fires 12 slams in ~0.55s, right at the
+      // server's 20/sec audio cap).
       const SLAM_POS_JITTER = 20;
-      // Use a moderate default velocity for catch-up slams since the
-      // sword may not have completed its arc to peak speed.
       const fallbackVel = 60;
-      const slamPos: [number, number, number] = [
-        clickHit.point[0] + jitterAxis(Math.random, SLAM_POS_JITTER),
-        clickHit.point[1] + jitterAxis(Math.random, SLAM_POS_JITTER),
-        clickHit.point[2] + jitterAxis(Math.random, SLAM_POS_JITTER),
-      ];
-      void sfx.playWorld('swordSlam', slamPos, {
+      const slamPos = {
+        x: clickHit.point[0] + jitterAxis(Math.random, SLAM_POS_JITTER),
+        y: clickHit.point[1] + jitterAxis(Math.random, SLAM_POS_JITTER),
+        z: clickHit.point[2] + jitterAxis(Math.random, SLAM_POS_JITTER),
+      };
+      void sfx.play('swordSlam', {
+        position: slamPos,
         volumeMultiplier: 0.55,
         pitchJitter: computeSlamPitchJitter(fallbackVel),
         filterGain: jitterAxis(Math.random, 20),
       });
     }
-  }, [revealState, clickHit, isRemote]);
+  }, [revealState, clickHit]);
   useEffect(() => {
     if (previousState.current !== revealState) {
       stateEnteredAt.current = performance.now() / 1000;
@@ -594,32 +593,47 @@ export function Sword({ slot, staggerIndex = 0, context }: SwordProps): JSX.Elem
       // spawn block above; each must stop its own.
       flyingHandleRef.current?.stop(60);
       flyingHandleRef.current = null;
+      // Camera shake stays gated on `!isRemote` because it's
+      // wire-broadcast (with per-receiver distance attenuation
+      // handled by `MultiplayerEffectsReceiver`). Receivers
+      // shake from the wire camera_shake event, not from the
+      // local cascade replication — otherwise they'd shake at
+      // full intensity regardless of their distance to the
+      // impact point.
       if (!isRemote) {
         // performance.now()/1000 (not state.clock.elapsedTime) — see
         // ShakeGroup for why we standardise on the wall clock.
         triggerWorldImpactShake(performance.now() / 1000, [hitPoint.x, hitPoint.y, hitPoint.z]);
-        // Velocity-driven slam + spatial jitter. Each slam:
-        //   - Volume scaled by impact velocity (harder hit → louder).
-        //   - Pitch jitter widened to ±40% (was ±25%) for distinctness
-        //     across the 12-cascade.
-        //   - Position offset by a small random vector around the wall
-        //     hit point so each slam emits from a slightly different
-        //     spatial location — the panner gives them slightly
-        //     different stereo positions, helping the ear separate
-        //     them instead of merging into a single block.
-        const v = slamVelocity.current;
-        const SLAM_POS_JITTER = 20;
-        const slamPos: [number, number, number] = [
-          hitPoint.x + jitterAxis(Math.random, SLAM_POS_JITTER),
-          hitPoint.y + jitterAxis(Math.random, SLAM_POS_JITTER),
-          hitPoint.z + jitterAxis(Math.random, SLAM_POS_JITTER),
-        ];
-        void sfx.playWorld('swordSlam', slamPos, {
-          volumeMultiplier: 0.55 * computeSlamVelocityFactor(v),
-          pitchJitter: computeSlamPitchJitter(v),
-          filterGain: jitterAxis(Math.random, 20),
-        });
       }
+      // Slam audio fires locally on every viewer (originator +
+      // receivers replicating this cascade). Each viewer's
+      // visuals and audio are tightly synchronised because they
+      // share the same useFrame trigger. No wire traffic needed
+      // — receivers don't depend on the rate-limited audio
+      // SceneEvent path for cascade audio.
+      //
+      // Velocity-driven slam + spatial jitter. Each slam:
+      //   - Volume scaled by impact velocity (harder hit → louder).
+      //   - Pitch jitter widened to ±40% (was ±25%) for distinctness
+      //     across the 12-cascade.
+      //   - Position offset by a small random vector around the wall
+      //     hit point so each slam emits from a slightly different
+      //     spatial location — the panner gives them slightly
+      //     different stereo positions, helping the ear separate
+      //     them instead of merging into a single block.
+      const v = slamVelocity.current;
+      const SLAM_POS_JITTER = 20;
+      const slamPos = {
+        x: hitPoint.x + jitterAxis(Math.random, SLAM_POS_JITTER),
+        y: hitPoint.y + jitterAxis(Math.random, SLAM_POS_JITTER),
+        z: hitPoint.z + jitterAxis(Math.random, SLAM_POS_JITTER),
+      };
+      void sfx.play('swordSlam', {
+        position: slamPos,
+        volumeMultiplier: 0.55 * computeSlamVelocityFactor(v),
+        pitchJitter: computeSlamPitchJitter(v),
+        filterGain: jitterAxis(Math.random, 20),
+      });
     }
 
     let opacityTarget = 0;

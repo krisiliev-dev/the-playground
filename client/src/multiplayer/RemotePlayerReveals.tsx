@@ -23,6 +23,7 @@ import { Sword, type SwordContext } from '@/components/scene/reveal/Sword';
 import { VIBE_SLOTS, FORMATION_SCALE } from '@/components/scene/reveal/vibeFormation';
 import { buildPortalEndpoints } from '@/content/portals';
 import { getSpawnSlot } from '@/content/spawnSlots';
+import { sfx } from '@/components/audio/SfxManager';
 import type { Entity, EntityId } from './types';
 
 /** Read presence-broadcast reveal fields off a remote entity's
@@ -171,6 +172,25 @@ function RemotePlayerCascade({ actorId, presence }: RemotePlayerCascadeProps): J
       useWorldStore.getState().removePortalEndpointsByActor(actorId);
     };
   }, [actorId]);
+
+  // Local replication of the per-cascade impactRumble cue.
+  // Mirrors `RevealOrchestrator`'s firing on the local player's
+  // `revealState === 'impact'`, but driven off the remote
+  // player's broadcast state. Each viewer's machine plays its
+  // own copy synchronised with their replicated visuals — no
+  // wire audio dependency, no rate-limit risk.
+  useEffect(() => {
+    if (presence.reveal_state !== 'impact') {
+      return;
+    }
+    void sfx.play('impactRumble', {
+      position: {
+        x: presence.click_hit_point[0],
+        y: presence.click_hit_point[1],
+        z: presence.click_hit_point[2],
+      },
+    });
+  }, [presence.reveal_state, presence.click_hit_point]);
 
   // Each Sword reads from its own `context` prop; the context
   // is a fresh object per render so React detects the change

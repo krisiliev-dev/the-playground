@@ -179,10 +179,15 @@ export function RevealOrchestrator(): JSX.Element {
     // Spatial low-frequency boom emitted at the wall hit point on the
     // moment of impact. The per-sword slams provide the higher-
     // frequency punch; this rumble adds weight to the wall itself.
-    // playWorld so other connected players hear it spatially-positioned
-    // at the impact (per ADR-006).
+    //
+    // Local play only — receivers replicate this same cue from
+    // their local cascade (`RemotePlayerCascade` fires it on
+    // remote `revealState === 'impact'`), so wire broadcast is
+    // unnecessary and would invite rate-limit drops at scale.
     if (revealState === 'impact' && clickHit) {
-      sfx.playWorld('impactRumble', clickHit.point);
+      void sfx.play('impactRumble', {
+        position: { x: clickHit.point[0], y: clickHit.point[1], z: clickHit.point[2] },
+      });
     }
   }, [revealState, clickHit]);
 
