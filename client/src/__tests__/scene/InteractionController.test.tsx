@@ -287,17 +287,22 @@ describe('InteractionController click commit path', () => {
     expect(useWorldStore.getState().pressedInteractableId).toBe('cube-B');
   });
 
-  it('mouseup does NOT fire handler if cursor wandered off (pressed !== hovered)', () => {
+  it('mouseup STILL fires handler if cursor wandered off (drag-away forgives)', () => {
+    // The press establishes intent — once mousedown has captured a
+    // target, mouseup commits to that target regardless of where
+    // the cursor ended up. This matches user expectation in 3D
+    // crosshair UI: clicking a portal then panning the camera
+    // shouldn't cancel the click.
     const handler = vi.fn();
     interactableHandlers.set('cube-A', handler);
     useWorldStore.setState({
-      hoveredInteractableId: 'cube-B', // different from pressed
+      hoveredInteractableId: 'cube-B', // cursor moved to a different target
     });
     useWorldStore.getState().beginInteractPress('cube-A', [0, 0, 0]);
 
     render(<InteractionController />);
     window.dispatchEvent(new MouseEvent('mouseup'));
-    expect(handler).not.toHaveBeenCalled();
+    expect(handler).toHaveBeenCalledTimes(1);
   });
 
   it('mouseup is a no-op when no press is active', () => {

@@ -67,7 +67,7 @@ import {
 import { MAX_PORTAL_RECURSION, getPaired, type PortalEndpoint } from '@/content/portals';
 import { MAIN_CUBE_BOB } from '@/content/routes';
 import { useWorldStore } from '@/store';
-import { interactableHandlers } from '../Interactable';
+import { useInteractable } from '../Interactable';
 import { floatOffset } from '../floatBob';
 import {
   CASCADE_OVERLAY_LAYER,
@@ -885,59 +885,37 @@ const PORTAL_APPROACH_RANGE = 140;
 const PORTAL_INTERACT_RANGE = PORTAL_APPROACH_RANGE;
 
 function PortalMesh({ endpoint, material, meshRef, groupRef }: PortalMeshProps): JSX.Element {
-  // Register a click handler with the central InteractionController.
-  // The controller raycasts from screen-centre each frame (independent
-  // of pointer-lock state), updates `hoveredInteractableId` based on
-  // the nearest mesh tagged via `userData.interactable`, and fires
-  // the registered handler on **mouseup** when press- and release-
-  // targets match.
+  // Wire interaction via the unified hook: registers the click
+  // handler with `InteractionController`, tags the surface plane's
+  // userData so the per-frame raycast picks it up, and animates a
+  // hover/press scale on the parent group (which contains both the
+  // surface plane AND the rim — so the rim "pops" when crosshaired).
   //
-  // The handler doesn't compute the leap target — it just queues a
-  // click on this portal id. CursorAvatar consumes the request next
-  // frame, runs `planPortalLeap` with bob-compensated source +
-  // current avatar position, and either kicks off a leap (valid) or
-  // discards (e.g. avatar standing behind a single-sided portal).
-  // Splitting it this way keeps active-side validation in the one
-  // place that has live avatar position; the click site stays a
-  // pure "register intent" callback.
-  useEffect(() => {
-    const handler = (): void => {
-      useWorldStore.getState().setPendingPortalClick(endpoint.id);
-    };
-    interactableHandlers.set(endpoint.id, handler);
-    return () => {
-      interactableHandlers.delete(endpoint.id);
-    };
-  }, [endpoint.id]);
+  // The handler queues a portal click; CursorAvatar consumes the
+  // request next frame, runs `planPortalLeap` with the live avatar
+  // position + bob compensation, and either kicks off a leap or
+  // discards the click (e.g. avatar behind a single-sided portal).
+  // Keeping active-side validation in the consume site means the
+  // click handler stays a pure "register intent" callback.
+  useInteractable({
+    id: endpoint.id,
+    range: PORTAL_INTERACT_RANGE,
+    ref: meshRef,
+    visualRef: groupRef,
+    onInteract: () => useWorldStore.getState().setPendingPortalClick(endpoint.id),
+  });
 
+  // The surface plane needs to be on PORTAL_SURFACE_LAYER (the
+  // cascade targets that layer specifically for stencil-mark
+  // passes); the userData / interactable wiring is fully handled
+  // by `useInteractable` above.
   useEffect(() => {
     const mesh = meshRef.current;
-    if (!mesh) {
+    if (!mesh || !mesh.layers || typeof mesh.layers.set !== 'function') {
       return;
     }
-    if (mesh.layers && typeof mesh.layers.set === 'function') {
-      mesh.layers.set(PORTAL_SURFACE_LAYER);
-    }
-    // Tag the surface plane for the InteractionController's raycast.
-    // The controller reads `userData.interactable / interactableId /
-    // interactableRange` to decide what's hoverable. Even though the
-    // material has `colorWrite: false`, R3F/Three's raycaster uses
-    // geometry, so the invisible plane is still a valid hit target.
-    // The userData guard mirrors the test-env layer guard above —
-    // jsdom mocks don't construct a real Three.js Mesh.
-    if (mesh.userData) {
-      mesh.userData.interactable = true;
-      mesh.userData.interactableId = endpoint.id;
-      mesh.userData.interactableRange = PORTAL_INTERACT_RANGE;
-    }
-    return () => {
-      if (mesh.userData) {
-        delete mesh.userData.interactable;
-        delete mesh.userData.interactableId;
-        delete mesh.userData.interactableRange;
-      }
-    };
-  }, [meshRef, endpoint.id]);
+    mesh.layers.set(PORTAL_SURFACE_LAYER);
+  }, [meshRef]);
 
   return (
     <group

@@ -11,8 +11,17 @@
  * controller's behaviour is verified via the manual smoke test
  * (the test cube in the scene).
  */
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
+
+// `useInteractable` calls `useFrame` for the auto hover/press scale
+// animation, but R3F's hooks throw outside a `<Canvas>` context. The
+// store-subscription side of the hook is the only thing this test
+// suite is verifying, so stub `useFrame` to a no-op.
+vi.mock('@react-three/fiber', () => ({
+  useFrame: vi.fn(),
+}));
+
 import { useInteractable } from '@/components/scene/Interactable';
 import { useWorldStore } from '@/store';
 
@@ -80,6 +89,19 @@ describe('useInteractable', () => {
     });
     expect(result.current.isHovered).toBe(false);
     expect(result.current.isPressed).toBe(false);
+  });
+
+  it('honors an external ref via opts.ref instead of creating its own', () => {
+    const externalRef = { current: null } as React.MutableRefObject<import('three').Mesh | null>;
+    const { result } = renderHook(() =>
+      useInteractable({
+        id: 'cube-A',
+        onInteract: () => undefined,
+        ref: externalRef,
+      }),
+    );
+    // Hook returns the same ref instance the caller passed in.
+    expect(result.current.ref).toBe(externalRef);
   });
 
   it('cleans up on unmount — re-renders with a new id do not leak old state', () => {

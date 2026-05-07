@@ -43,6 +43,7 @@ import { useWorldStore } from '@/store';
 import { useIsTouchPrimary } from '@/utils';
 import { sfx } from '../audio/SfxManager';
 import { interactableHandlers, setTouchInProgress } from './Interactable';
+import { cursorWorldPosition } from './cursorWorldPosition';
 import { SWING_PRE } from './reveal/constants';
 import {
   clampToBoxInterior,
@@ -200,6 +201,16 @@ const ROOM_EXIT_ID_BY_PATH: Record<string, string> = {
   '/writing': 'room-writing-exit',
 };
 
+/** Threshold for treating a wall-normal vector as "essentially
+ *  vertical" — i.e. the user clicked the floor or ceiling. When
+ *  abs(normal · worldUp) > this, the standard `worldUp × normal`
+ *  basis trick collapses (the cross of two near-parallel vectors
+ *  is near-zero), so we fall back to world +X for the wall's
+ *  "right" axis. 0.99 ≈ 8° tilt — generous enough that floors and
+ *  ceilings reliably trigger the fallback without the threshold
+ *  flickering on side-wall clicks at extreme camera pitches. */
+const NEARLY_VERTICAL_DOT = 0.99;
+
 /**
  * Compute the `PortalHole` to pass into `clampToBoxInterior` based
  * on which route the avatar is currently in:
@@ -237,7 +248,7 @@ function portalHoleForRoute(
     // half-portal and quadrantOffset = formation-quadrant-offset.
     const normal = normalOut.set(...clickHit.normal).normalize();
     const worldUp = TMP_WORLD_UP;
-    if (Math.abs(normal.dot(worldUp)) > 0.99) {
+    if (Math.abs(normal.dot(worldUp)) > NEARLY_VERTICAL_DOT) {
       rightOut.set(1, 0, 0);
     } else {
       rightOut.crossVectors(worldUp, normal).normalize();
@@ -1622,6 +1633,13 @@ function AvatarCursor({ refs }: ModeProps): null {
       teleportSnapRef.current = false;
     }
     group.scale.setScalar(refs.renderedScale.current);
+
+    // Publish the final-for-this-frame avatar world position to the
+    // shared singleton. InteractionController reads it next frame as
+    // the raycast origin, so things between camera and cursor (i.e.
+    // behind the cursor in view direction) don't intercept the
+    // crosshair ray. See `cursorWorldPosition.ts`.
+    cursorWorldPosition.copy(refs.avatarPos.current);
   }, 2);
 
   return null;
