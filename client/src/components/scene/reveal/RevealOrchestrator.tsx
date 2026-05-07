@@ -14,9 +14,10 @@ import { intersectInsideCube } from '@/utils/cubeRaycast';
 import { Portal } from './Portal';
 import { Sword } from './Sword';
 import { BulletTimeDirector } from './BulletTimeDirector';
-import { VIBE_SLOTS } from './vibeFormation';
+import { FORMATION_SCALE, VIBE_SLOTS } from './vibeFormation';
 import { sfx } from '../../audio/SfxManager';
 import { ARMED_DURATION_MS, SWINGING_DURATION_MS, IMPACT_DURATION_MS } from './constants';
+import { buildPortalEndpoints } from '@/content/portals';
 
 export function RevealOrchestrator(): JSX.Element {
   const revealState = useWorldStore((s) => s.revealState);
@@ -88,6 +89,20 @@ export function RevealOrchestrator(): JSX.Element {
       void sfx.play('impactRumble', {
         position: { x: clickHit.point[0], y: clickHit.point[1], z: clickHit.point[2] },
       });
+    }
+  }, [revealState, clickHit]);
+
+  // Populate runtime portal endpoints once the formation has landed.
+  // The 4 formation portals depend on `clickHit` (positioned in the
+  // wall plane); the 3 room-exit portals are static-by-room but
+  // ride along in the same array for uniform consumption. We trigger
+  // on `'impact'` (one beat before `'revealed'`) so the portals are
+  // present when the formation visually settles. Cleared by
+  // `resetReveal`.
+  useEffect(() => {
+    if (revealState === 'impact' && clickHit) {
+      const endpoints = buildPortalEndpoints(clickHit, FORMATION_SCALE);
+      useWorldStore.getState().setPortalEndpoints(endpoints);
     }
   }, [revealState, clickHit]);
 

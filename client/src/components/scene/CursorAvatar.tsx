@@ -52,6 +52,7 @@ import {
   computeWalkLeanTarget,
   computeWalkVector,
   computeWallProximity,
+  type PortalHole,
   projectNDCToWorld,
 } from './cursorAvatarMath';
 import { FLAT_ROUTES, MAIN_CUBE_BOB } from '@/content/routes';
@@ -61,7 +62,12 @@ import {
   routeForAvatar,
 } from '@/content/routeForPosition';
 import { floatOffset } from './floatBob';
-import { PORTAL_ENDPOINTS } from '@/content/portals';
+import {
+  DEFAULT_PORTAL_SIZE,
+  FORMATION_QUADRANT_OFFSET,
+  type PortalEndpoint,
+} from '@/content/portals';
+import type { ClickHit } from '@/store';
 import {
   bobbedEndpoint,
   findCrossedPortal,
@@ -182,6 +188,103 @@ const OUTLINE_SHIFT_Y_FRACTION = 0.012;
 const INSCENE_CURSOR_SCALE = 5;
 
 useGLTF.preload(MODEL_URL);
+
+const FORMATION_ROUTE = '/';
+/** Map from each section room's path to the id of its exit portal —
+ *  same ids the factory in `content/portals.ts` builds. Avoids a
+ *  string-match scan over the endpoint array each frame for the
+ *  hot clamp path. */
+const ROOM_EXIT_ID_BY_PATH: Record<string, string> = {
+  '/about': 'room-about-exit',
+  '/projects': 'room-projects-exit',
+  '/writing': 'room-writing-exit',
+};
+
+/**
+ * Compute the `PortalHole` to pass into `clampToBoxInterior` based
+ * on which route the avatar is currently in:
+ *
+ *   - On the main cube ('/'), the hole is the FOUR-quadrant cluster
+ *     at the click point on the formation wall, so the avatar can
+ *     walk into any of the section portals (or the SE trigger).
+ *   - In a section room ('/about', '/projects', '/writing'), the
+ *     hole is a single square on the room's exit-portal wall, so
+ *     the avatar can walk back through to the formation.
+ *   - In any other route (no associated portal), returns
+ *     `undefined` — the wall clamps unchanged.
+ *
+ * Mutates the passed scratch vectors so the caller can reuse them
+ * frame-to-frame; returning `undefined` leaves them in their last
+ * state (clamp ignores them then anyway).
+ */
+function portalHoleForRoute(
+  routePath: string,
+  endpoints: ReadonlyArray<PortalEndpoint>,
+  clickHit: ClickHit | null,
+  bobY: number,
+  centerOut: Vector3,
+  normalOut: Vector3,
+  rightOut: Vector3,
+  upOut: Vector3,
+): PortalHole | undefined {
+  if (routePath === FORMATION_ROUTE) {
+    if (!clickHit) {
+      return undefined;
+    }
+    // Wall basis at the click point, mirroring the factory in
+    // `content/portals.ts`. The clamp helper tests `|abs(localX) -
+    // quadrantOffset| < radius` for both axes, so radius =
+    // half-portal and quadrantOffset = formation-quadrant-offset.
+    const normal = normalOut.set(...clickHit.normal).normalize();
+    const worldUp = TMP_WORLD_UP;
+    if (Math.abs(normal.dot(worldUp)) > 0.99) {
+      rightOut.set(1, 0, 0);
+    } else {
+      rightOut.crossVectors(worldUp, normal).normalize();
+    }
+    upOut.crossVectors(normal, rightOut).normalize();
+    centerOut.set(...clickHit.point);
+    centerOut.y += bobY;
+    return {
+      center: centerOut,
+      normal: normalOut,
+      radius: DEFAULT_PORTAL_SIZE / 2,
+      right: rightOut,
+      up: upOut,
+      quadrantOffset: FORMATION_QUADRANT_OFFSET,
+    };
+  }
+  const exitId = ROOM_EXIT_ID_BY_PATH[routePath];
+  if (!exitId) {
+    return undefined;
+  }
+  const exit = endpoints.find((ep) => ep.id === exitId);
+  if (!exit) {
+    return undefined;
+  }
+  // Single-square hole. Active normal = local +Z rotated by the
+  // endpoint quaternion — for room exits that's world -Z (the
+  // inward face of the room's +Z wall). The clamp test reduces to
+  // `Chebyshev(tangent) < radius` since `quadrantOffset` is
+  // omitted.
+  centerOut.set(...exit.position);
+  centerOut.y += bobY;
+  TMP_LOCAL_Z.set(0, 0, 1);
+  normalOut.copy(TMP_LOCAL_Z).applyQuaternion({
+    x: exit.quaternion[0],
+    y: exit.quaternion[1],
+    z: exit.quaternion[2],
+    w: exit.quaternion[3],
+  } as Quaternion);
+  return {
+    center: centerOut,
+    normal: normalOut,
+    radius: exit.size.width / 2,
+  };
+}
+
+const TMP_WORLD_UP = new Vector3(0, 1, 0);
+const TMP_LOCAL_Z = new Vector3();
 
 /**
  * Shared state between ActiveCursor and its mode subcomponents.
@@ -1014,6 +1117,13 @@ function AvatarCursor({ refs }: ModeProps): null {
   /** Scratch for the per-frame clamp call. Reused so the per-route
    *  clamp lookup doesn't allocate. */
   const clampCenter = useRef(new Vector3());
+  /** Scratch buffers for the clamp's portalHole — populated each
+   *  frame by `portalHoleForRoute`. We keep them as refs so the
+   *  helper can mutate in place without per-frame allocation. */
+  const tmpHoleCenter = useRef(new Vector3());
+  const tmpHoleNormal = useRef(new Vector3());
+  const tmpHoleRight = useRef(new Vector3());
+  const tmpHoleUp = useRef(new Vector3());
   const clampHalf = useRef(new Vector3());
   /** Avatar position at the START of each frame (before walking is
    *  applied). Used by the portal-crossing detector to test prev →
@@ -1113,20 +1223,28 @@ function AvatarCursor({ refs }: ModeProps): null {
       const pendingClickId = useWorldStore.getState().pendingPortalClick;
       if (pendingClickId) {
         const bobYNow = floatOffset(state.clock.elapsedTime, MAIN_CUBE_BOB);
-        const sourceEp = PORTAL_ENDPOINTS.find((ep) => ep.id === pendingClickId);
+        const endpoints = useWorldStore.getState().portalEndpoints;
+        const sourceEp = endpoints.find((ep) => ep.id === pendingClickId);
         if (sourceEp) {
-          const bobbedSource = bobbedEndpoint(sourceEp, bobYNow);
-          const target = planPortalLeap(
-            {
-              x: refs.avatarPos.current.x,
-              y: refs.avatarPos.current.y,
-              z: refs.avatarPos.current.z,
-            },
-            bobbedSource,
-            PORTAL_LEAP_OVERSHOOT,
-          );
-          if (target) {
-            useWorldStore.getState().setLeapTarget(target);
+          if (sourceEp.trigger === 'simple-experience') {
+            // Trigger portals fire their action immediately on click;
+            // no leap, no teleport. The avatar stays put while the
+            // app flips to document mode.
+            useWorldStore.getState().setDocumentMode(true);
+          } else {
+            const bobbedSource = bobbedEndpoint(sourceEp, bobYNow);
+            const target = planPortalLeap(
+              {
+                x: refs.avatarPos.current.x,
+                y: refs.avatarPos.current.y,
+                z: refs.avatarPos.current.z,
+              },
+              bobbedSource,
+              PORTAL_LEAP_OVERSHOOT,
+            );
+            if (target) {
+              useWorldStore.getState().setLeapTarget(target);
+            }
           }
         }
         useWorldStore.getState().setPendingPortalClick(null);
@@ -1195,7 +1313,8 @@ function AvatarCursor({ refs }: ModeProps): null {
     // their world Y before the geometric crossing check.
     {
       const bobY = floatOffset(state.clock.elapsedTime, MAIN_CUBE_BOB);
-      const bobbedEndpoints = PORTAL_ENDPOINTS.map((ep) => bobbedEndpoint(ep, bobY));
+      const endpoints = useWorldStore.getState().portalEndpoints;
+      const bobbedEndpoints = endpoints.map((ep) => bobbedEndpoint(ep, bobY));
       const crossing = findCrossedPortal(
         {
           x: prevAvatarPos.current.x,
@@ -1210,40 +1329,51 @@ function AvatarCursor({ refs }: ModeProps): null {
         bobbedEndpoints,
       );
       if (crossing) {
-        // findCrossedPortal returns position via teleportPose internally
-        // but with yaw=0 placeholder. Re-call teleportPose with the
-        // avatar's actual yaw to get the correct post-teleport
-        // orientation (paired portals are identified front-to-front,
-        // so the resulting yaw is the source-relative yaw rotated 180°
-        // around Y and re-anchored in dest's frame).
-        const pose = teleportPose(
-          {
-            x: refs.avatarPos.current.x,
-            y: refs.avatarPos.current.y,
-            z: refs.avatarPos.current.z,
-          },
-          refs.avatarYaw.current,
-          crossing.source,
-          crossing.destination,
-        );
-        refs.avatarPos.current.set(pose.position.x, pose.position.y, pose.position.z);
-        refs.avatarYaw.current = pose.yaw;
-        // Refresh the local `yaw` so downstream computations (camera
-        // follow-offset rotation, avatarTargetQuat) use the post-
-        // teleport orientation on this frame.
-        yaw = pose.yaw;
-        // Tell the camera-follow rig downstream to snap (lerp rate=1)
-        // instead of sliding across the world. Without this the
-        // camera would visibly travel from the source-side follow
-        // point to the dest-side follow point over multiple frames.
-        teleportSnapRef.current = true;
-        // The click-leap (if any) drove us into this crossing; clear
-        // the leap target now so the avatar emerges at the destination
-        // without continuing to chase the source-side leap target
-        // (which, post-teleport, would point them back into the
-        // source portal from the dest side).
-        if (useWorldStore.getState().leapTarget !== null) {
-          useWorldStore.getState().setLeapTarget(null);
+        if (crossing.kind === 'trigger') {
+          // Trigger portals (Simple Experience) flip an app state
+          // instead of teleporting. Clear any in-flight leap so the
+          // avatar doesn't keep marching past the trigger plane while
+          // the app rerenders into document mode.
+          if (crossing.trigger === 'simple-experience') {
+            useWorldStore.getState().setDocumentMode(true);
+          }
+          if (useWorldStore.getState().leapTarget !== null) {
+            useWorldStore.getState().setLeapTarget(null);
+          }
+        } else {
+          // Teleport: re-call teleportPose with the avatar's actual
+          // yaw (findCrossedPortal returns yaw=0 as a placeholder) so
+          // the resulting orientation matches the front-to-front
+          // R₁₈₀_Y identification of paired portals.
+          const pose = teleportPose(
+            {
+              x: refs.avatarPos.current.x,
+              y: refs.avatarPos.current.y,
+              z: refs.avatarPos.current.z,
+            },
+            refs.avatarYaw.current,
+            crossing.source,
+            crossing.destination,
+          );
+          refs.avatarPos.current.set(pose.position.x, pose.position.y, pose.position.z);
+          refs.avatarYaw.current = pose.yaw;
+          // Refresh local `yaw` so downstream computations (camera
+          // follow-offset rotation, avatarTargetQuat) use the post-
+          // teleport orientation on this frame.
+          yaw = pose.yaw;
+          // Tell the camera-follow rig downstream to snap (lerp
+          // rate=1) instead of sliding across the world. Without
+          // this the camera would visibly travel from the source-
+          // side follow point to the dest-side follow point over
+          // multiple frames.
+          teleportSnapRef.current = true;
+          // The click-leap (if any) drove us into this crossing;
+          // clear the leap target now so the avatar emerges at the
+          // destination without continuing to chase the source-side
+          // leap target.
+          if (useWorldStore.getState().leapTarget !== null) {
+            useWorldStore.getState().setLeapTarget(null);
+          }
         }
       }
     }
@@ -1282,11 +1412,26 @@ function AvatarCursor({ refs }: ModeProps): null {
           (b.max[1] - b.min[1]) / 2,
           (b.max[2] - b.min[2]) / 2,
         );
+        // Carve a portal-shaped exception in the wall clamp so the
+        // avatar can walk into the formation portals (main cube's
+        // back wall) or the room's exit portal (room's +Z wall).
+        // Without this the wall stops the avatar before they reach
+        // the portal plane, and walk-through teleport never fires.
+        const portalHole = portalHoleForRoute(
+          clampRoute.route.path,
+          useWorldStore.getState().portalEndpoints,
+          useWorldStore.getState().clickHit,
+          bobY,
+          tmpHoleCenter.current,
+          tmpHoleNormal.current,
+          tmpHoleRight.current,
+          tmpHoleUp.current,
+        );
         clampToBoxInterior(
           avatarWorld,
           clampHalf.current,
           clampMargin,
-          undefined,
+          portalHole,
           clampCenter.current,
         );
       }

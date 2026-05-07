@@ -249,16 +249,30 @@ export const MAIN_CUBE_BOB: BobConfig = { period: 6, amplitude: 0.6 };
 const ROOM_SIZE = 400;
 const ROOM_HALF = ROOM_SIZE / 2;
 /** Distance from the main cube's -Z wall (z = -400) to the row of
- *  rooms behind it. Matches the legacy `WALL_GAP` so the row sits
- *  at the same place it used to. */
-const WALL_GAP = 100;
+ *  rooms behind it.
+ *
+ *  Sized to keep the projects-portal vCam OUT of the main cube. The
+ *  R₁₈₀_Y portal math puts `vCam.z = dest.z + (avatar's +Z offset
+ *  from source)`. With the avatar's max +Z extent at the back of
+ *  the main cube (`z = +400` minus margin) and the source portal at
+ *  `z ≈ -400`, that offset can reach ~800 units. If `dest.z + 800`
+ *  is still inside the main cube (z > -400), the through-view ends
+ *  up rendering the main cube's interior — which reads as "the vCam
+ *  exited the room." `WALL_GAP = 1000` puts dest at `z ≈ -1600`,
+ *  so worst-case vCam.z lands at `~-800` — outside the main cube
+ *  AND outside every room (which sit at `z ∈ [-1800, -1400]`),
+ *  rendering as empty space rather than confusing "main cube
+ *  again" content. About / Writing don't trip this because their
+ *  rooms are X-offset, but pushing them in lockstep keeps the
+ *  layout symmetric. */
+const WALL_GAP = 1000;
 /** Center-to-center spacing between adjacent rooms in the row.
  *  Greater than `ROOM_SIZE` so adjacent rooms have a visible gap
  *  between them rather than touching. */
 const ROOM_SPACING = 600;
 /** Z position of every room's center — one common slab behind the
  *  main cube's -Z face. */
-const ROOM_Z_CENTER = -CUBE_HALF - WALL_GAP - ROOM_HALF; // -700
+const ROOM_Z_CENTER = -CUBE_HALF - WALL_GAP - ROOM_HALF; // -1600
 
 export const ROUTES: ReadonlyArray<Route> = [
   {

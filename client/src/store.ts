@@ -13,6 +13,7 @@ import { create } from 'zustand';
 import type { AppState, EnvironmentConfig, Player } from '@/types';
 import { generateId } from '@/utils/id';
 import { DEFAULT_ENVIRONMENT } from '@/utils/defaults';
+import type { PortalEndpoint } from '@/content/portals';
 
 // ─── Phase 4 — Sword + VIBE Reveal ───────────────────────────────────
 
@@ -95,6 +96,10 @@ interface AppActions {
   /** Queue a click-to-portal request. Validation (single-sided gate,
    *  bob compensation) happens in CursorAvatar on consume. */
   setPendingPortalClick: (sourcePortalId: string | null) => void;
+  /** Replace the active portal endpoint set. Called by the reveal
+   *  orchestrator with `buildPortalEndpoints(clickHit)` output once
+   *  the formation has landed; called with `[]` on `resetReveal`. */
+  setPortalEndpoints: (endpoints: ReadonlyArray<PortalEndpoint>) => void;
   /** Record which room the avatar most recently *exited*. Updated
    *  by CursorAvatar when it teleports the avatar back to the
    *  cube; consumed by the menu's Back button to "pull" the
@@ -192,6 +197,14 @@ interface RevealSlice {
    *  target (or reject the click as invalid — e.g. clicked on the
    *  back of a single-sided portal), and clears the field. */
   pendingPortalClick: string | null;
+  /** Active portal endpoints. Empty until the reveal sequence
+   *  finishes — the formation portals are positioned relative to
+   *  the click point on the wall, so they can't exist before the
+   *  user has picked a wall. The portal cascade renderer + the
+   *  walk-through crossing detector both read from this; the
+   *  reveal orchestrator populates it via `buildPortalEndpoints`
+   *  once `revealState === 'revealed'`. Cleared on `resetReveal`. */
+  portalEndpoints: ReadonlyArray<PortalEndpoint>;
   /** Last room the avatar exited back to the cube. Persists past
    *  exit so the pause-menu Back button can re-enter it. Cleared
    *  when the user enters a new room (so Back from the cube always
@@ -291,6 +304,7 @@ export const useWorldStore = create<AppState & AppActions & RevealSlice & Intera
     pendingAvatarTeleport: null,
     leapTarget: null,
     pendingPortalClick: null,
+    portalEndpoints: [],
     lastExitedRoom: null,
     muted: false,
     // Avatar lives from page load — small at first (cursor-sized), then grows
@@ -331,7 +345,13 @@ export const useWorldStore = create<AppState & AppActions & RevealSlice & Intera
         return { revealState: next };
       }),
 
-    resetReveal: () => set({ revealState: 'idle', clickHit: null, controlsDismissed: false }),
+    resetReveal: () =>
+      set({
+        revealState: 'idle',
+        clickHit: null,
+        controlsDismissed: false,
+        portalEndpoints: [],
+      }),
 
     setPendingPointerLock: (pending) => set({ pendingPointerLock: pending }),
 
@@ -344,6 +364,7 @@ export const useWorldStore = create<AppState & AppActions & RevealSlice & Intera
     setPendingAvatarTeleport: (path) => set({ pendingAvatarTeleport: path }),
     setLeapTarget: (target) => set({ leapTarget: target }),
     setPendingPortalClick: (sourcePortalId) => set({ pendingPortalClick: sourcePortalId }),
+    setPortalEndpoints: (endpoints) => set({ portalEndpoints: endpoints }),
 
     setLastExitedRoom: (roomId) => set({ lastExitedRoom: roomId }),
 

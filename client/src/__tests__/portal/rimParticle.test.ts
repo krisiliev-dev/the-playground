@@ -15,11 +15,13 @@ import { describe, it, expect } from 'vitest';
 import { Color, Vector3 } from 'three';
 import {
   buildRimPalette,
+  RIM_ALL_EDGES,
   RIM_PARTICLE_LIFETIME_MAX,
   RIM_PARTICLE_LIFETIME_MIN,
   RIM_PARTICLE_OUTWARD_BIAS,
   RIM_PARTICLE_SPEED_MAX,
   RIM_PARTICLE_SPEED_MIN,
+  type RimEdgeMask,
   type RimParticle,
   respawnRimParticle,
 } from '@/components/scene/portal/rimParticle';
@@ -265,5 +267,97 @@ describe('respawnRimParticle — color from palette', () => {
     // palette pick 0.4 → floor(0.4*11)=4 → still in base slots.
     respawnRimParticle(p, WIDTH, HEIGHT, palette, false, seq([0, 0, 0, 0, 0, 0.4]));
     expect(p.color.equals(base)).toBe(true);
+  });
+});
+
+describe('respawnRimParticle — edge mask', () => {
+  const palette = buildRimPalette('#00ffcc');
+
+  it('default mask (RIM_ALL_EDGES) lets every edge spawn', () => {
+    // Sample a sweep over the perimeter — landing positions should
+    // cover all four edges.
+    const seenEdges = new Set<string>();
+    const p = makeParticle();
+    for (let i = 0; i < 80; i += 1) {
+      respawnRimParticle(p, WIDTH, HEIGHT, palette, false, seq([i / 80, 0, 0, 0, 0]));
+      if (Math.abs(p.origin.y - HALF_H) < 1e-6) {
+        seenEdges.add('top');
+      }
+      if (Math.abs(p.origin.x - HALF_W) < 1e-6) {
+        seenEdges.add('right');
+      }
+      if (Math.abs(p.origin.y + HALF_H) < 1e-6) {
+        seenEdges.add('bottom');
+      }
+      if (Math.abs(p.origin.x + HALF_W) < 1e-6) {
+        seenEdges.add('left');
+      }
+    }
+    expect(seenEdges).toEqual(new Set(['top', 'right', 'bottom', 'left']));
+  });
+
+  it('outer-edges-only mask (top + right) spawns ONLY on those edges', () => {
+    // For 80 sweeps over the perimeter, every spawn must land on
+    // the top edge (y = +halfH) or the right edge (x = +halfW).
+    // Corner spawns satisfy both checks — that's fine; we just
+    // need each spawn to be on at least one of the enabled edges.
+    const mask: RimEdgeMask = { top: true, right: true, bottom: false, left: false };
+    const p = makeParticle();
+    for (let i = 0; i < 80; i += 1) {
+      respawnRimParticle(p, WIDTH, HEIGHT, palette, false, seq([i / 80, 0, 0, 0, 0]), mask);
+      const onTop = Math.abs(p.origin.y - HALF_H) < 1e-6;
+      const onRight = Math.abs(p.origin.x - HALF_W) < 1e-6;
+      expect(onTop || onRight).toBe(true);
+    }
+  });
+
+  it('top-left mask spawns only on top + left', () => {
+    const mask: RimEdgeMask = { top: true, right: false, bottom: false, left: true };
+    const p = makeParticle();
+    for (let i = 0; i < 80; i += 1) {
+      respawnRimParticle(p, WIDTH, HEIGHT, palette, false, seq([i / 80, 0, 0, 0, 0]), mask);
+      const onTop = Math.abs(p.origin.y - HALF_H) < 1e-6;
+      const onLeft = Math.abs(p.origin.x + HALF_W) < 1e-6;
+      expect(onTop || onLeft).toBe(true);
+    }
+  });
+
+  it('bottom-right mask never spawns on top or left edge interior', () => {
+    // The complement check: with bottom + right enabled, no spawn
+    // should land in the INTERIOR of top or left edges (corners
+    // shared with right/bottom are still allowed). "Interior"
+    // means the coord is strictly between the corners.
+    const mask: RimEdgeMask = { top: false, right: true, bottom: true, left: false };
+    const p = makeParticle();
+    for (let i = 0; i < 80; i += 1) {
+      respawnRimParticle(p, WIDTH, HEIGHT, palette, false, seq([i / 80, 0, 0, 0, 0]), mask);
+      const onTopInterior =
+        Math.abs(p.origin.y - HALF_H) < 1e-6 &&
+        Math.abs(p.origin.x - HALF_W) > 1e-6 &&
+        Math.abs(p.origin.x + HALF_W) > 1e-6;
+      const onLeftInterior =
+        Math.abs(p.origin.x + HALF_W) < 1e-6 &&
+        Math.abs(p.origin.y - HALF_H) > 1e-6 &&
+        Math.abs(p.origin.y + HALF_H) > 1e-6;
+      expect(onTopInterior).toBe(false);
+      expect(onLeftInterior).toBe(false);
+    }
+  });
+
+  it('falls back to all-edges when the mask is fully empty (defensive)', () => {
+    // A fully-zero mask would collapse the perimeter to 0 and
+    // produce NaN positions; the helper falls back to RIM_ALL_EDGES.
+    const empty: RimEdgeMask = { top: false, right: false, bottom: false, left: false };
+    const p = makeParticle();
+    respawnRimParticle(p, WIDTH, HEIGHT, palette, false, seq([0.5, 0, 0, 0, 0]), empty);
+    expect(Number.isFinite(p.origin.x)).toBe(true);
+    expect(Number.isFinite(p.origin.y)).toBe(true);
+  });
+
+  it('RIM_ALL_EDGES has every edge enabled', () => {
+    expect(RIM_ALL_EDGES.top).toBe(true);
+    expect(RIM_ALL_EDGES.right).toBe(true);
+    expect(RIM_ALL_EDGES.bottom).toBe(true);
+    expect(RIM_ALL_EDGES.left).toBe(true);
   });
 });

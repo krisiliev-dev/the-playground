@@ -47,17 +47,15 @@ import {
   DecrementStencilOp,
   DoubleSide,
   EqualStencilFunc,
+  type Group,
   IncrementStencilOp,
-  type InstancedMesh,
   KeepStencilOp,
   type Material,
-  Matrix4,
   Mesh,
   MeshBasicMaterial,
   OrthographicCamera,
   PerspectiveCamera,
   PlaneGeometry,
-  Quaternion,
   Scene,
   ShaderMaterial,
   type StencilFunc,
@@ -66,12 +64,7 @@ import {
   type Vector3Tuple,
   type WebGLRenderer,
 } from 'three';
-import {
-  MAX_PORTAL_RECURSION,
-  PORTAL_ENDPOINTS,
-  getPaired,
-  type PortalEndpoint,
-} from '@/content/portals';
+import { MAX_PORTAL_RECURSION, getPaired, type PortalEndpoint } from '@/content/portals';
 import { MAIN_CUBE_BOB } from '@/content/routes';
 import { useWorldStore } from '@/store';
 import { interactableHandlers } from '../Interactable';
@@ -83,18 +76,19 @@ import {
   PORTAL_SURFACE_LAYER,
 } from '../sceneLayers';
 import { bobbedEndpoint, isOnActiveSide, virtualCameraPose } from './portalMath';
-import {
-  buildRimPalette,
-  RIM_PARTICLE_BASE_SIZE,
-  type RimParticle,
-  respawnRimParticle,
-} from './rimParticle';
 
 interface PortalState {
   readonly endpoint: PortalEndpoint;
-  /** Live ref to the stencil-only surface plane mesh, populated by
-   *  the React render via callback. `null` until the mesh mounts. */
+  /** Live ref to the stencil-only surface plane mesh. */
   meshRef: { current: Mesh | null };
+  /** Live ref to the outer transform group that wraps both the
+   *  surface mesh and the rim. The cascade bobs the *group* each
+   *  frame (not the mesh) so the rim and surface stay locked
+   *  together — bobbing the mesh alone (the old approach) only
+   *  worked when endpoint.y === 0; for non-zero Y it double-counts
+   *  because the parent group already contributes endpoint.y to the
+   *  mesh's world position. */
+  groupRef: { current: Group | null };
   /** The stencil-only material for the surface plane. Stencil props
    *  are reconfigured per render pass in the cascade loop. */
   readonly surfaceMaterial: MeshBasicMaterial;
@@ -105,14 +99,23 @@ interface PortalState {
 
 export function PortalCascade(): JSX.Element {
   const camera = useThree((s) => s.camera);
+  const portalEndpoints = useWorldStore((s) => s.portalEndpoints);
 
-  // Per-portal state. Allocated once on mount; the surface materials
-  // and vCams are reused across frames.
+  // Per-portal state. Reallocated whenever the active endpoint set
+  // changes (reveal start / reset). The surface materials and vCams
+  // are reused across frames within a given endpoint generation;
+  // disposal happens in the cleanup of the dispose effect below.
+  //
+  // Trigger endpoints (no `pairedWith`) still get a PortalState so
+  // their rim renders, but `getPaired` returns null for them — the
+  // cascade's recursive draw skips through-view rendering when there
+  // is no destination. The trigger fires elsewhere (CursorAvatar's
+  // walk-cross detector + click handler).
   const portalStates = useMemo<PortalState[]>(() => {
     const states: PortalState[] = [];
-    for (const ep of PORTAL_ENDPOINTS) {
-      const paired = getPaired(ep.id);
-      if (!paired) {
+    for (const ep of portalEndpoints) {
+      const paired = ep.trigger ? null : getPaired(ep.id, portalEndpoints);
+      if (!ep.trigger && !paired) {
         continue;
       }
       // The surface material is configured for stencil-only writes.
@@ -152,12 +155,13 @@ export function PortalCascade(): JSX.Element {
       states.push({
         endpoint: ep,
         meshRef: { current: null },
+        groupRef: { current: null },
         surfaceMaterial,
         vCam: new PerspectiveCamera(),
       });
     }
     return states;
-  }, []);
+  }, [portalEndpoints]);
 
   // Dispose surface materials on unmount.
   useEffect(() => {
@@ -199,12 +203,38 @@ export function PortalCascade(): JSX.Element {
 
     const bobY = floatOffset(time, MAIN_CUBE_BOB);
 
-    // Bob-compensate surface meshes (the rims are bob-compensated as
-    // children of the portal mesh, so updating the parent suffices).
+    // Per-route visibility filter: only portals tagged with the
+    // avatar's current route render. Without this, a player inside
+    // a section room would still see the formation portals'
+    // cutouts ghost through the room walls — the surface planes
+    // have `depthTest: false` for deep-cascade reasons, so their
+    // stencil marks aren't naturally occluded. We hide the entire
+    // group (surface plane + rim) for off-route portals so neither
+    // Phase 1 (main render) nor any cascade phase touches them.
+    const currentRoute = useWorldStore.getState().currentRoute;
     for (const ps of portalStates) {
-      const mesh = ps.meshRef.current;
-      if (mesh) {
-        mesh.position.y = ps.endpoint.position[1] + bobY;
+      const group = ps.groupRef.current;
+      if (group) {
+        group.visible = ps.endpoint.route === currentRoute;
+      }
+    }
+    const visiblePortalStates = portalStates.filter((ps) => ps.endpoint.route === currentRoute);
+    if (visiblePortalStates.length === 0) {
+      // Nothing to cascade — fall back to a default render.
+      gl.setRenderTarget(null);
+      gl.render(sceneRef, mainCam);
+      return;
+    }
+
+    // Bob-compensate the outer transform group of each visible
+    // portal so its surface plane AND rim stay locked to the
+    // bobbing cube wall. Setting `group.position.y = endpoint.y +
+    // bobY` overrides the y-component the JSX initialised; X and Z
+    // stay where the JSX put them.
+    for (const ps of visiblePortalStates) {
+      const group = ps.groupRef.current;
+      if (group) {
+        group.position.y = ps.endpoint.position[1] + bobY;
       }
     }
 
@@ -242,7 +272,15 @@ export function PortalCascade(): JSX.Element {
     mainCam.layers.enable(PORTAL_SURFACE_LAYER);
 
     // ===== Phase 2: recursive stencil portal rendering =====
-    for (const ps of portalStates) {
+    // Only visible (current-route) portals get cascaded — but the
+    // `allPortals` argument is the FULL `portalStates` list so
+    // `computeChainPose` can still resolve cross-route pairings
+    // (a formation portal's destination is its room-exit pair, even
+    // when the avatar is in the main cube and the room is "off
+    // route"). Off-route portals are still hidden via their parent
+    // group's `visible = false`, so Phase A's "hide other portals"
+    // loop iterating over the full list is a no-op for them.
+    for (const ps of visiblePortalStates) {
       drawPortalRecursive(
         gl,
         sceneRef,
@@ -289,6 +327,7 @@ export function PortalCascade(): JSX.Element {
           endpoint={state.endpoint}
           material={state.surfaceMaterial}
           meshRef={state.meshRef}
+          groupRef={state.groupRef}
         />
       ))}
     </>
@@ -312,6 +351,14 @@ function drawPortalRecursive(
   portalSurfaceMats: Set<Material>,
 ): void {
   if (depth >= MAX_PORTAL_RECURSION) {
+    return;
+  }
+
+  // Trigger endpoints don't render a through-view — there's no
+  // destination to step the virtual camera into. Skip the cascade
+  // for them entirely; their rim still renders as ordinary scene
+  // geometry in Phase 1 + each level's Phase D pass 1.
+  if (ps.endpoint.trigger) {
     return;
   }
 
@@ -410,7 +457,12 @@ function drawPortalRecursive(
   }
 
   // ===== Phase B: compute vCam for this portal at this depth =====
-  computeChainPose(ps, parentCam, bobY);
+  computeChainPose(
+    ps,
+    parentCam,
+    bobY,
+    allPortals.map((other) => other.endpoint),
+  );
 
   // ===== Phase C: clear depth in stencil region =====
   // Without this, depth values from the parent level (which are in
@@ -571,9 +623,14 @@ function drawPortalRecursive(
  * (inverse-pair cancellation), collapsing recursion to 2-pose
  * alternation.
  */
-function computeChainPose(ps: PortalState, parentCam: PerspectiveCamera, bobY: number): void {
+function computeChainPose(
+  ps: PortalState,
+  parentCam: PerspectiveCamera,
+  bobY: number,
+  allEndpoints: ReadonlyArray<PortalEndpoint>,
+): void {
   const endpoint = ps.endpoint;
-  const paired = getPaired(endpoint.id);
+  const paired = getPaired(endpoint.id, allEndpoints);
   if (!paired) {
     return;
   }
@@ -802,6 +859,7 @@ interface PortalMeshProps {
   endpoint: PortalEndpoint;
   material: MeshBasicMaterial;
   meshRef: { current: Mesh | null };
+  groupRef: { current: Group | null };
 }
 
 /**
@@ -826,7 +884,7 @@ const PORTAL_APPROACH_RANGE = 140;
  *  radius so the click affordance matches the visual affordance. */
 const PORTAL_INTERACT_RANGE = PORTAL_APPROACH_RANGE;
 
-function PortalMesh({ endpoint, material, meshRef }: PortalMeshProps): JSX.Element {
+function PortalMesh({ endpoint, material, meshRef, groupRef }: PortalMeshProps): JSX.Element {
   // Register a click handler with the central InteractionController.
   // The controller raycasts from screen-centre each frame (independent
   // of pointer-lock state), updates `hoveredInteractableId` based on
@@ -883,6 +941,9 @@ function PortalMesh({ endpoint, material, meshRef }: PortalMeshProps): JSX.Eleme
 
   return (
     <group
+      ref={(node: Group | null) => {
+        groupRef.current = node;
+      }}
       position={[endpoint.position[0], endpoint.position[1], endpoint.position[2]]}
       quaternion={[
         endpoint.quaternion[0],
@@ -919,177 +980,355 @@ interface PortalRimProps {
   height: number;
   color: string;
   /** Cube-local center of the portal, used by the rim's per-frame
-   *  proximity calc to dial speed + brightness up as the camera
-   *  approaches. Bob isn't compensated here — `bobY` is small
-   *  relative to typical approach distances, and the proximity
-   *  factor is a soft falloff anyway. */
+   *  proximity calc to dial brightness up as the camera approaches.
+   *  Bob isn't compensated here — `bobY` is small relative to
+   *  typical approach distances, and the proximity factor is a soft
+   *  falloff anyway. */
   portalPosition: Vector3Tuple;
 }
 
-/** Number of live particles per portal rim. Higher = denser at the
- *  cost of per-frame matrix/color writes. 2000 keeps the rim visibly
- *  saturated; production cost is dominated by the 2000 setMatrixAt +
- *  setColorAt writes per portal per frame, plus the vertex shader
- *  pass over `2000 * 24 verts` for each cascade level. */
-const RIM_PARTICLE_COUNT = 2000;
-
 /** Distance (cube-local units) at which proximity factor reaches 0
- *  — particles drift slowly and stay dim past this range. Pinned to
- *  `PORTAL_APPROACH_RANGE` so the rim's "wake up" radius matches the
- *  click radius and the visual affordance is honest. */
+ *  — the rim sits at idle brightness + idle speed past this range.
+ *  Pinned to `PORTAL_APPROACH_RANGE` so the rim's "wake up" radius
+ *  matches the click radius and the visual affordance is honest. */
 const RIM_PROXIMITY_FAR = PORTAL_APPROACH_RANGE;
-/** Distance at which proximity factor reaches 1 — particles fly fast
- *  and are at full brightness this close. */
+/** Distance at which proximity factor reaches 1 — rim is at full
+ *  brightness + full speed this close. */
 const RIM_PROXIMITY_NEAR = 30;
-/** Velocity multiplier when the camera is far away (factor=0). 0.15
- *  reads as "barely drifting" — particles spawn at the rim and die
- *  near the rim, producing a calm static-cloud look. */
-const RIM_SPEED_SCALE_IDLE = 0.15;
-/** Velocity multiplier when the camera is at the active threshold
- *  (factor=1). 1.0 = the speed sampled in `respawnRimParticle`. */
-const RIM_SPEED_SCALE_ACTIVE = 1.0;
-/** Color multiplier when far. 0.45 = visibly dimmed but still
- *  recognizable as the portal's color. */
+/** Emissive intensity multiplier when the camera is far away. 0.45
+ *  = visibly present but understated. */
 const RIM_BRIGHTNESS_IDLE = 0.45;
+/** Emissive intensity multiplier when the camera is within
+ *  `RIM_PROXIMITY_NEAR`. 1.0 = full saturation. */
 const RIM_BRIGHTNESS_ACTIVE = 1.0;
-/** Live-instance fraction at idle. 0.2 = 1/5 of the buffer renders
- *  when far from the portal — saves the GPU 80% of the per-instance
- *  work, while still leaving a visible halo. The CPU still steps all
- *  particles each frame so the hidden ones aren't stale when count
- *  ramps back up on approach. */
-const RIM_COUNT_FRACTION_IDLE = 0.2;
-const RIM_COUNT_FRACTION_ACTIVE = 1.0;
+/** Line speed multiplier at idle (player far / portal not
+ *  interactable). 0.05 = 5% of normal speed — almost still, with a
+ *  faint drift to keep the rim feeling alive. */
+const RIM_SPEED_IDLE = 0.05;
+/** Line speed multiplier at active (player within approach range).
+ *  1.0 = the speeds hardcoded in the shader. */
+const RIM_SPEED_ACTIVE = 1.0;
+
+/** Bar thickness in world units. Thicker than the old line look so
+ *  the rim has visible 3D presence and gives the racing lines lanes
+ *  to vary across. */
+const RIM_BAR_THICKNESS = 1.5;
+/** Base alpha of the rim's solid fill — near-transparent so the
+ *  frame reads as energy-field rather than physical metal, and the
+ *  racing lines pop against the faint backdrop. */
+const RIM_BASE_ALPHA = 0.12;
+
+const RIM_VERTEX_SHADER = /* glsl */ `
+  varying vec2 vUv;
+  void main() {
+    vUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+/** Fragment shader: full-rim cyberpunk racetrack with comet-shaped
+ *  streaks at varying lengths, lanes, hues, and speeds.
+ *
+ *  Each line is a "comet" — a sharp bright HEAD at position `pos`
+ *  with a fading TAIL extending behind it for `streakLen` along the
+ *  motion direction. `dirSign` (±1) selects which direction the
+ *  tail extends. Tail intensity falls off quadratically.
+ *
+ *  Per-line `hue` rotates the base portal color via Rodrigues'
+ *  formula around the (1,1,1) axis in RGB space — cheap, hue-only
+ *  rotation that preserves brightness. ±0.5 radian (~±30°) keeps
+ *  variants close to the portal's brand color but visually distinct.
+ *
+ *  Line motion uses `u_phaseClock` (an accumulator advanced on the
+ *  JS side by `delta * speedScale` each frame) instead of `u_time`,
+ *  so proximity-driven speed changes flow smoothly without
+ *  phase jumps. The breathing pulse stays on `u_time` (constant rate). */
+const RIM_FRAGMENT_SHADER = /* glsl */ `
+  uniform vec3 u_color;
+  uniform float u_brightness;
+  uniform float u_axis;
+  uniform float u_perimAtStart;
+  uniform float u_perimAtEnd;
+  uniform float u_baseAlpha;
+  uniform float u_time;
+  uniform float u_phaseClock;
+  varying vec2 vUv;
+
+  // Cheap hue rotation in RGB space around the (1,1,1) gray axis
+  // via Rodrigues' formula. Preserves brightness; pure hue shift.
+  // Source: standard YIQ-equivalent shader trick.
+  vec3 hueShift(vec3 c, float h) {
+    const vec3 K = vec3(0.5773502691896258);
+    float cs = cos(h);
+    return c * cs + cross(K, c) * sin(h) + K * dot(K, c) * (1.0 - cs);
+  }
+
+  // Compute one comet line's color contribution at this fragment.
+  // - perim: this fragment's full-rim coordinate in [0, 1).
+  // - v: perpendicular (lane) coordinate in [0, 1].
+  // - pos: head position around the perimeter.
+  // - lane: lane center (uv-perp value).
+  // - streakLen: length of the trail behind the head, in perim units.
+  // - laneWidth: line half-width across the lane axis.
+  // - dirSign: ±1; tail extends in direction opposite to motion.
+  // - hue: hue shift in radians applied to baseCol.
+  // - baseCol: portal's rim color (u_color).
+  // - intens: per-line intensity multiplier.
+  // Returns vec4(rgb_contribution, alpha_contribution) so we can
+  // accumulate colored streaks additively.
+  vec4 lineFx(
+    float perim, float v,
+    float pos, float lane,
+    float streakLen, float laneWidth,
+    float dirSign, float hue,
+    vec3 baseCol, float intens
+  ) {
+    // "Behind head" coordinate, in motion direction. 0 at head;
+    // grows toward streakLen at the tail end.
+    float behind = (pos - perim) * dirSign;
+    behind = behind - floor(behind + 0.5); // wrap to (-0.5, 0.5]
+    // Gate to [0, streakLen] without an if-branch (cheaper on GPU).
+    float gate = step(0.0, behind) * step(behind, streakLen);
+    float trail = (1.0 - behind / streakLen) * gate;
+    trail = trail * trail; // quadratic falloff for sharper head, soft tail
+    float laneFall = 1.0 - smoothstep(laneWidth * 0.65, laneWidth, abs(v - lane));
+    float i = trail * laneFall * intens;
+    vec3 c = hueShift(baseCol, hue);
+    return vec4(c * i, i);
+  }
+
+  void main() {
+    float u = mix(vUv.x, vUv.y, u_axis);
+    float v = mix(vUv.y, vUv.x, u_axis);
+    float perim = mix(u_perimAtStart, u_perimAtEnd, u);
+
+    // Breathing pulse on constant time clock (independent of speed).
+    float pulse = 1.0 + 0.15 * sin(u_time * 1.4);
+
+    // 27 comet lines: varied lengths (0.020..0.180), hues (-0.50..+0.50),
+    // lane widths, speeds, directions, intensities. Position uses
+    // u_phaseClock so proximity-driven speed scales smoothly.
+    vec4 acc = vec4(0.0);
+    acc += lineFx(perim, v, fract(u_phaseClock *  0.21 + 0.00), 0.04, 0.060, 0.030,  1.0,  0.00, u_color, 1.10);
+    acc += lineFx(perim, v, fract(u_phaseClock * -0.27 + 0.30), 0.08, 0.030, 0.025, -1.0,  0.30, u_color, 1.30);
+    acc += lineFx(perim, v, fract(u_phaseClock *  0.13 + 0.43), 0.12, 0.110, 0.050,  1.0, -0.40, u_color, 0.85);
+    acc += lineFx(perim, v, fract(u_phaseClock * -0.18 + 0.71), 0.16, 0.040, 0.030, -1.0,  0.50, u_color, 1.20);
+    acc += lineFx(perim, v, fract(u_phaseClock *  0.08 + 0.15), 0.20, 0.080, 0.040,  1.0, -0.20, u_color, 0.95);
+    acc += lineFx(perim, v, fract(u_phaseClock * -0.31 + 0.62), 0.24, 0.140, 0.060, -1.0,  0.10, u_color, 0.65);
+    acc += lineFx(perim, v, fract(u_phaseClock *  0.16 + 0.86), 0.28, 0.025, 0.025,  1.0, -0.50, u_color, 1.30);
+    acc += lineFx(perim, v, fract(u_phaseClock * -0.11 + 0.04), 0.32, 0.090, 0.045, -1.0,  0.40, u_color, 0.90);
+    acc += lineFx(perim, v, fract(u_phaseClock *  0.24 + 0.49), 0.36, 0.045, 0.035,  1.0,  0.00, u_color, 1.15);
+    acc += lineFx(perim, v, fract(u_phaseClock * -0.06 + 0.18), 0.40, 0.100, 0.050, -1.0, -0.30, u_color, 0.80);
+    acc += lineFx(perim, v, fract(u_phaseClock *  0.19 + 0.55), 0.44, 0.030, 0.030,  1.0,  0.20, u_color, 1.10);
+    acc += lineFx(perim, v, fract(u_phaseClock * -0.29 + 0.92), 0.48, 0.020, 0.025, -1.0, -0.10, u_color, 1.40);
+    acc += lineFx(perim, v, fract(u_phaseClock *  0.10 + 0.27), 0.52, 0.150, 0.060,  1.0,  0.50, u_color, 0.75);
+    acc += lineFx(perim, v, fract(u_phaseClock * -0.14 + 0.37), 0.56, 0.055, 0.038, -1.0, -0.40, u_color, 1.05);
+    acc += lineFx(perim, v, fract(u_phaseClock *  0.34 + 0.78), 0.60, 0.025, 0.030,  1.0,  0.30, u_color, 1.30);
+    acc += lineFx(perim, v, fract(u_phaseClock * -0.22 + 0.13), 0.64, 0.085, 0.045, -1.0,  0.00, u_color, 0.95);
+    acc += lineFx(perim, v, fract(u_phaseClock *  0.07 + 0.66), 0.68, 0.020, 0.025,  1.0, -0.50, u_color, 1.20);
+    acc += lineFx(perim, v, fract(u_phaseClock * -0.17 + 0.45), 0.72, 0.180, 0.065, -1.0,  0.40, u_color, 0.70);
+    acc += lineFx(perim, v, fract(u_phaseClock *  0.26 + 0.08), 0.76, 0.040, 0.035,  1.0, -0.20, u_color, 1.15);
+    acc += lineFx(perim, v, fract(u_phaseClock * -0.09 + 0.85), 0.80, 0.110, 0.055, -1.0,  0.10, u_color, 0.85);
+    acc += lineFx(perim, v, fract(u_phaseClock *  0.15 + 0.21), 0.84, 0.030, 0.030,  1.0,  0.30, u_color, 1.10);
+    acc += lineFx(perim, v, fract(u_phaseClock * -0.32 + 0.59), 0.88, 0.020, 0.025, -1.0, -0.40, u_color, 1.35);
+    acc += lineFx(perim, v, fract(u_phaseClock *  0.12 + 0.74), 0.92, 0.075, 0.045,  1.0,  0.20, u_color, 0.95);
+    acc += lineFx(perim, v, fract(u_phaseClock * -0.20 + 0.36), 0.96, 0.050, 0.038, -1.0, -0.10, u_color, 1.05);
+    acc += lineFx(perim, v, fract(u_phaseClock *  0.30 + 0.51), 0.18, 0.030, 0.030,  1.0,  0.50, u_color, 1.20);
+    acc += lineFx(perim, v, fract(u_phaseClock * -0.08 + 0.95), 0.34, 0.130, 0.060, -1.0, -0.30, u_color, 0.60);
+    acc += lineFx(perim, v, fract(u_phaseClock *  0.22 + 0.16), 0.66, 0.045, 0.035,  1.0,  0.00, u_color, 1.15);
+
+    // Apply pulse to the accumulated streaks (color + alpha).
+    vec3 streakRgb = acc.rgb * pulse;
+    float streakA = acc.a * pulse;
+
+    vec3 base = u_color * u_baseAlpha;
+    // Lift streak color toward bright/white at high intensity for that
+    // hot-neon glow where the head passes.
+    vec3 hot = mix(streakRgb * 1.6, streakRgb * 1.6 + vec3(0.4), 0.5);
+    vec3 col = base + hot * u_brightness;
+    float alpha = clamp(u_baseAlpha + streakA, 0.0, 1.0);
+    gl_FragColor = vec4(col, alpha);
+  }
+`;
 
 /**
- * Particle-field rim: every frame, ~400 small cubes spawn along the
- * rectangle's perimeter, drift outward in randomized directions,
- * shrink quadratically, and respawn at end-of-life. Drawn as a
- * single InstancedMesh on PORTAL_LAYER, so a portal's full particle
- * cloud is one draw call per recursion level.
+ * Full-rim cyberpunk racetrack: 4 thick, near-transparent emissive
+ * bars forming a frame around the portal. Each bar is a
+ * BoxGeometry with its own ShaderMaterial that draws a faint
+ * solid base + 5 bright "racing lines" (cars) circling the full
+ * perimeter at different speeds, lanes, and widths. Some run
+ * clockwise, some counter-clockwise; lines flow continuously
+ * across bar boundaries (corners).
  *
- * Color comes from a small palette derived from `endpoint.rim.color`:
- * the rim color itself dominates, with white sparkles and a
- * complementary-hue accent for variety. Per-instance color is fed
- * via `setColorAt`, which lazy-allocates `instanceColor` on the mesh.
+ * Why 4 materials (one per bar): each needs a unique
+ * `u_perimStart` and `u_perimLength` so the fragment shader can
+ * compute its position around the FULL perimeter, not just within
+ * the local bar. Materials share the time + brightness uniforms,
+ * which we update on all 4 each frame.
  *
- * The particle update runs at default useFrame priority, before the
- * cascade's priority-3 render pass, so each cascade level sees an
- * already-stepped buffer.
+ * Per-frame cost: 1 distance calc + 4 uniform writes for `u_time`
+ * + 4 for `u_brightness`. Negligible. The fragment shader is a
+ * handful of math ops + `smoothstep`s per fragment, over a tiny
+ * pixel coverage.
  */
 function PortalRim({ width, height, color, portalPosition }: PortalRimProps): JSX.Element {
-  const meshRef = useRef<InstancedMesh | null>(null);
+  const groupRef = useRef<Group | null>(null);
   const camera = useThree((s) => s.camera);
 
-  const palette = useMemo(() => buildRimPalette(color), [color]);
-
-  // Particle pool. Pre-staggered ages so the first frame already
-  // looks like a steady-state cloud, not a synchronized burst.
-  const particles = useMemo<RimParticle[]>(() => {
-    const arr: RimParticle[] = [];
-    for (let i = 0; i < RIM_PARTICLE_COUNT; i += 1) {
-      const p: RimParticle = {
-        origin: new Vector3(),
-        velocity: new Vector3(),
-        color: new Color(),
-        age: 0,
-        lifetime: 1,
-      };
-      respawnRimParticle(p, width, height, palette, true);
-      arr.push(p);
-    }
-    return arr;
-  }, [width, height, palette]);
-
-  // Scratch values reused across the per-frame loop — zero allocation.
-  const tmpMat = useMemo(() => new Matrix4(), []);
-  const tmpPos = useMemo(() => new Vector3(), []);
-  const tmpQuat = useMemo(() => new Quaternion(), []);
-  const tmpScale = useMemo(() => new Vector3(), []);
-  const tmpVel = useMemo(() => new Vector3(), []);
-  const tmpColor = useMemo(() => new Color(), []);
   const portalCenter = useMemo(
     () => new Vector3(portalPosition[0], portalPosition[1], portalPosition[2]),
     [portalPosition],
   );
 
+  // 4 materials, one per bar. Each gets the perim range it covers
+  // (start → end pair) so the shader can `mix` across regardless
+  // of whether the bar's UV runs in the same direction as
+  // increasing perim. Track is clockwise from top-left (perim 0).
+  // Right + bottom bars pass start > end so their UVs run perim
+  // backward — matches their UV layout where uv=0 is at the FAR
+  // end of the bar (bottom-right and bottom-left respectively).
+  const materials = useMemo(() => {
+    const total = 2 * (width + height);
+    const widthFrac = width / total;
+    const heightFrac = height / total;
+    const make = (axis: number, perimAtStart: number, perimAtEnd: number): ShaderMaterial =>
+      new ShaderMaterial({
+        uniforms: {
+          u_color: { value: new Color(color) },
+          u_brightness: { value: RIM_BRIGHTNESS_IDLE },
+          u_axis: { value: axis },
+          u_perimAtStart: { value: perimAtStart },
+          u_perimAtEnd: { value: perimAtEnd },
+          u_baseAlpha: { value: RIM_BASE_ALPHA },
+          u_time: { value: 0 },
+          // phaseClock is incremented in useFrame by `delta * speedScale`
+          // each frame, so proximity-driven speed changes flow without
+          // phase-jump artifacts.
+          u_phaseClock: { value: 0 },
+        },
+        vertexShader: RIM_VERTEX_SHADER,
+        fragmentShader: RIM_FRAGMENT_SHADER,
+        toneMapped: false,
+        transparent: true,
+        // Don't write depth — adjacent transparent meshes (the
+        // 4 bars overlap at corners) would otherwise occlude each
+        // other inconsistently across viewing angles.
+        depthWrite: false,
+      });
+    return {
+      // Top: clockwise from top-left to top-right. uv.x runs left
+      // to right, perim runs 0 → widthFrac.
+      top: make(0, 0, widthFrac),
+      // Right: clockwise from top-right to bottom-right. uv.y=0 is
+      // at the BOTTOM of the right bar (away from top-right corner
+      // where perim enters), so uv.y=0 ↔ widthFrac+heightFrac and
+      // uv.y=1 ↔ widthFrac. Reverse direction.
+      right: make(1, widthFrac + heightFrac, widthFrac),
+      // Bottom: clockwise from bottom-right to bottom-left. uv.x=0
+      // is at the LEFT of the bottom bar, so uv.x=0 ↔ 2wF+hF and
+      // uv.x=1 ↔ wF+hF. Reverse direction.
+      bottom: make(0, 2 * widthFrac + heightFrac, widthFrac + heightFrac),
+      // Left: clockwise from bottom-left to top-left. uv.y=0 is at
+      // the BOTTOM of the left bar, perim enters at bottom-left.
+      // Direct: uv.y=0 ↔ 2wF+hF, uv.y=1 ↔ 1.
+      left: make(1, 2 * widthFrac + heightFrac, 1),
+    };
+  }, [color, width, height]);
+
+  // Tag every bar mesh with PORTAL_LAYER so the cascade renders the
+  // rim alongside other in-scene geometry through each through-view.
   useEffect(() => {
-    const mesh = meshRef.current;
-    if (!mesh) {
+    const group = groupRef.current;
+    if (!group) {
       return;
     }
-    if (mesh.layers && typeof mesh.layers.set === 'function') {
-      mesh.layers.set(PORTAL_LAYER);
-    }
-  }, []);
+    group.traverse((obj) => {
+      if (obj.layers && typeof obj.layers.set === 'function' && obj !== group) {
+        obj.layers.set(PORTAL_LAYER);
+      }
+    });
+  }, [width, height]);
 
-  useFrame((_state, delta) => {
-    const mesh = meshRef.current;
-    if (!mesh || typeof mesh.setMatrixAt !== 'function') {
-      return;
-    }
+  useEffect(() => {
+    return () => {
+      materials.top.dispose();
+      materials.right.dispose();
+      materials.bottom.dispose();
+      materials.left.dispose();
+    };
+  }, [materials]);
 
-    // Proximity factor: 1 when the camera is closer than NEAR,
-    // 0 past FAR, smooth linear ramp in between. Drives both speed
-    // (slow→fast) and brightness (dim→full) so the rim reads as
-    // calm at idle and "alive" on approach.
+  // Phase accumulator — advanced by `delta * speedScale` each frame
+  // so the streaks slow down smoothly when the avatar steps out of
+  // the approach radius and speed up smoothly on re-approach.
+  // Multiplying `u_time * speedScale` directly would cause a phase
+  // pop the moment speedScale changed; integrating the rate instead
+  // keeps motion continuous.
+  const phaseClockRef = useRef(0);
+
+  useFrame((state, delta) => {
     const dist = camera.position.distanceTo(portalCenter);
     const proximity = Math.max(
       0,
       Math.min(1, (RIM_PROXIMITY_FAR - dist) / (RIM_PROXIMITY_FAR - RIM_PROXIMITY_NEAR)),
     );
-    const speedScale =
-      RIM_SPEED_SCALE_IDLE + (RIM_SPEED_SCALE_ACTIVE - RIM_SPEED_SCALE_IDLE) * proximity;
     const brightness =
       RIM_BRIGHTNESS_IDLE + (RIM_BRIGHTNESS_ACTIVE - RIM_BRIGHTNESS_IDLE) * proximity;
-    const countFraction =
-      RIM_COUNT_FRACTION_IDLE + (RIM_COUNT_FRACTION_ACTIVE - RIM_COUNT_FRACTION_IDLE) * proximity;
-    // `mesh.count` clips the InstancedMesh draw call to the first N
-    // instances regardless of buffer length — the GPU just doesn't
-    // process the rest. A larger floor than 1 keeps a visible halo
-    // even when the player is on the far side of the cube.
-    mesh.count = Math.max(1, Math.round(RIM_PARTICLE_COUNT * countFraction));
-    const canSetColor = typeof mesh.setColorAt === 'function';
+    // Speed is a HARD threshold at the interactable range, not a
+    // gradual ramp: idle (almost still) outside, active (full) once
+    // the avatar crosses into click range. The phase accumulator
+    // handles the rate jump smoothly — phaseClock keeps advancing,
+    // just 20× faster from the next frame on, so motion accelerates
+    // without phase teleporting.
+    const isInteractable = dist <= RIM_PROXIMITY_FAR;
+    const speedScale = isInteractable ? RIM_SPEED_ACTIVE : RIM_SPEED_IDLE;
+    phaseClockRef.current += delta * speedScale;
 
-    for (let i = 0; i < particles.length; i += 1) {
-      const p = particles[i]!;
-      // `speedScale` slows TIME for the particle (age advances at
-      // `delta * speedScale`) instead of scaling displacement. The
-      // distinction matters: scaling displacement means slow particles
-      // never reach far before dying — they huddle at the rim and the
-      // cloud looks pinched. Scaling time keeps the same outward
-      // trajectory but plays it slower, so the halo retains its full
-      // spread at idle and just animates more languidly.
-      p.age += delta * speedScale;
-      if (p.age >= p.lifetime) {
-        respawnRimParticle(p, width, height, palette, false);
-      }
-
-      const t = p.age / p.lifetime;
-      // Quadratic falloff: shrinks gently early, fades fast at end.
-      const fade = 1 - t;
-      const size = RIM_PARTICLE_BASE_SIZE * fade * fade;
-
-      tmpVel.copy(p.velocity).multiplyScalar(p.age);
-      tmpPos.copy(p.origin).add(tmpVel);
-      tmpScale.set(size, size, size);
-      tmpMat.compose(tmpPos, tmpQuat, tmpScale);
-      mesh.setMatrixAt(i, tmpMat);
-      if (canSetColor) {
-        tmpColor.copy(p.color).multiplyScalar(brightness);
-        mesh.setColorAt(i, tmpColor);
-      }
-    }
-
-    mesh.instanceMatrix.needsUpdate = true;
-    if (mesh.instanceColor) {
-      mesh.instanceColor.needsUpdate = true;
+    const time = state.clock.elapsedTime;
+    const phaseClock = phaseClockRef.current;
+    for (const mat of [materials.top, materials.right, materials.bottom, materials.left]) {
+      mat.uniforms.u_brightness!.value = brightness;
+      mat.uniforms.u_time!.value = time;
+      mat.uniforms.u_phaseClock!.value = phaseClock;
     }
   });
 
+  const halfW = width / 2;
+  const halfH = height / 2;
+  const t = RIM_BAR_THICKNESS;
+  // Top + bottom bars are length `width + t` so they cover the
+  // four outer corner blocks. With length=width, the cubes at
+  // (±(halfW+t/2), ±(halfH+t/2)) — the absolute outer corners of
+  // the rim — would be in NO bar (top stops at x=±halfW, right
+  // stops at y=±halfH). Extending the horizontals by `t` fills
+  // those gaps; left + right bars stay at length=height since
+  // the extended top + bottom now cover their corner cubes.
+  const horizLen = width + t;
+
   return (
-    <instancedMesh ref={meshRef} args={[undefined, undefined, RIM_PARTICLE_COUNT]}>
-      <boxGeometry args={[1, 1, 1]} />
-      <meshBasicMaterial toneMapped={false} />
-    </instancedMesh>
+    <group ref={groupRef}>
+      {/* Top bar — long axis = X (u_axis=0), extended to cover
+          the top-left + top-right outer corners. */}
+      <mesh position={[0, halfH, 0]}>
+        <boxGeometry args={[horizLen, t, t]} />
+        <primitive object={materials.top} attach="material" />
+      </mesh>
+      {/* Right bar — long axis = Y (u_axis=1). */}
+      <mesh position={[halfW, 0, 0]}>
+        <boxGeometry args={[t, height, t]} />
+        <primitive object={materials.right} attach="material" />
+      </mesh>
+      {/* Bottom bar — extended to cover bottom-left + bottom-right
+          outer corners. */}
+      <mesh position={[0, -halfH, 0]}>
+        <boxGeometry args={[horizLen, t, t]} />
+        <primitive object={materials.bottom} attach="material" />
+      </mesh>
+      {/* Left bar */}
+      <mesh position={[-halfW, 0, 0]}>
+        <boxGeometry args={[t, height, t]} />
+        <primitive object={materials.left} attach="material" />
+      </mesh>
+    </group>
   );
 }

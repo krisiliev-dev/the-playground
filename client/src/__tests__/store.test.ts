@@ -225,6 +225,48 @@ describe('useWorldStore', () => {
     });
   });
 
+  describe('portalEndpoints', () => {
+    it('defaults to an empty array', () => {
+      useWorldStore.getState().resetReveal();
+      expect(useWorldStore.getState().portalEndpoints).toEqual([]);
+    });
+
+    it('setPortalEndpoints replaces the array', () => {
+      const stub = [
+        {
+          id: 'x',
+          pairedWith: 'y',
+          position: [0, 0, 0] as [number, number, number],
+          quaternion: [0, 0, 0, 1] as readonly [number, number, number, number],
+          size: { width: 10, height: 10 },
+          sidedness: 'single' as const,
+          rim: { color: '#fff' },
+          route: '/',
+        },
+      ];
+      useWorldStore.getState().setPortalEndpoints(stub);
+      expect(useWorldStore.getState().portalEndpoints).toBe(stub);
+    });
+
+    it('resetReveal clears portalEndpoints', () => {
+      const stub = [
+        {
+          id: 'x',
+          pairedWith: 'y',
+          position: [0, 0, 0] as [number, number, number],
+          quaternion: [0, 0, 0, 1] as readonly [number, number, number, number],
+          size: { width: 10, height: 10 },
+          sidedness: 'single' as const,
+          rim: { color: '#fff' },
+          route: '/',
+        },
+      ];
+      useWorldStore.getState().setPortalEndpoints(stub);
+      useWorldStore.getState().resetReveal();
+      expect(useWorldStore.getState().portalEndpoints).toEqual([]);
+    });
+  });
+
   describe('pendingPointerLock', () => {
     beforeEach(() => {
       useWorldStore.getState().setPendingPointerLock(false);
