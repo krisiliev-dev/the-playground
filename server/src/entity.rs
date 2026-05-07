@@ -57,7 +57,7 @@ impl Transform {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Entity {
     pub id: EntityId,
     pub kind: EntityKind,

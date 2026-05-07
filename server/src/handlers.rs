@@ -99,12 +99,19 @@ async fn handle_ws(socket: WebSocket, state: AppState, ip: String, is_admin: boo
     }
 
     // ── 2. Outbound task: broadcast → this socket ────────────
+    // Filters out THIS connection's own player entity from
+    // EntityUpdates — the client predicts its own position
+    // locally and doesn't need server echoes. Saves bandwidth
+    // and avoids snap-back artefacts during prediction.
     let mut broadcast_rx = state.broadcast_tx.subscribe();
     let mut outbound_task = tokio::spawn(async move {
         loop {
             match broadcast_rx.recv().await {
                 Ok(msg) => {
-                    let Ok(text) = serde_json::to_string(&msg) else {
+                    let Some(forwarded) = filter_self_echo(msg, player_id) else {
+                        continue;
+                    };
+                    let Ok(text) = serde_json::to_string(&forwarded) else {
                         continue;
                     };
                     if ws_sender.send(Message::Text(text)).await.is_err() {
@@ -216,6 +223,26 @@ async fn send_error(state: &AppState, message: &str) {
     });
 }
 
+/// Strip the receiving client's own player from outbound
+/// `EntityUpdates`, dropping the message entirely if that was
+/// the only entity in it. Other message kinds pass through
+/// unchanged.
+fn filter_self_echo(msg: ServerMessage, self_id: EntityId) -> Option<ServerMessage> {
+    match msg {
+        ServerMessage::EntityUpdates { entities } => {
+            let filtered: Vec<Entity> = entities.into_iter().filter(|e| e.id != self_id).collect();
+            if filtered.is_empty() {
+                None
+            } else {
+                Some(ServerMessage::EntityUpdates { entities: filtered })
+            }
+        }
+        // FullState, EntityDeleted, Error all relevant to the
+        // receiver even when they reference the receiver itself.
+        other => Some(other),
+    }
+}
+
 async fn cleanup(state: &AppState, ip: &str, player_id: EntityId) {
     let removed = state.registry.write().await.remove(&player_id);
     if removed.is_some() {
@@ -225,4 +252,66 @@ async fn cleanup(state: &AppState, ip: &str, player_id: EntityId) {
     }
     state.release_connection(ip).await;
     info!(ip = %ip, "websocket disconnected");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::entity::{EntityKind, Transform};
+
+    fn make_entity() -> Entity {
+        Entity::new(
+            EntityKind::Player,
+            Transform::identity(),
+            serde_json::json!({}),
+        )
+    }
+
+    #[test]
+    fn filter_self_echo_strips_own_entity_from_updates() {
+        let me = make_entity();
+        let other = make_entity();
+        let msg = ServerMessage::EntityUpdates {
+            entities: vec![me.clone(), other.clone()],
+        };
+        let filtered = filter_self_echo(msg, me.id).unwrap();
+        match filtered {
+            ServerMessage::EntityUpdates { entities } => {
+                assert_eq!(entities.len(), 1);
+                assert_eq!(entities[0].id, other.id);
+            }
+            _ => panic!("expected EntityUpdates"),
+        }
+    }
+
+    #[test]
+    fn filter_self_echo_drops_message_when_only_self_present() {
+        let me = make_entity();
+        let msg = ServerMessage::EntityUpdates {
+            entities: vec![me.clone()],
+        };
+        assert!(filter_self_echo(msg, me.id).is_none());
+    }
+
+    #[test]
+    fn filter_self_echo_passes_full_state_through_unchanged() {
+        let me = make_entity();
+        let msg = ServerMessage::FullState {
+            entities: vec![me.clone()],
+            your_player_id: me.id,
+        };
+        let filtered = filter_self_echo(msg, me.id);
+        assert!(matches!(filtered, Some(ServerMessage::FullState { .. })));
+    }
+
+    #[test]
+    fn filter_self_echo_passes_entity_deleted_through_even_for_self() {
+        let me = make_entity();
+        let msg = ServerMessage::EntityDeleted { ids: vec![me.id] };
+        let filtered = filter_self_echo(msg, me.id);
+        assert!(matches!(
+            filtered,
+            Some(ServerMessage::EntityDeleted { .. })
+        ));
+    }
 }

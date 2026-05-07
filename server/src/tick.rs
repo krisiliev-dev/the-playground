@@ -1,81 +1,96 @@
-//! 30 Hz authoritative tick loop.
+//! 30 Hz authoritative tick loop with per-entity diffing.
 //!
-//! Per ADR-004, the server snapshots the entity registry on each
-//! tick and broadcasts the snapshot to every subscribed client.
-//! Clients use the snapshots to interpolate remote entities and
-//! to reconcile their predicted local player.
+//! Per ADR-004: snapshot the entity registry on each tick and
+//! broadcast *only the entities whose state changed* since the
+//! previous tick. An idle scene (no input, no admin mutation)
+//! produces zero broadcasts — the tick loop is silent.
 //!
-//! For MVP the tick broadcasts the *full* current state every
-//! frame (no per-entity diffing). At ~100 entities × 33ms this is
-//! a few KB/s/client — well within budget for a portfolio site.
-//! When the entity count grows or bandwidth becomes a constraint,
-//! swap in a per-entity fingerprint diff here without touching
-//! the rest of the system.
+//! The tracked-last-state lives inside the spawned task as plain
+//! mutable HashMap; not shared across tasks so no lock cost.
+//! Equality is structural via `PartialEq` derives on Entity,
+//! Transform, and serde_json::Value.
 //!
-//! Empty registry → no broadcast (clients without remote entities
-//! don't need ticks).
+//! Deletes are NOT tracked here — the cleanup path in
+//! `handlers.rs` and the admin Delete op already broadcast
+//! `EntityDeleted` synchronously, which is faster (delete is
+//! visually disruptive — propagate it without waiting for the
+//! next tick).
+use std::collections::HashMap;
 use std::time::Duration;
 
 use tokio::time::interval;
 use tracing::warn;
 
+use crate::entity::{Entity, EntityId};
 use crate::protocol::ServerMessage;
 use crate::state::AppState;
 
-/// Server tick frequency. 30 Hz is the standard "good enough for
-/// cursor / avatar movement" rate; doubling it doubles bandwidth
-/// without a perceptible smoothness improvement once snapshot
-/// interpolation is in place client-side.
 pub const TICK_HZ: u64 = 30;
 
-/// Spawn the tick loop as a background task. Returns the
-/// JoinHandle so the caller can cancel it on shutdown — though
-/// in practice main.rs just drops it and lets process exit clean
-/// up.
 pub fn spawn(state: AppState) -> tokio::task::JoinHandle<()> {
     let period = Duration::from_micros(1_000_000 / TICK_HZ);
     tokio::spawn(async move {
         let mut ticker = interval(period);
-        // Default `MissedTickBehavior::Burst` would try to catch
-        // up after a stall by firing back-to-back ticks. For a
-        // game loop we'd rather skip — clients interpolate over
-        // gaps, and burst-catching just wastes bandwidth.
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+        // Per-task memory of "what we last broadcast." Compared
+        // against each tick's snapshot to compute the diff.
+        let mut last_seen: HashMap<EntityId, Entity> = HashMap::new();
 
         loop {
             ticker.tick().await;
-            tick_once(&state).await;
+            tick_once(&state, &mut last_seen).await;
         }
     })
 }
 
-async fn tick_once(state: &AppState) {
-    // Brief read lock — clone out and drop before the broadcast
-    // so the lock is never held across an await on a slow
-    // subscriber.
+async fn tick_once(state: &AppState, last_seen: &mut HashMap<EntityId, Entity>) {
     let entities = {
         let registry = state.registry.read().await;
         if registry.is_empty() {
+            // Registry empty — clear our memory of last-seen so a
+            // future entity at the same id is treated as "new" not
+            // "unchanged."
+            last_seen.clear();
             return;
         }
         registry.snapshot()
     };
 
-    // Subscriber count == 0 ⇒ no clients connected. Broadcast
-    // returns Err in that case which is fine; we just skip.
     if state.broadcast_tx.receiver_count() == 0 {
         return;
     }
 
+    // Pick out the entities that are new or have mutated.
+    let changed: Vec<Entity> = entities
+        .iter()
+        .filter(|e| match last_seen.get(&e.id) {
+            Some(prev) => prev != *e,
+            None => true,
+        })
+        .cloned()
+        .collect();
+
+    // Drop entries from `last_seen` for ids no longer present.
+    // Keeps memory in step with the registry; otherwise a long-
+    // running server slowly leaks across deleted-then-recreated
+    // ids.
+    let live_ids: std::collections::HashSet<EntityId> = entities.iter().map(|e| e.id).collect();
+    last_seen.retain(|id, _| live_ids.contains(id));
+
+    if changed.is_empty() {
+        return;
+    }
+
+    // Refresh memory for next tick.
+    for entity in &changed {
+        last_seen.insert(entity.id, entity.clone());
+    }
+
     if let Err(err) = state
         .broadcast_tx
-        .send(ServerMessage::EntityUpdates { entities })
+        .send(ServerMessage::EntityUpdates { entities: changed })
     {
-        // The only way `send` errors is if there are zero
-        // receivers — which we just checked, so this would mean
-        // the count dropped to zero between the check and the
-        // send (race window of a few µs). Log at warn so we'd
-        // notice if it became frequent.
         warn!(?err, "tick broadcast failed (no receivers)");
     }
 }
