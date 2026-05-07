@@ -261,8 +261,13 @@ class SfxManager {
     const source = ctx.createBufferSource();
     source.buffer = buffer;
 
+    // Pre-effect gain — manifest baseline only. Per-cue tuning
+    // (volume relative to other cues, distance from compressor
+    // threshold, etc.) lives here. The user-facing volumeMultiplier
+    // is applied AFTER the effect chain (postGain below) so a
+    // caller scaling 5x doesn't get crushed by the compressor.
     const gain = ctx.createGain();
-    gain.gain.value = (entry.volume ?? 1) * (opts.volumeMultiplier ?? 1);
+    gain.gain.value = entry.volume ?? 1;
 
     const baseRate = entry.playbackRate ?? 1;
     const jitter = opts.pitchJitter ?? 0;
@@ -307,6 +312,24 @@ class SfxManager {
       chainTail.connect(filter);
       chainTail = filter;
       effectNodes.push(filter);
+    }
+
+    // Post-effect volume scaler — applied AFTER compress/saturate/
+    // filter so opts.volumeMultiplier produces an audibly-linear
+    // change in output level. With volumeMultiplier folded into
+    // the pre-effect gain (the previous design), heavily-
+    // compressed cues like swordSlam (threshold -18dB, ratio 10)
+    // would crush input-side scaling into a near-flat output, so a
+    // caller asking for "5x volume" sounded essentially the same
+    // as 1x. Splitting pre-vs-post preserves the compressor's
+    // dynamic-range design while making the multiplier do what
+    // the name suggests.
+    if ((opts.volumeMultiplier ?? 1) !== 1) {
+      const postGain = ctx.createGain();
+      postGain.gain.value = opts.volumeMultiplier ?? 1;
+      chainTail.connect(postGain);
+      chainTail = postGain;
+      effectNodes.push(postGain);
     }
 
     let panner: PannerNode | null = null;
