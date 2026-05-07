@@ -27,6 +27,12 @@ vi.mock('@/components/scene/CursorAvatar', () => ({
   CursorAvatar: () => <div data-testid="cursor-avatar" />,
 }));
 
+// Remote cursor avatar pulls in useGLTF + a real GLB load — stub
+// it out so the World test doesn't need the drei loader surface.
+vi.mock('@/components/scene/RemoteCursorAvatar', () => ({
+  RemoteCursorAvatar: () => null,
+}));
+
 // OrbitControls from drei uses R3F hooks under the hood — stub it out.
 vi.mock('@react-three/drei', () => ({
   OrbitControls: () => null,
