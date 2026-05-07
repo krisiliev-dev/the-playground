@@ -7,8 +7,6 @@ import {
   DevTools,
   ShakeGroup,
   CursorAvatar,
-  PortalTransition,
-  PORTAL_TRANSIT_DURATION,
 } from '@/components/scene';
 import {
   CursorText,
@@ -17,12 +15,16 @@ import {
   LoadingScreen,
   PauseMenu,
 } from '@/components/overlay';
+import { RouteSync } from '@/components/RouteSync';
 import { sfx } from '@/components/audio/SfxManager';
 import { isInteractionSynthSuppressed } from '@/components/scene/Interactable';
-import { About, Home, Projects, Writing } from '@/routes';
+import { SectionPage } from '@/routes/SectionPage';
 import { DocumentShell } from '@/components/document';
 import { useWorldStore } from '@/store';
 import { acquirePointerLock } from '@/utils';
+import { CubeScene } from '@/scenes/CubeScene';
+import { SceneHost } from '@/scenes/SceneHost';
+import { AboutRoom } from '@/scenes/rooms/AboutRoom';
 
 type BootState = 'loading' | 'ready' | 'failed';
 
@@ -51,6 +53,12 @@ const CANVAS_DPR = [1, 2] as [number, number];
 const CANVAS_GL = {
   antialias: true,
   alpha: false,
+  // `stencil: true` requests a framebuffer with stencil bits.
+  // Required by PortalCascade's stencil-based recursive portal
+  // renderer — each recursion level marks the portal's screen region
+  // in the stencil buffer, then renders the through-view scene
+  // restricted to that region. 8 bits = 255 nesting levels available.
+  stencil: true,
   powerPreference: 'default',
   failIfMajorPerformanceCaveat: false,
 } as const;
@@ -195,42 +203,11 @@ function useAudioMute(): void {
  * animation duration, so panProgress=1 and the steady-state holds.
  */
 /**
- * DOM-side counterpart to PortalTransition. Renders a fullscreen
- * fade overlay in the portal's color while a click-through is in
- * progress; opacity ramps from 0 → 1 over `PORTAL_TRANSIT_DURATION`
- * via a CSS animation. Hides itself when `portalTransit === null`,
- * which PortalTransition sets when its camera dolly completes.
- */
-function PortalTransitionOverlay(): JSX.Element | null {
-  const portalTransit = useWorldStore((s) => s.portalTransit);
-  if (!portalTransit) {
-    return null;
-  }
-  return (
-    <>
-      <style>{`@keyframes portal-transit-fade { from { opacity: 0; } to { opacity: 1; } }`}</style>
-      <div
-        aria-hidden
-        style={{
-          position: 'fixed',
-          inset: 0,
-          backgroundColor: portalTransit.color,
-          pointerEvents: 'none',
-          zIndex: 50,
-          opacity: 0,
-          animation: `portal-transit-fade ${PORTAL_TRANSIT_DURATION}s ease-in forwards`,
-        }}
-      />
-    </>
-  );
-}
-
-/**
- * Bridges in-world Portal clicks → react-router navigation. Portals
- * live inside the R3F Canvas where react-router's context doesn't
- * reliably propagate, so they signal navigation by writing a path
- * to the store; this consumer (mounted inside BrowserRouter where
- * `useNavigate` is usable) picks it up and dispatches.
+ * Generic one-shot navigation bridge. Any in-Canvas code that wants
+ * react-router navigation writes a path to the store; this consumer
+ * (mounted inside BrowserRouter where `useNavigate` works) picks it
+ * up and dispatches. Currently unused by default — `RouteSync` is
+ * the primary URL driver — but kept for explicit programmatic nav.
  */
 function NavigationConsumer(): null {
   const pendingNavigation = useWorldStore((s) => s.pendingNavigation);
@@ -391,6 +368,7 @@ export function App(): JSX.Element {
   return (
     <BrowserRouter>
       <NavigationConsumer />
+      <RouteSync />
       <div
         style={{
           ...styles.root,
@@ -422,16 +400,35 @@ export function App(): JSX.Element {
             onCreated={handleCreated}
           >
             <FrameLoopController />
-            <PortalTransition />
             <color attach="background" args={['#0a0a12']} />
-            <Suspense fallback={null}>
-              <ShakeGroup>
-                <World />
-              </ShakeGroup>
-            </Suspense>
-            {/* Cursor lives outside ShakeGroup so it doesn't jitter with the
-                camera-shake on sword impacts. */}
+            {/* SceneHost swaps `state.scene` to whichever scene
+                `currentRoom` selects (null = cube). Every scene's
+                content is mounted via R3F createPortal into its
+                own THREE.Scene; only the active one renders. */}
+            <SceneHost />
+            <CubeScene>
+              <Suspense fallback={null}>
+                <ShakeGroup>
+                  <World />
+                </ShakeGroup>
+              </Suspense>
+            </CubeScene>
+            {/* CursorAvatar lives at the *root* R3F context (NOT
+                inside CubeScene's createPortal subtree). R3F
+                createPortal sub-stores have their own `pointer`
+                state that isn't updated by the canvas's event
+                handlers — anything inside a createPortal that
+                reads `pointer` (PointerCursor does, via useThree)
+                gets stale `(0, 0)` and the cursor freezes at
+                screen center. CursorAvatar internally re-parents
+                its Three.js group to the active scene each
+                currentRoom change, so it still appears in
+                whichever scene the player is in. */}
             <CursorAvatar />
+            {/* Per-scene rooms — sibling of CubeScene, NOT child,
+                so each scene's createPortal targets its own
+                THREE.Scene without parent interference. */}
+            <AboutRoom />
             <PostFx />
             <DevTools />
           </Canvas>
@@ -470,7 +467,6 @@ export function App(): JSX.Element {
           body="The 3D renderer lost its GPU context. This is rare; reloading restores the scene."
         />
       )}
-      {!documentMode && <PortalTransitionOverlay />}
     </BrowserRouter>
   );
 }
@@ -485,15 +481,13 @@ export function App(): JSX.Element {
  * presentation does.
  */
 function SectionRoutes(): JSX.Element {
+  // One dynamic page handles every route. SectionPage reads
+  // useLocation().pathname and looks up the matching route's
+  // content from `routes.ts`. New sections need a route entry,
+  // not a new component file.
   return (
     <Routes>
-      <Route path="/" element={<Home />} />
-      <Route path="/about" element={<About />} />
-      <Route path="/projects" element={<Projects />} />
-      <Route path="/projects/:slug" element={<Projects />} />
-      <Route path="/writing" element={<Writing />} />
-      <Route path="/writing/:slug" element={<Writing />} />
-      <Route path="*" element={<Home />} />
+      <Route path="*" element={<SectionPage />} />
     </Routes>
   );
 }

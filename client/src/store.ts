@@ -30,22 +30,6 @@ export interface ClickHit {
   normal: [number, number, number];
 }
 
-/**
- * Active click-through portal transition. While set, the in-Canvas
- * `PortalTransition` component owns the camera (AvatarCursor's
- * useFrame yields), dollying it toward the disc hub over a fixed
- * duration. A sibling DOM overlay fades the portal's color over
- * the canvas in lockstep. At completion the transition writes
- * `pendingNavigation` to push the route and clears itself.
- */
-export interface PortalTransit {
-  /** Route to push once the camera dolly finishes. */
-  path: string;
-  /** Portal color — drives the DOM fade overlay so it matches the
-   *  pie the user clicked. */
-  color: string;
-}
-
 // ─── Store Actions ───────────────────────────────────────────────────
 
 interface AppActions {
@@ -85,10 +69,38 @@ interface AppActions {
    *  in-world Portal wants App's NavigationConsumer to navigate to.
    *  Pass `null` to clear after consumption. */
   setPendingNavigation: (path: string | null) => void;
-  /** Begin (or end) a click-through portal transition. Pass a
-   *  PortalTransit to start one; pass null to clear after the
-   *  PortalTransition driver finishes its dolly. */
-  setPortalTransit: (transit: PortalTransit | null) => void;
+  /** Set which Room (id from ROOMS in scene/Rooms.tsx) the avatar
+   *  is currently inside, or null when in the main cube. Drives
+   *  the avatar's clamping bounds (room cube vs main cube) and
+   *  URL sync (room.path vs '/'). */
+  setCurrentRoom: (roomId: string | null) => void;
+  /** Update the avatar's current bbox-derived route. Driven by
+   *  CursorAvatar's per-frame routing loop; consumed by RouteSync
+   *  to push to react-router. */
+  setCurrentRoute: (path: string) => void;
+  /** Request that the avatar be repositioned at the entry point of
+   *  the named route. Set by RouteSync when the URL changes
+   *  externally (deep link, browser back); consumed by
+   *  RouteTeleportConsumer inside the Canvas, which actually moves
+   *  the avatar's position ref and clears the request. */
+  setPendingAvatarTeleport: (path: string | null) => void;
+  /** Request a "leap to here" — CursorAvatar drives the avatar toward
+   *  this world-space target at LEAP_SPEED until it arrives or
+   *  crosses a portal plane (whichever happens first). Used by
+   *  click-to-portal: `PortalMesh`'s click handler sets the leap
+   *  target slightly past the portal's active face so the natural
+   *  walk-through crossing detector picks up the cross and runs the
+   *  same `teleportPose` pipeline as a manual walk-in. */
+  setLeapTarget: (target: [number, number, number] | null) => void;
+  /** Queue a click-to-portal request. Validation (single-sided gate,
+   *  bob compensation) happens in CursorAvatar on consume. */
+  setPendingPortalClick: (sourcePortalId: string | null) => void;
+  /** Record which room the avatar most recently *exited*. Updated
+   *  by CursorAvatar when it teleports the avatar back to the
+   *  cube; consumed by the menu's Back button to "pull" the
+   *  avatar back into that same room — Back is just another
+   *  portal activation under the hood. */
+  setLastExitedRoom: (roomId: string | null) => void;
   /** Toggle the explicit user mute. Combined with documentMode by
    *  App's audio-mute effect to set the live master volume. */
   setMuted: (muted: boolean) => void;
@@ -148,13 +160,43 @@ interface RevealSlice {
    *  `navigate()`. The store mediates because react-router's
    *  context doesn't reliably bridge across R3F's reconciler. */
   pendingNavigation: string | null;
-  /** Active click-through transition. Set when the user clicks a
-   *  section portal; the in-Canvas `PortalTransition` runs a
-   *  ~1.5s camera dolly toward the disc hub while a DOM overlay
-   *  fades the portal's color over the canvas. At completion the
-   *  transition writes `pendingNavigation` and clears itself. Null
-   *  whenever no transition is in progress. */
-  portalTransit: PortalTransit | null;
+  /** Which Room (id from ROOMS in scene/Rooms.tsx) the avatar is
+   *  currently inside, or null when in the main cube. Updated by
+   *  CursorAvatar after a teleport; consumed by the avatar's
+   *  clamping logic and the URL-sync effect in NavigationConsumer. */
+  currentRoom: string | null;
+  /** The avatar's current bbox-derived route — the deepest
+   *  registered `Route` (see `content/routes.ts`) whose bbox
+   *  contains the avatar's cube-local position. Updated each frame
+   *  by CursorAvatar's routing loop; the source of truth for the
+   *  URL (RouteSync mirrors it into react-router) and for which
+   *  document slice the Simple Experience renders. */
+  currentRoute: string;
+  /** One-shot teleport request, set by RouteSync when the URL
+   *  changes externally and the avatar needs to be moved into the
+   *  matching route's bbox. Cleared by RouteTeleportConsumer once
+   *  the avatar position ref has been updated. */
+  pendingAvatarTeleport: string | null;
+  /** Active leap target in cube-local world coords, or null when no
+   *  leap is in progress. Set by CursorAvatar after `planPortalLeap`
+   *  validates a click against the avatar's current side of the
+   *  portal. CursorAvatar's per-frame loop overrides walk input and
+   *  moves toward this target at LEAP_SPEED. Cleared on arrival or
+   *  when the walk-through crossing detector fires (whichever
+   *  happens first). */
+  leapTarget: [number, number, number] | null;
+  /** One-shot click-to-portal request. The string is a
+   *  `PortalEndpoint.id` (the portal the user clicked). CursorAvatar
+   *  consumes this each frame: bob-shifts the source endpoint, runs
+   *  `planPortalLeap` with the avatar's live position to pick a
+   *  target (or reject the click as invalid — e.g. clicked on the
+   *  back of a single-sided portal), and clears the field. */
+  pendingPortalClick: string | null;
+  /** Last room the avatar exited back to the cube. Persists past
+   *  exit so the pause-menu Back button can re-enter it. Cleared
+   *  when the user enters a new room (so Back from the cube always
+   *  goes to the most recently exited one, not "two rooms ago"). */
+  lastExitedRoom: string | null;
   /** Explicit user mute toggled from PauseMenu's audio control. The
    *  effective master volume is `documentMode || muted ? 0 : 1`,
    *  so document mode silences audio independently of the user's
@@ -244,7 +286,12 @@ export const useWorldStore = create<AppState & AppActions & RevealSlice & Intera
     documentMode: readPersistedDocumentMode(),
     pendingPointerLock: false,
     pendingNavigation: null,
-    portalTransit: null,
+    currentRoom: null,
+    currentRoute: '/',
+    pendingAvatarTeleport: null,
+    leapTarget: null,
+    pendingPortalClick: null,
+    lastExitedRoom: null,
     muted: false,
     // Avatar lives from page load — small at first (cursor-sized), then grows
     // once the reveal completes. See CursorAvatar.tsx for the scale logic.
@@ -290,7 +337,15 @@ export const useWorldStore = create<AppState & AppActions & RevealSlice & Intera
 
     setPendingNavigation: (path) => set({ pendingNavigation: path }),
 
-    setPortalTransit: (transit) => set({ portalTransit: transit }),
+    setCurrentRoom: (roomId) => set({ currentRoom: roomId }),
+
+    setCurrentRoute: (path) => set({ currentRoute: path }),
+
+    setPendingAvatarTeleport: (path) => set({ pendingAvatarTeleport: path }),
+    setLeapTarget: (target) => set({ leapTarget: target }),
+    setPendingPortalClick: (sourcePortalId) => set({ pendingPortalClick: sourcePortalId }),
+
+    setLastExitedRoom: (roomId) => set({ lastExitedRoom: roomId }),
 
     setMuted: (muted) => set({ muted }),
 

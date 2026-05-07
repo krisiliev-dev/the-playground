@@ -11,6 +11,7 @@ import {
   computeInitialPanProgress,
   computeLeanTarget,
   computePinchVelocity,
+  computeWalkLeanTarget,
   computeWalkVector,
   computeWallProximity,
   projectNDCToWorld,
@@ -431,5 +432,50 @@ describe('computeCameraCollisionRatio', () => {
     // No Y collision considered — only X drives. avatar X=0, offset
     // 20 in X. X wall at 37. ratio = 37/20 = 1.85 → clamped to 1.
     expect(ratio).toBe(1);
+  });
+});
+
+describe('computeWalkLeanTarget', () => {
+  const idle = { w: false, a: false, s: false, d: false } as const;
+  const LEAN_MAX = (20 * Math.PI) / 180; // matches CursorAvatar.tsx
+
+  it('returns 0 when no forward input is active', () => {
+    expect(computeWalkLeanTarget(idle, 0, LEAN_MAX)).toBe(0);
+  });
+
+  it('W alone tilts forward by the full lean budget', () => {
+    expect(computeWalkLeanTarget({ ...idle, w: true }, 0, LEAN_MAX)).toBeCloseTo(LEAN_MAX, 10);
+  });
+
+  it('S alone tilts backward by the full lean budget (negative)', () => {
+    expect(computeWalkLeanTarget({ ...idle, s: true }, 0, LEAN_MAX)).toBeCloseTo(-LEAN_MAX, 10);
+  });
+
+  it('A and D do not contribute to the forward lean', () => {
+    expect(computeWalkLeanTarget({ ...idle, a: true }, 0, LEAN_MAX)).toBe(0);
+    expect(computeWalkLeanTarget({ ...idle, d: true }, 0, LEAN_MAX)).toBe(0);
+  });
+
+  it('partial touch throttle scales linearly inside the [-1, 1] window', () => {
+    expect(computeWalkLeanTarget(idle, 0.5, LEAN_MAX)).toBeCloseTo(0.5 * LEAN_MAX, 10);
+    expect(computeWalkLeanTarget(idle, -0.25, LEAN_MAX)).toBeCloseTo(-0.25 * LEAN_MAX, 10);
+  });
+
+  it('W + full forward touch clamps at the lean budget (no extra tilt)', () => {
+    // The clamp is the load-bearing detail: pushing harder than 1
+    // forward unit must NOT tilt the avatar past the visual budget.
+    expect(computeWalkLeanTarget({ ...idle, w: true }, 1, LEAN_MAX)).toBeCloseTo(LEAN_MAX, 10);
+  });
+
+  it('S + full backward touch clamps at -lean budget', () => {
+    expect(computeWalkLeanTarget({ ...idle, s: true }, -1, LEAN_MAX)).toBeCloseTo(-LEAN_MAX, 10);
+  });
+
+  it('W + S cancel out (both true → zero forward input → zero lean)', () => {
+    expect(computeWalkLeanTarget({ ...idle, w: true, s: true }, 0, LEAN_MAX)).toBe(0);
+  });
+
+  it('passing leanMaxRad=0 silences the lean for any input', () => {
+    expect(computeWalkLeanTarget({ ...idle, w: true }, 1, 0)).toBe(0);
   });
 });

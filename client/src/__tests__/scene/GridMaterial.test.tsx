@@ -14,4 +14,5 @@ describe('GridMaterial', () => {
     const shader = container.querySelector('shaderMaterial');
     expect(shader).toBeTruthy();
   });
+
 });

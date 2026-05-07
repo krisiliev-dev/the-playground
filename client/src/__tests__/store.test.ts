@@ -276,23 +276,22 @@ describe('useWorldStore', () => {
     });
   });
 
-  describe('portalTransit', () => {
+  describe('lastExitedRoom', () => {
     beforeEach(() => {
-      useWorldStore.getState().setPortalTransit(null);
+      useWorldStore.getState().setLastExitedRoom(null);
     });
 
-    it('defaults to null (no click-through in progress)', () => {
-      expect(useWorldStore.getState().portalTransit).toBeNull();
+    it('defaults to null (no rooms exited yet)', () => {
+      expect(useWorldStore.getState().lastExitedRoom).toBeNull();
     });
 
-    it('setPortalTransit stores the path + color and clears back to null', () => {
-      useWorldStore.getState().setPortalTransit({ path: '/about', color: '#4169e1' });
-      expect(useWorldStore.getState().portalTransit).toEqual({
-        path: '/about',
-        color: '#4169e1',
-      });
-      useWorldStore.getState().setPortalTransit(null);
-      expect(useWorldStore.getState().portalTransit).toBeNull();
+    it('records and clears the most recently exited room id', () => {
+      useWorldStore.getState().setLastExitedRoom('room-about');
+      expect(useWorldStore.getState().lastExitedRoom).toBe('room-about');
+      useWorldStore.getState().setLastExitedRoom('room-projects');
+      expect(useWorldStore.getState().lastExitedRoom).toBe('room-projects');
+      useWorldStore.getState().setLastExitedRoom(null);
+      expect(useWorldStore.getState().lastExitedRoom).toBeNull();
     });
   });
 

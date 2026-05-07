@@ -149,46 +149,6 @@ describe('PauseMenu', () => {
     });
   });
 
-  describe('Back button', () => {
-    it('is disabled when at /', () => {
-      renderMenu('/');
-      act(() => {
-        window.dispatchEvent(mEvent());
-      });
-      expect(screen.getByText('← Back')).toBeDisabled();
-    });
-
-    it('is enabled when at a non-root route', () => {
-      renderMenu('/about');
-      act(() => {
-        window.dispatchEvent(mEvent());
-      });
-      expect(screen.getByText('← Back')).not.toBeDisabled();
-    });
-  });
-
-  describe('section shortcuts', () => {
-    it('renders all four section links', () => {
-      renderMenu();
-      act(() => {
-        window.dispatchEvent(mEvent());
-      });
-      expect(screen.getByText('Home')).toBeInTheDocument();
-      expect(screen.getByText('About')).toBeInTheDocument();
-      expect(screen.getByText('Projects')).toBeInTheDocument();
-      expect(screen.getByText('Writing')).toBeInTheDocument();
-    });
-
-    it('section link is a Link with the right href', () => {
-      renderMenu();
-      act(() => {
-        window.dispatchEvent(mEvent());
-      });
-      const aboutLink = screen.getByText('About').closest('a');
-      expect(aboutLink).toHaveAttribute('href', '/about');
-    });
-  });
-
   describe('Contact card', () => {
     it('starts collapsed', () => {
       renderMenu();

@@ -16,19 +16,11 @@ import { Sword } from './Sword';
 import { BulletTimeDirector } from './BulletTimeDirector';
 import { VIBE_SLOTS } from './vibeFormation';
 import { sfx } from '../../audio/SfxManager';
-
-/** Armed phase doubles as the camera-pan window — 800ms gives enough
- *  time for the camera to swing toward the spawn direction so the user
- *  registers what's about to happen. */
-const ARMED_TO_SWINGING_MS = 800;
-/** Sword swing duration: 5.5s per-sword (3.5 pre + 1.2 mid + 0.8 post) +
- *  cascade tail (12 × 50ms stagger = 0.6s). Total ≈ 6.1s; padded to
- *  6800ms so every sword has time to cross its `t >= SWING_DURATION`
- *  threshold inside the swinging state (otherwise the per-frame slam
- *  fire is skipped and the catch-up path runs at default volume,
- *  losing the velocity-driven dynamics for most slams in the cascade). */
-const SWINGING_TO_IMPACT_MS = 6800;
-const IMPACT_TO_REVEALED_MS = 1450;
+import {
+  ARMED_DURATION_MS,
+  SWINGING_DURATION_MS,
+  IMPACT_DURATION_MS,
+} from './constants';
 
 export function RevealOrchestrator(): JSX.Element {
   const revealState = useWorldStore((s) => s.revealState);
@@ -106,15 +98,15 @@ export function RevealOrchestrator(): JSX.Element {
   // Auto-advance the rest of the beats with timers.
   useEffect(() => {
     if (revealState === 'armed') {
-      const id = window.setTimeout(advanceReveal, ARMED_TO_SWINGING_MS);
+      const id = window.setTimeout(advanceReveal, ARMED_DURATION_MS);
       return () => window.clearTimeout(id);
     }
     if (revealState === 'swinging') {
-      const id = window.setTimeout(advanceReveal, SWINGING_TO_IMPACT_MS);
+      const id = window.setTimeout(advanceReveal, SWINGING_DURATION_MS);
       return () => window.clearTimeout(id);
     }
     if (revealState === 'impact') {
-      const id = window.setTimeout(advanceReveal, IMPACT_TO_REVEALED_MS);
+      const id = window.setTimeout(advanceReveal, IMPACT_DURATION_MS);
       return () => window.clearTimeout(id);
     }
     return undefined;
@@ -132,7 +124,7 @@ export function RevealOrchestrator(): JSX.Element {
 }
 
 export const REVEAL_TIMINGS = {
-  ARMED_TO_SWINGING_MS,
-  SWINGING_TO_IMPACT_MS,
-  IMPACT_TO_REVEALED_MS,
+  ARMED_TO_SWINGING_MS: ARMED_DURATION_MS,
+  SWINGING_TO_IMPACT_MS: SWINGING_DURATION_MS,
+  IMPACT_TO_REVEALED_MS: IMPACT_DURATION_MS,
 } as const;

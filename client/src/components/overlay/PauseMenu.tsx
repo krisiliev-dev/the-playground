@@ -17,16 +17,28 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import { useWorldStore } from '@/store';
+import { FLAT_ROUTES } from '@/content/routes';
 import { acquirePointerLock, useIsTouchPrimary } from '@/utils';
 
-const NAV_ITEMS = [
-  { to: '/', label: 'Home' },
-  { to: '/about', label: 'About' },
-  { to: '/projects', label: 'Projects' },
-  { to: '/writing', label: 'Writing' },
-] as const;
+interface NavItem {
+  readonly path: string;
+  readonly label: string;
+}
+
+/** Top-level nav items shown in the menu. Each path must correspond
+ *  to a route declared in `routes.ts` with an `entryPoint` — the
+ *  click writes `pendingAvatarTeleport`, which CursorAvatar consumes
+ *  by snapping the avatar to that route's bob-compensated entry
+ *  point. The avatar's per-frame bbox-routing then derives the URL
+ *  from the new position, and RouteSync mirrors it into the URL bar. */
+const NAV_ITEMS: ReadonlyArray<NavItem> = [
+  { path: '/', label: 'Home' },
+  { path: '/about', label: 'About' },
+  { path: '/projects', label: 'Projects' },
+  { path: '/writing', label: 'Writing' },
+];
 
 const KEYMAP_DESKTOP: ReadonlyArray<{ key: string; desc: string }> = [
   { key: 'M', desc: 'open / close menu' },
@@ -51,7 +63,6 @@ export function PauseMenu(): JSX.Element | null {
   // looped sounds would keep playing into the document otherwise).
   const muted = useWorldStore((s) => s.muted);
   const setMuted = useWorldStore((s) => s.setMuted);
-  const navigate = useNavigate();
   const location = useLocation();
   const isTouch = useIsTouchPrimary();
   const firstFocusRef = useRef<HTMLButtonElement>(null);
@@ -126,19 +137,33 @@ export function PauseMenu(): JSX.Element | null {
 
   const close = (): void => setOpen(false);
 
-  const handleBack = (): void => {
+  // Nav handler — write a teleport request, close the menu. The
+  // avatar's frame loop snaps to the route's entry point on the
+  // next tick; RouteSync's avatar→URL effect mirrors the new
+  // route into the URL bar. One signal, one frame, both views
+  // updated.
+  const handleNav = (path: string): void => {
     close();
-    // react-router v7's navigate returns a Promise (the in-flight
-    // transition). We don't await it — the menu close + visual
-    // dismiss are independent of when the route swap settles.
-    void navigate(-1);
+    // Disable the no-op case where the user clicks the route they
+    // are already on — the URL hasn't drifted, the teleport would
+    // just snap them to the entry point of where they already are.
+    if (location.pathname === path) {
+      return;
+    }
+    // Verify the path is a registered route before writing the
+    // teleport — guards against typos in NAV_ITEMS that would
+    // otherwise silently no-op inside CursorAvatar.
+    const known = FLAT_ROUTES.some((fr) => fr.route.path === path);
+    if (!known) {
+      return;
+    }
+    useWorldStore.getState().setPendingAvatarTeleport(path);
   };
 
   // Just flip the store flag — App's effect on (documentMode, muted)
   // is the single source of truth for the live master volume.
   const toggleMute = (): void => setMuted(!muted);
 
-  const isHome = location.pathname === '/';
   const keymap = isTouch ? KEYMAP_TOUCH : KEYMAP_DESKTOP;
   // The mobile ≡ icon is the only persistent UI on touch. Hidden once
   // the menu is open (the menu itself is the affordance to close).
@@ -167,28 +192,19 @@ export function PauseMenu(): JSX.Element | null {
           <div style={styles.card} onClick={(e) => e.stopPropagation()}>
             <h2 style={styles.heading}>Menu</h2>
 
-            <button
-              ref={firstFocusRef}
-              type="button"
-              style={isHome ? styles.itemDisabled : styles.item}
-              disabled={isHome}
-              onClick={handleBack}
-            >
-              ← Back
-            </button>
-
             <nav style={styles.nav} aria-label="Sections">
-              {NAV_ITEMS.map((item) => {
-                const active = location.pathname === item.to;
+              {NAV_ITEMS.map((item, i) => {
+                const active = location.pathname === item.path;
                 return (
-                  <Link
-                    key={item.to}
-                    to={item.to}
+                  <button
+                    key={item.path}
+                    ref={i === 0 ? firstFocusRef : undefined}
+                    type="button"
                     style={active ? styles.navLinkActive : styles.navLink}
-                    onClick={close}
+                    onClick={() => handleNav(item.path)}
                   >
                     {item.label}
-                  </Link>
+                  </button>
                 );
               })}
             </nav>

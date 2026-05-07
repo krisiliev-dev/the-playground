@@ -185,7 +185,20 @@ export function InteractionController(): null {
   const endInteractPress = useWorldStore((s) => s.endInteractPress);
 
   const { camera, scene } = useThree();
-  const raycaster = useMemo(() => new Raycaster(), []);
+  const raycaster = useMemo(() => {
+    const r = new Raycaster();
+    // Enable every layer on the raycaster so meshes parked on
+    // non-default layers (e.g. portal surface planes on
+    // PORTAL_SURFACE_LAYER) still register hits. Layers are a
+    // *rendering* filter, not an interaction filter — what's
+    // interactable is gated by `userData.interactable` below.
+    // Without this, default raycaster.layers (only layer 0) rejects
+    // any non-zero-layer mesh before the userData check runs, so
+    // portals never light up as hovered and click-through never
+    // fires.
+    r.layers.enableAll();
+    return r;
+  }, []);
   /** NDC of the crosshair — always (0, 0) since the crosshair is
    *  fixed at screen centre. */
   const screenCentre = useMemo(() => new Vector2(0, 0), []);

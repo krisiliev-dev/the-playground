@@ -48,7 +48,13 @@ const fragmentShader = /* glsl */ `
 
 export function SkyBackground({ dimensions }: SkyBackgroundProps): JSX.Element {
   const [w, h, d] = dimensions;
-  const radius = (Math.sqrt(w * w + h * h + d * d) / 2) * 1.5;
+  // Multiplier of 4 ensures the sphere comfortably encloses the
+  // cube AND the section rooms that protrude outside it (room
+  // centres sit ~700 units from origin and span ±200 in each axis,
+  // so the cube diagonal × 1.5 was undersized — rooms intersected
+  // the sphere). 4× costs nothing visually since the gradient
+  // shader is direction-only.
+  const radius = (Math.sqrt(w * w + h * h + d * d) / 2) * 4;
 
   const uniforms = useMemo<SkyUniforms>(
     () => ({

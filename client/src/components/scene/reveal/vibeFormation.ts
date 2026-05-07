@@ -22,8 +22,13 @@ export interface SwordSlot {
   midPos: readonly [number, number];
   /** Unit vector along the stroke (hilt → tip). */
   midDir: readonly [number, number];
-  /** Angle around the end circle (radians, in wall right/up plane). */
-  endAngle: number;
+  /** End offset in the wall (right, up) plane around the click
+   *  point. Replaces the previous `endAngle` (circular ring): the
+   *  formation now traces a SQUARE perimeter so each side gets an
+   *  even count of swords and the four cube portals can sit in
+   *  their own quadrant without overlapping the sword landing
+   *  ring. Scaled by `FORMATION_SCALE` for narrow viewports. */
+  endOffset: readonly [number, number];
 }
 
 /** Single shared variant for every sword — keeps the formation visually
@@ -171,9 +176,43 @@ function computeFormationScale(): number {
 }
 export const FORMATION_SCALE = computeFormationScale();
 
-/** Final formation. End angles distribute the swords evenly around the
- *  click point on the wall; spawn position is derived from the mid pose
- *  in Sword.tsx (each sword spawns far in front of the camera, at a
+/** Half-edge of the square sword formation around the click point.
+ *  Sized to sit just outside the 4 cube portals' bounding box (each
+ *  portal half=5, centres at ±6, so corners reach ±11; the swords land
+ *  at ±SQUARE_HALF so there's a small visual gap between the portal
+ *  edges and the sword ring). Scaled by FORMATION_SCALE on narrow
+ *  viewports together with the letter geometry. */
+const SQUARE_HALF = 14 * FORMATION_SCALE;
+
+/** Map a perimeter parameter `t` ∈ [0, 1) onto an axis-aligned square
+ *  of half-edge `half`. t=0 starts at the right edge midpoint and
+ *  walks counter-clockwise (right → top → left → bottom). 12 swords
+ *  with `t = (i + 0.5) / 12` get 3 swords per side, none on corners. */
+function squarePerimeter(t: number, half: number): readonly [number, number] {
+  const s = ((t % 1) + 1) % 1; // wrap into [0, 1)
+  const segment = s * 4;
+  const side = Math.floor(segment) % 4;
+  const f = segment - Math.floor(segment); // 0..1 within side
+  switch (side) {
+    case 0:
+      // Right edge, going up: from (+half, -half) to (+half, +half).
+      return [half, -half + 2 * half * f];
+    case 1:
+      // Top edge, going left: from (+half, +half) to (-half, +half).
+      return [half - 2 * half * f, half];
+    case 2:
+      // Left edge, going down: from (-half, +half) to (-half, -half).
+      return [-half, half - 2 * half * f];
+    default:
+      // Bottom edge, going right: from (-half, -half) to (+half, -half).
+      return [-half + 2 * half * f, -half];
+  }
+}
+
+/** Final formation. End offsets distribute the swords evenly around the
+ *  click point on the wall along a SQUARE perimeter (3 per side, none
+ *  on corners). Spawn position is derived from the mid pose in
+ *  Sword.tsx (each sword spawns far in front of the camera, at a
  *  lateral offset proportional to where it'll end up in the letter).
  *  midPos is scaled uniformly by `FORMATION_SCALE` so the whole word
  *  fits horizontally on narrow viewports. */
@@ -182,5 +221,5 @@ export const VIBE_SLOTS: readonly SwordSlot[] = ALL_STROKES.map((s, i) => ({
   variant: SHARED_VARIANT,
   midPos: [s.mid[0] * FORMATION_SCALE, s.mid[1] * FORMATION_SCALE] as const,
   midDir: s.dir,
-  endAngle: (i * 2 * Math.PI) / VIBE_SWORD_COUNT,
+  endOffset: squarePerimeter((i + 0.5) / VIBE_SWORD_COUNT, SQUARE_HALF),
 }));

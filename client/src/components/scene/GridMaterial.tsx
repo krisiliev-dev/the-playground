@@ -12,10 +12,23 @@ import {
 
 interface GridMaterialProps {
   side?: Side;
+  /** Hex color for the grid lines. Default cyan (cube). Section
+   *  rooms pass their own color so each room reads as the same
+   *  cyberpunk wireframe texture as the cube, just retinted. */
+  gridColor?: string;
+  /** Hex color for the dark background between lines. */
+  bgColor?: string;
+  /** Output alpha. Use < 1 alongside `transparent` for a
+   *  see-through wall (the temporary cube transparency). */
+  alpha?: number;
+  /** Material's `transparent` flag. When true, sets
+   *  `depthWrite: false` so the wall doesn't occlude what's
+   *  behind it. */
+  transparent?: boolean;
 }
 
-const GRID_COLOR = '#00ffcc';
-const BG_COLOR = '#12121a';
+const DEFAULT_GRID_COLOR = '#00ffcc';
+const DEFAULT_BG_COLOR = '#12121a';
 /** Line thickness as a fraction of a cell. Smaller = thinner lines. */
 const LINE_WIDTH = 0.012;
 /** World-units between grid lines. Bigger = larger panels. */
@@ -38,6 +51,7 @@ const SLACK_THRESHOLD = 8.0;
 
 const vertexShader = /* glsl */ `
   varying vec3 vBoxPosition;
+  varying vec3 vWorldPosition;
   varying vec3 vWorldNormal;
 
   void main() {
@@ -46,8 +60,10 @@ const vertexShader = /* glsl */ `
     // even when the cube bobs up and down. Use modelMatrix for gl_Position
     // so rendering still respects the float transform.
     vBoxPosition = position;
+    vec4 worldPos = modelMatrix * vec4(position, 1.0);
+    vWorldPosition = worldPos.xyz;
     vWorldNormal = normalize(mat3(modelMatrix) * normal);
-    gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(position, 1.0);
+    gl_Position = projectionMatrix * viewMatrix * worldPos;
   }
 `;
 
@@ -62,6 +78,7 @@ const fragmentShader = /* glsl */ `
   uniform float u_lineWidth;
   uniform float u_gridSpacing;
   uniform float u_tensionFull;
+  uniform float u_alpha;
 
   uniform float u_time;
   uniform vec3 u_mouse;
@@ -75,6 +92,7 @@ const fragmentShader = /* glsl */ `
   uniform float u_rippleTime;
 
   varying vec3 vBoxPosition;
+  varying vec3 vWorldPosition;
   varying vec3 vWorldNormal;
 
   // Read segment i from the data texture. Texture layout:
@@ -261,7 +279,7 @@ const fragmentShader = /* glsl */ `
     color += u_gridColor * halo * 0.45 * glowPulse;
     color += u_gridColor * rippleIntensity * 0.2;
 
-    gl_FragColor = vec4(color, 1.0);
+    gl_FragColor = vec4(color, u_alpha);
   }
 `;
 
@@ -280,18 +298,25 @@ function makeCaughtTexture(): {
 }
 
 export const GridMaterial = forwardRef<ShaderMaterial, GridMaterialProps>(function GridMaterial(
-  { side = DoubleSide },
+  {
+    side = DoubleSide,
+    gridColor = DEFAULT_GRID_COLOR,
+    bgColor = DEFAULT_BG_COLOR,
+    alpha = 1,
+    transparent = false,
+  },
   ref,
 ) {
   const { texture, data } = useMemo(() => makeCaughtTexture(), []);
 
   const uniforms = useMemo(
     () => ({
-      u_gridColor: { value: hexToVec3(GRID_COLOR) },
-      u_bgColor: { value: hexToVec3(BG_COLOR) },
+      u_gridColor: { value: hexToVec3(gridColor) },
+      u_bgColor: { value: hexToVec3(bgColor) },
       u_lineWidth: { value: LINE_WIDTH },
       u_gridSpacing: { value: GRID_SPACING },
       u_tensionFull: { value: TENSION_FULL },
+      u_alpha: { value: alpha },
 
       u_time: { value: 0 },
       u_mouse: { value: new Vector3(9999, 9999, 9999) },
@@ -303,6 +328,11 @@ export const GridMaterial = forwardRef<ShaderMaterial, GridMaterialProps>(functi
       u_rippleOrigin: { value: new Vector3(9999, 9999, 9999) },
       u_rippleTime: { value: -1000 },
     }),
+    // Color/alpha props are baked into the uniforms at mount; if a
+    // caller wants to retint dynamically we can switch to useEffect
+    // later. For now the cube and each room mount with stable values
+    // so this is fine.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [texture],
   );
 
@@ -335,6 +365,8 @@ export const GridMaterial = forwardRef<ShaderMaterial, GridMaterialProps>(functi
       fragmentShader={fragmentShader}
       uniforms={uniforms}
       side={side}
+      transparent={transparent}
+      depthWrite={!transparent}
     />
   );
 });

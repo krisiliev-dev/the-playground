@@ -15,7 +15,11 @@ import { Vector2 } from 'three';
 
 export function PostFx(): JSX.Element {
   return (
-    <EffectComposer multisampling={0}>
+    <EffectComposer multisampling={0} stencilBuffer>
+      {/* `stencilBuffer` allocates a stencil renderbuffer in the
+          composer's offscreen FBO. Kept on as a forward-compatible
+          flag; the legacy stencil-portal pipeline that needed it
+          has been deleted. */}
       <Bloom
         // luminanceThreshold: only pixels brighter than this contribute.
         // Set just below pure cyan brightness so the grid + portal glow but

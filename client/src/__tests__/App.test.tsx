@@ -17,6 +17,32 @@ interface MockCanvasProps {
   [key: string]: unknown;
 }
 
+vi.mock('@react-three/drei', () => ({
+  // PortalDisc inside AboutRoom uses useFBO; the Canvas mock in
+  // this test file is a plain <div>, so the real drei hooks would
+  // throw "Hooks can only be used within the Canvas component."
+  useFBO: () => ({ texture: null, setSize: () => {}, dispose: () => {} }),
+}));
+
+// AboutRoom isn't part of what App.test.tsx is asserting; mock it
+// out so its PortalDisc doesn't pull in the interactable system.
+vi.mock('@/scenes/rooms/AboutRoom', () => ({
+  AboutRoom: () => null,
+}));
+
+// SceneHost requires the real R3F state shape; the Canvas mock
+// here is a plain <div> so the host's effect can't run.
+vi.mock('@/scenes/SceneHost', () => ({
+  SceneHost: () => null,
+}));
+
+// CubeScene is just a createPortal pass-through; the test's
+// fiber mock already aliases createPortal to identity, but mock
+// CubeScene directly to keep the test focused on App's own logic.
+vi.mock('@/scenes/CubeScene', () => ({
+  CubeScene: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
+}));
+
 vi.mock('@react-three/fiber', () => ({
   Canvas: ({ children, onCreated, ...props }: MockCanvasProps) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -45,10 +71,21 @@ vi.mock('@react-three/fiber', () => ({
   // fake state shape that satisfies the selector forms used in App
   // (`useThree(s => s.invalidate)` and the bare `useThree()` call).
   useFrame: () => undefined,
-  useThree: (selector?: (s: { invalidate: () => void }) => unknown) => {
-    const state = { invalidate: () => undefined };
+  useThree: (selector?: (s: unknown) => unknown) => {
+    const state = {
+      invalidate: () => undefined,
+      set: () => undefined,
+      size: { width: 800, height: 600 },
+      gl: {},
+      scene: {},
+      camera: {},
+    };
     return selector ? selector(state) : state;
   },
+  // CubeScene + AboutRoom mount their content via createPortal
+  // into dedicated THREE.Scene instances. The mock just renders
+  // children inline so the React tree still walks.
+  createPortal: (children: unknown) => children,
 }));
 
 // Mock the World component (plus ShakeGroup + CursorAvatar) so we can
@@ -299,54 +336,6 @@ describe('App', () => {
     });
   });
 
-  // ── Portal click-through transition overlay ─────────────────────
-  describe('PortalTransitionOverlay', () => {
-    beforeEach(() => {
-      useWorldStore.setState({ portalTransit: null, documentMode: false });
-    });
-
-    it('renders nothing when no transit is in progress', () => {
-      render(<App />);
-      // Overlay element is identified by its aria-hidden attribute
-      // and the portal-transit-fade animation. Without a transit,
-      // it shouldn't be in the DOM at all.
-      const overlays = document.querySelectorAll('[aria-hidden="true"]');
-      const transitOverlay = Array.from(overlays).find((el) =>
-        (el as HTMLElement).style.animation?.includes('portal-transit-fade'),
-      );
-      expect(transitOverlay).toBeUndefined();
-    });
-
-    it('renders the colored overlay while a transit is active', () => {
-      render(<App />);
-      act(() => {
-        useWorldStore.setState({ portalTransit: { path: '/about', color: '#4169e1' } });
-      });
-      const overlays = document.querySelectorAll('[aria-hidden="true"]');
-      const transitOverlay = Array.from(overlays).find((el) =>
-        (el as HTMLElement).style.animation?.includes('portal-transit-fade'),
-      );
-      expect(transitOverlay).toBeDefined();
-      // Background color matches the pie that was clicked.
-      expect((transitOverlay as HTMLElement).style.backgroundColor).toBe('rgb(65, 105, 225)');
-    });
-
-    it('does not render the overlay in document mode even if transit somehow set', () => {
-      // Defensive: SE portal flips documentMode, not portalTransit,
-      // so this shouldn't co-occur in practice — but if it ever did
-      // we'd want to favor the document UI.
-      useWorldStore.setState({
-        portalTransit: { path: '/about', color: '#4169e1' },
-        documentMode: true,
-      });
-      render(<App />);
-      const overlays = document.querySelectorAll('[aria-hidden="true"]');
-      const transitOverlay = Array.from(overlays).find((el) =>
-        (el as HTMLElement).style.animation?.includes('portal-transit-fade'),
-      );
-      expect(transitOverlay).toBeUndefined();
-    });
-  });
 
   // ── In-world Portal navigation bridge (ADR-003 step 5) ──────────
   describe('NavigationConsumer', () => {
