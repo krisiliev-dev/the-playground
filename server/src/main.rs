@@ -14,6 +14,7 @@ mod config;
 mod entity;
 mod handlers;
 mod protocol;
+mod recipes;
 mod registry;
 mod scene_event;
 mod snapshot;
@@ -82,8 +83,19 @@ async fn main() {
                 .to_string()
         })
         .into();
+    // Per ADR-008: recipes live in their own JSON file, sibling to
+    // the snapshot + asset index by default. Configurable so deploys
+    // can put recipes on a separate persistent volume.
+    let recipes_path: std::path::PathBuf = std::env::var("RECIPES_FILE")
+        .unwrap_or_else(|_| "recipes.json".to_string())
+        .into();
 
-    let state = AppState::new(admin_token, assets_dir.clone(), asset_index_path.clone());
+    let state = AppState::new(
+        admin_token,
+        assets_dir.clone(),
+        asset_index_path.clone(),
+        recipes_path.clone(),
+    );
 
     // Restore the asset registry from disk. Same graceful policy
     // as the entity snapshot — missing file is cold start, parse
@@ -129,6 +141,29 @@ async fn main() {
     }
     snapshot::precheck_writable(&snapshot_path).await;
 
+    // Restore admin-authored effect recipes (per ADR-008).
+    // Missing file = cold start; corrupt / version-mismatched =
+    // logged and we proceed with an empty store. Recipes are
+    // small enough that startup load is instant.
+    {
+        match recipes::load_recipes(&recipes_path).await {
+            Ok(loaded) => {
+                let n = loaded.len();
+                *state.recipe_store.write().await = loaded;
+                tracing::info!(
+                    restored = n,
+                    path = %recipes_path.display(),
+                    "loaded recipe store"
+                );
+            }
+            Err(e) => tracing::warn!(
+                error = %e,
+                path = %recipes_path.display(),
+                "recipe store load failed; starting empty"
+            ),
+        }
+    }
+
     // Spawn the 30 Hz authoritative tick loop. Returns a JoinHandle
     // we deliberately drop — the task lives for the lifetime of
     // the process; tokio cancels it on graceful shutdown.
@@ -155,6 +190,19 @@ async fn main() {
         // Admin-only listing of all uploaded assets — admin UI's
         // asset picker reads from here.
         .route("/api/admin/assets", get(handlers::get_admin_assets))
+        // Admin-only recipe management (per ADR-008). Recipes are
+        // JSON-defined sequences of SceneEvents that can be
+        // triggered at any position without redeploy.
+        .route("/api/admin/recipes", get(handlers::get_admin_recipes))
+        .route("/api/admin/recipes", post(handlers::post_admin_recipe))
+        .route(
+            "/api/admin/recipes/:id",
+            axum::routing::delete(handlers::delete_admin_recipe),
+        )
+        .route(
+            "/api/admin/play_recipe",
+            post(handlers::post_admin_play_recipe),
+        )
         // Public static serving of uploaded assets. Content-
         // addressed URLs mean these are safe to cache aggressively;
         // ServeDir handles MIME types + byte-range requests.

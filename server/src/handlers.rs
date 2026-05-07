@@ -38,6 +38,7 @@ use crate::assets::{self, DEFAULT_MAX_UPLOAD_BYTES};
 use crate::auth;
 use crate::entity::{Entity, EntityId, EntityKind, Transform};
 use crate::protocol::{ClientMessage, EntityOp, SceneEventKind, ServerMessage};
+use crate::recipes::{self, Recipe};
 use crate::scene_event::{validate_event, ValidationOutcome};
 use crate::state::AppState;
 
@@ -173,6 +174,138 @@ pub async fn get_admin_assets(
     }
     let registry = state.asset_registry.read().await;
     Json(registry.assets.clone()).into_response()
+}
+
+/// GET /api/admin/recipes — admin-only listing endpoint that
+/// returns the current recipe store (per ADR-008). Powers the
+/// future admin UI's recipe picker.
+pub async fn get_admin_recipes(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    let presented = extract_bearer(&headers).unwrap_or("");
+    if !auth::is_admin_token(presented, &state.admin_token) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let store = state.recipe_store.read().await;
+    Json(store.recipes.clone()).into_response()
+}
+
+/// POST /api/admin/recipes — upsert a recipe by id. Body is the
+/// JSON recipe shape; replaces any existing recipe with the same
+/// id. Persists to disk after a successful upsert.
+pub async fn post_admin_recipe(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(recipe): Json<Recipe>,
+) -> impl IntoResponse {
+    let presented = extract_bearer(&headers).unwrap_or("");
+    if !auth::is_admin_token(presented, &state.admin_token) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    if let Err(e) = recipes::validate_recipe(&recipe) {
+        warn!(error = %e, recipe_id = %recipe.id, "recipe validation failed");
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        )
+            .into_response();
+    }
+    let inserted = {
+        let mut store = state.recipe_store.write().await;
+        store.upsert(recipe.clone())
+    };
+    // Persist atomically. Failure logs and returns 500 — we don't
+    // want to silently keep an in-memory recipe that won't survive
+    // restart, since admins expect their authoring to be durable.
+    let snapshot = {
+        let store = state.recipe_store.read().await;
+        recipes::RecipeStore {
+            version: store.version,
+            recipes: store.recipes.clone(),
+        }
+    };
+    if let Err(e) = recipes::save_recipes(&state.recipes_path, &snapshot).await {
+        tracing::error!(error = %e, "recipe persist failed");
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+    let status = if inserted {
+        StatusCode::CREATED
+    } else {
+        StatusCode::OK
+    };
+    (status, Json(recipe)).into_response()
+}
+
+/// DELETE /api/admin/recipes/:id — drop a recipe by id.
+pub async fn delete_admin_recipe(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    let presented = extract_bearer(&headers).unwrap_or("");
+    if !auth::is_admin_token(presented, &state.admin_token) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let removed = {
+        let mut store = state.recipe_store.write().await;
+        store.remove(&id)
+    };
+    if !removed {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let snapshot = {
+        let store = state.recipe_store.read().await;
+        recipes::RecipeStore {
+            version: store.version,
+            recipes: store.recipes.clone(),
+        }
+    };
+    if let Err(e) = recipes::save_recipes(&state.recipes_path, &snapshot).await {
+        tracing::error!(error = %e, "recipe persist failed after delete");
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+    StatusCode::NO_CONTENT.into_response()
+}
+
+#[derive(Deserialize)]
+pub struct PlayRecipeRequest {
+    /// Recipe id to fire.
+    pub id: String,
+    /// World position the recipe is anchored at — every step's
+    /// `position_offset` is added to this.
+    pub position: [f32; 3],
+}
+
+/// POST /api/admin/play_recipe — trigger a recipe by id at the
+/// given position. Spawns a tokio task that broadcasts each step
+/// at its scheduled offset_ms; returns immediately with 202
+/// Accepted so the admin UI doesn't block on long recipes.
+pub async fn post_admin_play_recipe(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<PlayRecipeRequest>,
+) -> impl IntoResponse {
+    let presented = extract_bearer(&headers).unwrap_or("");
+    if !auth::is_admin_token(presented, &state.admin_token) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let recipe = {
+        let store = state.recipe_store.read().await;
+        store.get(&req.id).cloned()
+    };
+    let Some(recipe) = recipe else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let trigger_pos = req.position;
+    let broadcast_tx = state.broadcast_tx.clone();
+    // Spawn the playback so the request returns promptly. The
+    // timing logic lives in `recipes::run_recipe` so it can be
+    // tested directly.
+    tokio::spawn(async move {
+        recipes::run_recipe(&recipe, trigger_pos, broadcast_tx).await;
+    });
+    StatusCode::ACCEPTED.into_response()
 }
 
 /// Pull the bearer token from an `Authorization: Bearer <token>`

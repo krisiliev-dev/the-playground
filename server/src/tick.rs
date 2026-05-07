@@ -116,6 +116,7 @@ mod tests {
             String::new(),
             std::path::PathBuf::from("./test-assets"),
             std::path::PathBuf::from("./test-assets.json"),
+            std::path::PathBuf::from("./test-recipes.json"),
         );
         let mut rx = state.broadcast_tx.subscribe();
         let mut last_seen = HashMap::new();
@@ -140,6 +141,7 @@ mod tests {
             String::new(),
             std::path::PathBuf::from("./test-assets"),
             std::path::PathBuf::from("./test-assets.json"),
+            std::path::PathBuf::from("./test-recipes.json"),
         );
         let mut rx = state.broadcast_tx.subscribe();
         let mut last_seen = HashMap::new();
@@ -169,6 +171,7 @@ mod tests {
             String::new(),
             std::path::PathBuf::from("./test-assets"),
             std::path::PathBuf::from("./test-assets.json"),
+            std::path::PathBuf::from("./test-recipes.json"),
         );
         let mut rx = state.broadcast_tx.subscribe();
         let mut last_seen = HashMap::new();
@@ -194,6 +197,7 @@ mod tests {
             String::new(),
             std::path::PathBuf::from("./test-assets"),
             std::path::PathBuf::from("./test-assets.json"),
+            std::path::PathBuf::from("./test-recipes.json"),
         );
         let mut rx = state.broadcast_tx.subscribe();
         let mut last_seen = HashMap::new();
@@ -243,6 +247,7 @@ mod tests {
             String::new(),
             std::path::PathBuf::from("./test-assets"),
             std::path::PathBuf::from("./test-assets.json"),
+            std::path::PathBuf::from("./test-recipes.json"),
         );
         let _rx = state.broadcast_tx.subscribe(); // keep channel alive
         let mut last_seen = HashMap::new();
@@ -280,6 +285,7 @@ mod tests {
             String::new(),
             std::path::PathBuf::from("./test-assets"),
             std::path::PathBuf::from("./test-assets.json"),
+            std::path::PathBuf::from("./test-recipes.json"),
         );
         // Note: NOT subscribing.
         let mut last_seen = HashMap::new();

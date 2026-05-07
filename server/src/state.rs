@@ -17,6 +17,7 @@ use tokio::sync::{broadcast, RwLock};
 
 use crate::assets::AssetRegistry;
 use crate::protocol::ServerMessage;
+use crate::recipes::RecipeStore;
 use crate::registry::EntityRegistry;
 use crate::scene_event::RateTracker;
 
@@ -62,10 +63,23 @@ pub struct AppState {
     /// Path to the on-disk asset index file. Sibling to
     /// `assets_dir` itself by default.
     pub asset_index_path: PathBuf,
+    /// Persistent store of admin-authored effect recipes
+    /// (per ADR-008). Loaded from `recipes.json` on boot,
+    /// rewritten atomically after every upsert/delete so
+    /// authored recipes survive restarts.
+    pub recipe_store: Arc<RwLock<RecipeStore>>,
+    /// Path to the on-disk recipe store file. Configurable via
+    /// `RECIPES_FILE` env var.
+    pub recipes_path: PathBuf,
 }
 
 impl AppState {
-    pub fn new(admin_token: String, assets_dir: PathBuf, asset_index_path: PathBuf) -> Self {
+    pub fn new(
+        admin_token: String,
+        assets_dir: PathBuf,
+        asset_index_path: PathBuf,
+        recipes_path: PathBuf,
+    ) -> Self {
         let (broadcast_tx, _) = broadcast::channel(BROADCAST_CAPACITY);
         Self {
             registry: Arc::new(RwLock::new(EntityRegistry::new())),
@@ -76,6 +90,8 @@ impl AppState {
             assets_dir,
             asset_registry: Arc::new(RwLock::new(AssetRegistry::new())),
             asset_index_path,
+            recipe_store: Arc::new(RwLock::new(RecipeStore::new())),
+            recipes_path,
         }
     }
 

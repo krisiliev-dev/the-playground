@@ -198,6 +198,7 @@ mod tests {
             String::new(),
             std::path::PathBuf::from("./test-assets"),
             std::path::PathBuf::from("./test-assets.json"),
+            std::path::PathBuf::from("./test-recipes.json"),
         );
         let portal_a_id = {
             let mut reg = state.registry.write().await;
