@@ -14,6 +14,7 @@ mod entity;
 mod handlers;
 mod protocol;
 mod registry;
+mod scene_event;
 mod snapshot;
 mod state;
 mod tick;

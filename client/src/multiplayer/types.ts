@@ -36,6 +36,41 @@ export const IDENTITY_TRANSFORM: Transform = {
   scale: [1, 1, 1],
 };
 
+// ─── Scene events (per ADR-006) ───────────────────────────────
+
+/** Discriminated union of every transient effect type. Mirror
+ *  of `server/src/protocol.rs::SceneEventKind`. */
+export type SceneEventKind =
+  | {
+      kind: 'sword_swing';
+      from: [number, number, number];
+      to: [number, number, number];
+      strength: number;
+    }
+  | {
+      kind: 'sword_impact';
+      position: [number, number, number];
+    }
+  | {
+      kind: 'audio';
+      sound_id: string;
+      position?: [number, number, number] | null;
+      volume: number;
+    }
+  | {
+      kind: 'camera_shake';
+      position: [number, number, number];
+      radius: number;
+      intensity: number;
+      duration_ms: number;
+    };
+
+/** String-tagged subset for `useSceneEvent`'s typed subscription. */
+export type SceneEventName = SceneEventKind['kind'];
+
+/** Helper: pick the variant of `SceneEventKind` whose tag is `K`. */
+export type SceneEventOf<K extends SceneEventName> = Extract<SceneEventKind, { kind: K }>;
+
 // ─── Inbound (server → client) ────────────────────────────────
 
 export type ServerMessage =
@@ -53,6 +88,11 @@ export type ServerMessage =
       ids: EntityId[];
     }
   | {
+      type: 'scene_event';
+      actor_id: EntityId | null;
+      event: SceneEventKind;
+    }
+  | {
       type: 'error';
       message: string;
     };
@@ -68,6 +108,10 @@ export type ClientMessage =
   | {
       type: 'entity_mutation';
       op: EntityOp;
+    }
+  | {
+      type: 'scene_event';
+      event: SceneEventKind;
     };
 
 export type EntityOp =

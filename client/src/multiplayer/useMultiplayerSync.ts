@@ -19,6 +19,7 @@ import { useWorldStore } from '@/store';
 import type { ClientMessage, Entity, EntityId, ServerMessage, Transform } from './types';
 import { IDENTITY_TRANSFORM } from './types';
 import { dropAllSnapshots, dropSnapshot, recordSnapshot } from './snapshotInterpolation';
+import { dispatchSceneEvent, drainOutboundQueue } from './sceneEvents';
 
 /** How often we push our local player transform to the server.
  *  Matches the server's tick rate; sending more often is just
@@ -136,26 +137,35 @@ export function useMultiplayerSync(opts: MultiplayerOptions): void {
     };
 
     // Outbound input pump. Ticks regardless of whether the socket
-    // is currently connected; sends when there is one and the
-    // transform has changed since the last send.
+    // is currently connected; sends when there is one. Carries:
+    //   - PlayerInput, when local transform or route changed.
+    //   - Any pending scene events queued via emitSceneEvent.
     outboundTimer.current = window.setInterval(() => {
       const ws = socketRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) {
         return;
       }
+      // Player input — only when something changed.
       const current = readLocalTransform();
       const route = useWorldStore.getState().currentRoute;
-      if (transformsEqual(current, lastSentTransform.current) && route === lastSentRoute.current) {
-        return;
+      if (!transformsEqual(current, lastSentTransform.current) || route !== lastSentRoute.current) {
+        lastSentTransform.current = current;
+        lastSentRoute.current = route;
+        const inputMsg: ClientMessage = {
+          type: 'player_input',
+          transform: current,
+          route,
+        };
+        ws.send(JSON.stringify(inputMsg));
       }
-      lastSentTransform.current = current;
-      lastSentRoute.current = route;
-      const msg: ClientMessage = {
-        type: 'player_input',
-        transform: current,
-        route,
-      };
-      ws.send(JSON.stringify(msg));
+      // Scene events — drain anything emitted since last tick.
+      // Sends one message per event for now; if we hit volume,
+      // batch into a single `scene_events` array variant later.
+      const queued = drainOutboundQueue();
+      for (const event of queued) {
+        const eventMsg: ClientMessage = { type: 'scene_event', event };
+        ws.send(JSON.stringify(eventMsg));
+      }
     }, 1000 / OUTBOUND_HZ);
 
     connect();
@@ -229,6 +239,9 @@ export function dispatchServerMessage(msg: ServerMessage, d: Dispatchers): void 
       for (const id of msg.ids) {
         dropSnapshot(id);
       }
+      break;
+    case 'scene_event':
+      dispatchSceneEvent(msg.event, msg.actor_id);
       break;
     case 'error':
       // eslint-disable-next-line no-console

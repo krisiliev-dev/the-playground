@@ -16,6 +16,7 @@ use tokio::sync::{broadcast, RwLock};
 
 use crate::protocol::ServerMessage;
 use crate::registry::EntityRegistry;
+use crate::scene_event::RateTracker;
 
 /// Maximum simultaneous WebSocket connections, server-wide.
 pub const MAX_CONNECTIONS: usize = 100;
@@ -40,6 +41,12 @@ pub struct AppState {
     /// Empty string ⇒ no admin can ever authenticate (read-only
     /// dev / preview environments).
     pub admin_token: String,
+    /// Per-actor sliding-window rate tracker for SceneEvent
+    /// validation (ADR-006). Each connected client's events are
+    /// counted here; excess events are silently dropped from
+    /// rebroadcast. Cleared per-actor on disconnect via
+    /// `RateTracker::forget`.
+    pub event_rate: Arc<RwLock<RateTracker>>,
 }
 
 impl AppState {
@@ -50,6 +57,7 @@ impl AppState {
             connections_per_ip: Arc::new(RwLock::new(HashMap::new())),
             broadcast_tx,
             admin_token,
+            event_rate: Arc::new(RwLock::new(RateTracker::new())),
         }
     }
 

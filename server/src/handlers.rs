@@ -34,7 +34,8 @@ use tracing::{debug, info, warn};
 
 use crate::auth;
 use crate::entity::{Entity, EntityId, EntityKind, Transform};
-use crate::protocol::{ClientMessage, EntityOp, ServerMessage};
+use crate::protocol::{ClientMessage, EntityOp, SceneEventKind, ServerMessage};
+use crate::scene_event::{validate_event, ValidationOutcome};
 use crate::state::AppState;
 
 pub async fn health_check() -> impl IntoResponse {
@@ -180,7 +181,31 @@ async fn handle_client_message(
             }
             apply_admin_mutation(state, op).await;
         }
+        ClientMessage::SceneEvent { event } => {
+            forward_scene_event(state, player_id, event).await;
+        }
     }
+}
+
+/// Validate a SceneEvent and rebroadcast to other clients on
+/// pass. Per ADR-006, the originator already played the effect
+/// locally (optimistic-local), so we never echo back to them —
+/// the broadcast carries `actor_id` and the client outbound
+/// task filters self-echoes. Validation drops are silent.
+async fn forward_scene_event(state: &AppState, actor_id: EntityId, event: SceneEventKind) {
+    let now = std::time::Instant::now();
+    let outcome = {
+        let mut tracker = state.event_rate.write().await;
+        validate_event(Some(actor_id), event, &mut tracker, now)
+    };
+    let validated = match outcome {
+        ValidationOutcome::Pass(e) => e,
+        ValidationOutcome::Drop => return,
+    };
+    let _ = state.broadcast_tx.send(ServerMessage::SceneEvent {
+        actor_id: Some(actor_id),
+        event: validated,
+    });
 }
 
 async fn apply_admin_mutation(state: &AppState, op: EntityOp) {
@@ -225,8 +250,10 @@ async fn send_error(state: &AppState, message: &str) {
 
 /// Strip the receiving client's own player from outbound
 /// `EntityUpdates`, dropping the message entirely if that was
-/// the only entity in it. Other message kinds pass through
-/// unchanged.
+/// the only entity in it. SceneEvents authored by `self_id` are
+/// dropped wholesale (per ADR-006: optimistic-local means the
+/// originator already played the effect — server-rebroadcast
+/// is for OTHERS). Other message kinds pass through unchanged.
 fn filter_self_echo(msg: ServerMessage, self_id: EntityId) -> Option<ServerMessage> {
     match msg {
         ServerMessage::EntityUpdates { entities } => {
@@ -235,6 +262,13 @@ fn filter_self_echo(msg: ServerMessage, self_id: EntityId) -> Option<ServerMessa
                 None
             } else {
                 Some(ServerMessage::EntityUpdates { entities: filtered })
+            }
+        }
+        ServerMessage::SceneEvent { actor_id, event } => {
+            if actor_id == Some(self_id) {
+                None
+            } else {
+                Some(ServerMessage::SceneEvent { actor_id, event })
             }
         }
         // FullState, EntityDeleted, Error all relevant to the
@@ -250,6 +284,9 @@ async fn cleanup(state: &AppState, ip: &str, player_id: EntityId) {
             ids: vec![player_id],
         });
     }
+    // Drop the rate-tracker history for this actor so its memory
+    // doesn't grow unbounded over a long-running server.
+    state.event_rate.write().await.forget(player_id);
     state.release_connection(ip).await;
     info!(ip = %ip, "websocket disconnected");
 }
@@ -313,5 +350,59 @@ mod tests {
             filtered,
             Some(ServerMessage::EntityDeleted { .. })
         ));
+    }
+
+    #[test]
+    fn filter_self_echo_drops_scene_events_authored_by_self() {
+        let me = make_entity();
+        let event = SceneEventKind::Audio {
+            sound_id: "click".to_string(),
+            position: None,
+            volume: 0.5,
+        };
+        let msg = ServerMessage::SceneEvent {
+            actor_id: Some(me.id),
+            event,
+        };
+        // Originator already played locally — server must not echo back.
+        assert!(filter_self_echo(msg, me.id).is_none());
+    }
+
+    #[test]
+    fn filter_self_echo_passes_scene_events_from_other_actors() {
+        let me = make_entity();
+        let other = make_entity();
+        let event = SceneEventKind::SwordImpact {
+            position: [1.0, 2.0, 3.0],
+        };
+        let msg = ServerMessage::SceneEvent {
+            actor_id: Some(other.id),
+            event,
+        };
+        let filtered = filter_self_echo(msg, me.id);
+        match filtered {
+            Some(ServerMessage::SceneEvent { actor_id, .. }) => {
+                assert_eq!(actor_id, Some(other.id));
+            }
+            _ => panic!("expected SceneEvent forwarded"),
+        }
+    }
+
+    #[test]
+    fn filter_self_echo_passes_anonymous_scene_events() {
+        let me = make_entity();
+        // Anonymous events (actor_id == None) are reserved for
+        // future server-originated effects (world-wide announcements).
+        // They should fan out to everyone, including the receiver.
+        let event = SceneEventKind::Audio {
+            sound_id: "broadcast".to_string(),
+            position: None,
+            volume: 1.0,
+        };
+        let msg = ServerMessage::SceneEvent {
+            actor_id: None,
+            event,
+        };
+        assert!(filter_self_echo(msg, me.id).is_some());
     }
 }
