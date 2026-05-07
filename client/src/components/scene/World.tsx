@@ -18,6 +18,7 @@ import { InteractionController } from './Interactable';
 import { RouteBoxes } from './RouteBoxes';
 import { RouteContent3D } from './RouteContent3D';
 import { Portals } from './portal/Portals';
+import { RemotePlayers } from './RemotePlayers';
 
 export function World(): JSX.Element {
   const environment = useWorldStore((s) => s.environment);
@@ -31,6 +32,7 @@ export function World(): JSX.Element {
       <RouteBoxes />
       <RouteContent3D />
       <Portals />
+      <RemotePlayers />
       <RevealOrchestrator />
       <InteractionController />
       <SkyBackground dimensions={environment.dimensions} />

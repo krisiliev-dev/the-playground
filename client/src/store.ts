@@ -14,6 +14,7 @@ import type { AppState, EnvironmentConfig, Player } from '@/types';
 import { generateId } from '@/utils/id';
 import { DEFAULT_ENVIRONMENT } from '@/utils/defaults';
 import type { PortalEndpoint } from '@/content/portals';
+import type { Entity, EntityId } from '@/multiplayer/types';
 
 // ─── Phase 4 — Sword + VIBE Reveal ───────────────────────────────────
 
@@ -260,6 +261,29 @@ function persistDocumentMode(mode: boolean): void {
   }
 }
 
+/**
+ * Server-authoritative entity mirror — clients see the world via
+ * this slice (per ADR-004). Populated by `useMultiplayerSync`:
+ * `FullState` on connect seeds the map, subsequent
+ * `EntityUpdates` upsert by id, `EntityDeleted` removes.
+ *
+ * `localPlayerId` flags which entity in the map is the client's
+ * own player so rendering code can skip drawing a remote avatar
+ * over the local one.
+ */
+interface MultiplayerSlice {
+  entities: ReadonlyMap<EntityId, Entity>;
+  localPlayerId: EntityId | null;
+  /** Insert or replace many entities at once. Used for the
+   *  initial `FullState` and per-tick `EntityUpdates`. */
+  upsertEntities: (entities: ReadonlyArray<Entity>) => void;
+  removeEntities: (ids: ReadonlyArray<EntityId>) => void;
+  setLocalPlayerId: (id: EntityId | null) => void;
+  /** Called on socket close so a stale remote-avatar map doesn't
+   *  linger across reconnects. */
+  clearAllEntities: () => void;
+}
+
 interface InteractionSlice {
   /** Id of the interactable the crosshair is currently aimed at,
    *  or null if nothing is in range. Updated by the InteractionController
@@ -285,116 +309,142 @@ interface InteractionSlice {
   pressedTargetPoint: [number, number, number] | null;
 }
 
-export const useWorldStore = create<AppState & AppActions & RevealSlice & InteractionSlice>(
-  (set) => ({
-    // State
-    player: createInitialPlayer(),
-    environment: DEFAULT_ENVIRONMENT,
-    activeZoneId: null,
-    isReady: false,
-    revealState: 'idle',
-    clickHit: null,
-    controlsDismissed: false,
-    menuOpen: false,
-    documentMode: readPersistedDocumentMode(),
-    pendingPointerLock: false,
-    pendingNavigation: null,
-    currentRoom: null,
-    currentRoute: '/',
-    pendingAvatarTeleport: null,
-    leapTarget: null,
-    pendingPortalClick: null,
-    portalEndpoints: [],
-    lastExitedRoom: null,
-    muted: false,
-    // Avatar lives from page load — small at first (cursor-sized), then grows
-    // once the reveal completes. See CursorAvatar.tsx for the scale logic.
-    cursorAvatarActive: true,
-    hoveredInteractableId: null,
-    hoveredInteractablePoint: null,
-    pressedInteractableId: null,
-    pressedTargetPoint: null,
+export const useWorldStore = create<
+  AppState & AppActions & RevealSlice & MultiplayerSlice & InteractionSlice
+>((set) => ({
+  // State
+  player: createInitialPlayer(),
+  environment: DEFAULT_ENVIRONMENT,
+  activeZoneId: null,
+  isReady: false,
+  revealState: 'idle',
+  clickHit: null,
+  controlsDismissed: false,
+  menuOpen: false,
+  documentMode: readPersistedDocumentMode(),
+  pendingPointerLock: false,
+  pendingNavigation: null,
+  currentRoom: null,
+  currentRoute: '/',
+  pendingAvatarTeleport: null,
+  leapTarget: null,
+  pendingPortalClick: null,
+  portalEndpoints: [],
+  lastExitedRoom: null,
+  muted: false,
+  // Avatar lives from page load — small at first (cursor-sized), then grows
+  // once the reveal completes. See CursorAvatar.tsx for the scale logic.
+  cursorAvatarActive: true,
+  entities: new Map(),
+  localPlayerId: null,
+  hoveredInteractableId: null,
+  hoveredInteractablePoint: null,
+  pressedInteractableId: null,
+  pressedTargetPoint: null,
 
-    // Actions
-    setPlayerPosition: (position) =>
-      set((state) => ({
-        player: { ...state.player, position },
-      })),
+  // Actions
+  setPlayerPosition: (position) =>
+    set((state) => ({
+      player: { ...state.player, position },
+    })),
 
-    setPlayerRotation: (rotation) =>
-      set((state) => ({
-        player: { ...state.player, rotation },
-      })),
+  setPlayerRotation: (rotation) =>
+    set((state) => ({
+      player: { ...state.player, rotation },
+    })),
 
-    setActiveZone: (zoneId) => set({ activeZoneId: zoneId }),
+  setActiveZone: (zoneId) => set({ activeZoneId: zoneId }),
 
-    updateEnvironment: (config) => set({ environment: config }),
+  updateEnvironment: (config) => set({ environment: config }),
 
-    setReady: (ready) => set({ isReady: ready }),
+  setReady: (ready) => set({ isReady: ready }),
 
-    advanceReveal: () =>
-      set((state) => {
-        const idx = REVEAL_ORDER.indexOf(state.revealState);
-        if (idx < 0 || idx >= REVEAL_ORDER.length - 1) {
-          return state;
-        }
-        const next = REVEAL_ORDER[idx + 1];
-        if (!next) {
-          return state;
-        }
-        return { revealState: next };
-      }),
+  advanceReveal: () =>
+    set((state) => {
+      const idx = REVEAL_ORDER.indexOf(state.revealState);
+      if (idx < 0 || idx >= REVEAL_ORDER.length - 1) {
+        return state;
+      }
+      const next = REVEAL_ORDER[idx + 1];
+      if (!next) {
+        return state;
+      }
+      return { revealState: next };
+    }),
 
-    resetReveal: () =>
-      set({
-        revealState: 'idle',
-        clickHit: null,
-        controlsDismissed: false,
-        portalEndpoints: [],
-      }),
+  resetReveal: () =>
+    set({
+      revealState: 'idle',
+      clickHit: null,
+      controlsDismissed: false,
+      portalEndpoints: [],
+    }),
 
-    setPendingPointerLock: (pending) => set({ pendingPointerLock: pending }),
+  setPendingPointerLock: (pending) => set({ pendingPointerLock: pending }),
 
-    setPendingNavigation: (path) => set({ pendingNavigation: path }),
+  setPendingNavigation: (path) => set({ pendingNavigation: path }),
 
-    setCurrentRoom: (roomId) => set({ currentRoom: roomId }),
+  setCurrentRoom: (roomId) => set({ currentRoom: roomId }),
 
-    setCurrentRoute: (path) => set({ currentRoute: path }),
+  setCurrentRoute: (path) => set({ currentRoute: path }),
 
-    setPendingAvatarTeleport: (path) => set({ pendingAvatarTeleport: path }),
-    setLeapTarget: (target) => set({ leapTarget: target }),
-    setPendingPortalClick: (sourcePortalId) => set({ pendingPortalClick: sourcePortalId }),
-    setPortalEndpoints: (endpoints) => set({ portalEndpoints: endpoints }),
+  setPendingAvatarTeleport: (path) => set({ pendingAvatarTeleport: path }),
+  setLeapTarget: (target) => set({ leapTarget: target }),
+  setPendingPortalClick: (sourcePortalId) => set({ pendingPortalClick: sourcePortalId }),
+  setPortalEndpoints: (endpoints) => set({ portalEndpoints: endpoints }),
 
-    setLastExitedRoom: (roomId) => set({ lastExitedRoom: roomId }),
+  setLastExitedRoom: (roomId) => set({ lastExitedRoom: roomId }),
 
-    setMuted: (muted) => set({ muted }),
+  setMuted: (muted) => set({ muted }),
 
-    setClickHit: (hit) => set({ clickHit: hit }),
+  setClickHit: (hit) => set({ clickHit: hit }),
 
-    toggleCursorAvatar: () => set((state) => ({ cursorAvatarActive: !state.cursorAvatarActive })),
+  toggleCursorAvatar: () => set((state) => ({ cursorAvatarActive: !state.cursorAvatarActive })),
 
-    setCursorAvatarActive: (active) => set({ cursorAvatarActive: active }),
+  setCursorAvatarActive: (active) => set({ cursorAvatarActive: active }),
 
-    setControlsDismissed: (dismissed) => set({ controlsDismissed: dismissed }),
+  setControlsDismissed: (dismissed) => set({ controlsDismissed: dismissed }),
 
-    setMenuOpen: (open) => set({ menuOpen: open }),
+  setMenuOpen: (open) => set({ menuOpen: open }),
 
-    setDocumentMode: (mode) => {
-      persistDocumentMode(mode);
-      set({ documentMode: mode });
-    },
+  setDocumentMode: (mode) => {
+    persistDocumentMode(mode);
+    set({ documentMode: mode });
+  },
 
-    setHoveredInteractable: (id, point = null) =>
-      // Always pair id + point: when id is null, point should also be
-      // null (no hover, no surface). When id is non-null, callers
-      // SHOULD pass a point — but if they don't (legacy call sites),
-      // we clear the point so it can't go stale relative to the id.
-      set({ hoveredInteractableId: id, hoveredInteractablePoint: id ? point : null }),
+  setHoveredInteractable: (id, point = null) =>
+    // Always pair id + point: when id is null, point should also be
+    // null (no hover, no surface). When id is non-null, callers
+    // SHOULD pass a point — but if they don't (legacy call sites),
+    // we clear the point so it can't go stale relative to the id.
+    set({ hoveredInteractableId: id, hoveredInteractablePoint: id ? point : null }),
 
-    beginInteractPress: (id, point) =>
-      set({ pressedInteractableId: id, pressedTargetPoint: point }),
+  beginInteractPress: (id, point) => set({ pressedInteractableId: id, pressedTargetPoint: point }),
 
-    endInteractPress: () => set({ pressedInteractableId: null, pressedTargetPoint: null }),
-  }),
-);
+  endInteractPress: () => set({ pressedInteractableId: null, pressedTargetPoint: null }),
+
+  // Multiplayer slice. The Map is rebuilt for each mutation so
+  // Zustand's `Object.is` shallow-equality fires for subscribers
+  // — mutating a held Map in place would silently skip renders.
+  upsertEntities: (entities) =>
+    set((state) => {
+      const next = new Map(state.entities);
+      for (const entity of entities) {
+        next.set(entity.id, entity);
+      }
+      return { entities: next };
+    }),
+
+  removeEntities: (ids) =>
+    set((state) => {
+      const next = new Map(state.entities);
+      for (const id of ids) {
+        next.delete(id);
+      }
+      return { entities: next };
+    }),
+
+  setLocalPlayerId: (id) => set({ localPlayerId: id }),
+
+  clearAllEntities: () => set({ entities: new Map(), localPlayerId: null }),
+}));

@@ -15,6 +15,7 @@ import { isInteractionSynthSuppressed } from '@/components/scene/Interactable';
 import { SectionPage } from '@/routes/SectionPage';
 import { DocumentShell } from '@/components/document';
 import { useWorldStore } from '@/store';
+import { useMultiplayerSync } from '@/multiplayer/useMultiplayerSync';
 import { acquirePointerLock } from '@/utils';
 import { CubeScene } from '@/scenes/CubeScene';
 import { SceneHost } from '@/scenes/SceneHost';
@@ -243,10 +244,22 @@ function FrameLoopController(): null {
   return null;
 }
 
+/** Multiplayer WS URL — `VITE_MULTIPLAYER_URL` at build time, e.g.
+ *  `ws://localhost:8080/ws` in dev. Empty string disables the
+ *  hook so the app still runs single-player when the server isn't
+ *  reachable (CI builds, offline deploys, etc.). */
+const MULTIPLAYER_URL: string = (
+  (import.meta.env as { VITE_MULTIPLAYER_URL?: string }).VITE_MULTIPLAYER_URL ?? ''
+).trim();
+
 export function App(): JSX.Element {
   useGlobalMouseFeedback();
   useAvatarDevHotkey();
   useAudioMute();
+  useMultiplayerSync({
+    url: MULTIPLAYER_URL,
+    enabled: MULTIPLAYER_URL.length > 0,
+  });
   // Simple Experience document mode. When true, the 3D scene
   // (Canvas + cursor + animations) is *paused and hidden* rather
   // than torn down: FrameLoopController stops calling invalidate so

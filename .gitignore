@@ -9,6 +9,12 @@ client/node_modules
 client/dist/
 client/storybook-static/
 server/target/
+# Runtime-written scene snapshot (per ADR-004). Operator-authored
+# state, not source — the default path is `state.json` next to the
+# server binary. Production deploys can point STATE_FILE elsewhere.
+server/state.json
+server/state.json.tmp
+server/state.json.probe
 
 # ── IDE / Editor ────────────────────────────────────────────────────
 .vscode/

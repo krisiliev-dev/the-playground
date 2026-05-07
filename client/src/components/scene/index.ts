@@ -4,6 +4,7 @@ export { RouteBoxes } from './RouteBoxes';
 export { GridMaterial } from './GridMaterial';
 export { SkyBackground } from './SkyBackground';
 export { CursorAvatar } from './CursorAvatar';
+export { RemotePlayers } from './RemotePlayers';
 export { PostFx } from './PostFx';
 export { DevTools } from './DevTools';
 export { ShakeGroup } from './ShakeGroup';
