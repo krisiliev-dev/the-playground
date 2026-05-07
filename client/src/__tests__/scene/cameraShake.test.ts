@@ -121,6 +121,40 @@ describe('cameraShake', () => {
       triggerImpactShake(0, -1);
       expect(computeShakeOffset(0.05)).toEqual([0, 0, 0]);
     });
+
+    it('a single impulse with weight > stacking cap drives full magnitude', () => {
+      // Stacking cap is 1.5 (protects against many-player slam
+      // clusters). But a *single* large impulse — e.g. an admin-
+      // triggered shake with intensity > 1 — should produce its
+      // full magnitude even though it nominally exceeds the cap.
+      // Without this rule, admin events couldn't author bigger
+      // shakes than the local default.
+      triggerImpactShake(0, 5.0);
+      // mag = SHAKE_MAGNITUDE * effective_intensity. With single
+      // largest = 5.0, effective ≥ 5.0 → mag = 0.45 * 5 = 2.25.
+      // Each axis offset ∈ [-2.25, 2.25]. We sample many frames
+      // and look for a max-observed-abs that exceeds the
+      // stacking-cap-only ceiling of 0.675.
+      let maxObservedAbs = 0;
+      for (let i = 0; i < 500; i++) {
+        const [x, y] = computeShakeOffset(0.001);
+        maxObservedAbs = Math.max(maxObservedAbs, Math.abs(x), Math.abs(y));
+      }
+      // If the cap were applied to a single impulse, max would be
+      // ≤ 0.675. The new behaviour pushes well past that.
+      expect(maxObservedAbs).toBeGreaterThan(1.0);
+    });
+
+    it('respects per-impulse duration override (admin can author longer shakes)', () => {
+      // Default duration is 0.18s; this impulse uses 0.5s.
+      triggerImpactShake(0, 1.0, 0.5);
+      // At t=0.3 (past default duration but within custom), the
+      // impulse should still contribute non-zero output.
+      const [x, y] = computeShakeOffset(0.3);
+      expect(Math.abs(x) + Math.abs(y)).toBeGreaterThan(0);
+      // At t=0.6 (past custom duration), back to zero.
+      expect(computeShakeOffset(0.6)).toEqual([0, 0, 0]);
+    });
   });
 });
 

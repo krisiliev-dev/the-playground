@@ -48,7 +48,15 @@ export function MultiplayerEffectsReceiver(): null {
     if (falloff <= 0) {
       return;
     }
-    triggerImpactShake(performance.now() / 1000, falloff * event.intensity);
+    // Pass through both the (attenuated) weight and the event's
+    // own duration so admin-triggered events with custom
+    // duration_ms actually shake for that long, instead of being
+    // silently truncated to the local default.
+    triggerImpactShake(
+      performance.now() / 1000,
+      falloff * event.intensity,
+      event.duration_ms / 1000,
+    );
   });
 
   return null;
