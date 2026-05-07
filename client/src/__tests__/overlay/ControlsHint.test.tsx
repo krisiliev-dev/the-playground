@@ -73,6 +73,8 @@ describe('ControlsHint', () => {
     expect(screen.getByText('look around')).toBeInTheDocument();
     expect(screen.getByText('click / hold')).toBeInTheDocument();
     expect(screen.getByText('interact')).toBeInTheDocument();
+    expect(screen.getByText('M')).toBeInTheDocument();
+    expect(screen.getByText('menu')).toBeInTheDocument();
     expect(screen.getByText('click anywhere to dismiss')).toBeInTheDocument();
   });
 
@@ -87,6 +89,8 @@ describe('ControlsHint', () => {
     expect(screen.getByText('swipe to look')).toBeInTheDocument();
     expect(screen.getByText('tap / hold')).toBeInTheDocument();
     expect(screen.getByText('interact')).toBeInTheDocument();
+    expect(screen.getByText('≡')).toBeInTheDocument();
+    expect(screen.getByText('menu')).toBeInTheDocument();
     expect(screen.getByText('tap anywhere to dismiss')).toBeInTheDocument();
   });
 

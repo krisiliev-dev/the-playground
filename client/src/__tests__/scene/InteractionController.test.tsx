@@ -128,6 +128,7 @@ describe('InteractionController click commit path', () => {
       hoveredInteractableId: null,
       pressedInteractableId: null,
       pressedTargetPoint: null,
+      menuOpen: false,
     });
     interactableHandlers.clear();
   });
@@ -325,6 +326,91 @@ describe('InteractionController click commit path', () => {
     expect(handler).not.toHaveBeenCalled();
 
     setTouchInProgress(false);
+  });
+
+  it('mousedown bails when menuOpen is true (clicks belong to the menu)', () => {
+    useWorldStore.setState({
+      hoveredInteractableId: 'cube-A',
+      hoveredInteractablePoint: [1, 2, 3],
+      menuOpen: true,
+    });
+
+    render(<InteractionController />);
+    window.dispatchEvent(new MouseEvent('mousedown'));
+
+    // No press started — the menuOpen gate intercepted the handler
+    // before it could call beginInteractPress.
+    expect(useWorldStore.getState().pressedInteractableId).toBeNull();
+  });
+
+  it('mouseup bails when menuOpen is true (no spurious release while menu is up)', () => {
+    useWorldStore.setState({
+      hoveredInteractableId: 'cube-A',
+      hoveredInteractablePoint: [1, 2, 3],
+    });
+    useWorldStore.getState().beginInteractPress('cube-A', [1, 2, 3]);
+    // Now flip the menu open mid-press.
+    useWorldStore.setState({ menuOpen: true });
+
+    render(<InteractionController />);
+    window.dispatchEvent(new MouseEvent('mouseup'));
+
+    // mouseup gated by menuOpen; the press is *not* released here.
+    // (PauseMenu's open-side-effect handles cleanup via
+    // endInteractPress; this is the gate that keeps the controller's
+    // mouseup from also acting on the menu's backdrop click.)
+    expect(useWorldStore.getState().pressedInteractableId).toBe('cube-A');
+  });
+
+  it('mousedown bails when pointer-lock is null in avatar mode (re-engage click)', () => {
+    // Explicitly pin pointerLockElement to null — production browsers
+    // expose this as null when no lock is active. jsdom leaves it
+    // undefined, so we inject the production-shape value here.
+    Object.defineProperty(document, 'pointerLockElement', {
+      configurable: true,
+      get: () => null,
+    });
+    useWorldStore.setState({
+      hoveredInteractableId: 'cube-A',
+      hoveredInteractablePoint: [1, 2, 3],
+    });
+
+    render(<InteractionController />);
+    window.dispatchEvent(new MouseEvent('mousedown'));
+
+    // The click was a "re-engage controls" gesture (acquires
+    // pointer-lock). Don't *also* fire a press on the crosshair's
+    // current target.
+    expect(useWorldStore.getState().pressedInteractableId).toBeNull();
+
+    // Restore default jsdom behaviour for subsequent tests.
+    Object.defineProperty(document, 'pointerLockElement', {
+      configurable: true,
+      get: () => undefined,
+    });
+  });
+
+  it('mousedown fires press when pointer-lock is active', () => {
+    const canvas = document.createElement('canvas');
+    Object.defineProperty(document, 'pointerLockElement', {
+      configurable: true,
+      get: () => canvas,
+    });
+    useWorldStore.setState({
+      hoveredInteractableId: 'cube-A',
+      hoveredInteractablePoint: [4, 5, 6],
+    });
+
+    render(<InteractionController />);
+    window.dispatchEvent(new MouseEvent('mousedown'));
+
+    // Lock is active → click is interaction, not re-engage.
+    expect(useWorldStore.getState().pressedInteractableId).toBe('cube-A');
+
+    Object.defineProperty(document, 'pointerLockElement', {
+      configurable: true,
+      get: () => undefined,
+    });
   });
 
   it('clears the pressed state on mouseup (long-held synchronous path)', () => {

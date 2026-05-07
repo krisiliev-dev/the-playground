@@ -224,4 +224,116 @@ describe('useWorldStore', () => {
       expect(useWorldStore.getState().clickHit).toBeNull();
     });
   });
+
+  describe('pendingPointerLock', () => {
+    beforeEach(() => {
+      useWorldStore.getState().setPendingPointerLock(false);
+    });
+
+    it('defaults to false', () => {
+      expect(useWorldStore.getState().pendingPointerLock).toBe(false);
+    });
+
+    it('setPendingPointerLock toggles the flag', () => {
+      useWorldStore.getState().setPendingPointerLock(true);
+      expect(useWorldStore.getState().pendingPointerLock).toBe(true);
+      useWorldStore.getState().setPendingPointerLock(false);
+      expect(useWorldStore.getState().pendingPointerLock).toBe(false);
+    });
+  });
+
+  describe('muted', () => {
+    beforeEach(() => {
+      useWorldStore.getState().setMuted(false);
+    });
+
+    it('defaults to false', () => {
+      expect(useWorldStore.getState().muted).toBe(false);
+    });
+
+    it('setMuted toggles the flag', () => {
+      useWorldStore.getState().setMuted(true);
+      expect(useWorldStore.getState().muted).toBe(true);
+      useWorldStore.getState().setMuted(false);
+      expect(useWorldStore.getState().muted).toBe(false);
+    });
+  });
+
+  describe('pendingNavigation', () => {
+    beforeEach(() => {
+      useWorldStore.getState().setPendingNavigation(null);
+    });
+
+    it('defaults to null', () => {
+      expect(useWorldStore.getState().pendingNavigation).toBeNull();
+    });
+
+    it('setPendingNavigation stores a path and clears it back to null', () => {
+      useWorldStore.getState().setPendingNavigation('/about');
+      expect(useWorldStore.getState().pendingNavigation).toBe('/about');
+      useWorldStore.getState().setPendingNavigation(null);
+      expect(useWorldStore.getState().pendingNavigation).toBeNull();
+    });
+  });
+
+  describe('lastExitedRoom', () => {
+    beforeEach(() => {
+      useWorldStore.getState().setLastExitedRoom(null);
+    });
+
+    it('defaults to null (no rooms exited yet)', () => {
+      expect(useWorldStore.getState().lastExitedRoom).toBeNull();
+    });
+
+    it('records and clears the most recently exited room id', () => {
+      useWorldStore.getState().setLastExitedRoom('room-about');
+      expect(useWorldStore.getState().lastExitedRoom).toBe('room-about');
+      useWorldStore.getState().setLastExitedRoom('room-projects');
+      expect(useWorldStore.getState().lastExitedRoom).toBe('room-projects');
+      useWorldStore.getState().setLastExitedRoom(null);
+      expect(useWorldStore.getState().lastExitedRoom).toBeNull();
+    });
+  });
+
+  describe('documentMode', () => {
+    beforeEach(() => {
+      // Each test starts from documentMode === false with a clean
+      // localStorage so persistence assertions are deterministic.
+      window.localStorage.clear();
+      useWorldStore.getState().setDocumentMode(false);
+      window.localStorage.clear();
+    });
+
+    it('defaults to a boolean (false in test env without prior persistence)', () => {
+      const { documentMode } = useWorldStore.getState();
+      expect(typeof documentMode).toBe('boolean');
+      expect(documentMode).toBe(false);
+    });
+
+    it('setDocumentMode flips the flag', () => {
+      useWorldStore.getState().setDocumentMode(true);
+      expect(useWorldStore.getState().documentMode).toBe(true);
+      useWorldStore.getState().setDocumentMode(false);
+      expect(useWorldStore.getState().documentMode).toBe(false);
+    });
+
+    it('persists the chosen value to localStorage', () => {
+      useWorldStore.getState().setDocumentMode(true);
+      expect(window.localStorage.getItem('documentMode')).toBe('true');
+      useWorldStore.getState().setDocumentMode(false);
+      expect(window.localStorage.getItem('documentMode')).toBe('false');
+    });
+
+    it('does not mutate revealState (Canvas pauses cleanly across mode toggles)', () => {
+      // The Canvas now stays mounted with `frameloop="never"`
+      // when documentMode is true, so animation refs and timers
+      // are preserved as-is — there's nothing to "fast-forward".
+      // Toggling modes is a pure visibility + render-loop change.
+      useWorldStore.setState({ revealState: 'swinging' });
+      useWorldStore.getState().setDocumentMode(true);
+      expect(useWorldStore.getState().revealState).toBe('swinging');
+      useWorldStore.getState().setDocumentMode(false);
+      expect(useWorldStore.getState().revealState).toBe('swinging');
+    });
+  });
 });

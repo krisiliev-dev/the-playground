@@ -11,6 +11,7 @@ import {
   computeInitialPanProgress,
   computeLeanTarget,
   computePinchVelocity,
+  computeWalkLeanTarget,
   computeWalkVector,
   computeWallProximity,
   projectNDCToWorld,
@@ -261,6 +262,50 @@ describe('clampToBoxInterior', () => {
     expect(ret).toBe(pos);
     expect(pos.x).toBe(32);
   });
+
+  describe('with portalHole', () => {
+    // Hole on the +X wall (point [40, 0, 0], inward normal [-1, 0, 0]),
+    // disc radius 10. Avatar projection onto the wall plane is just
+    // (y, z); inside-disc means sqrt(y² + z²) < 10.
+    const PLUS_X_HOLE = {
+      center: new Vector3(40, 0, 0),
+      normal: new Vector3(-1, 0, 0),
+      radius: 10,
+    };
+
+    it('skips the +X clamp when the avatar projects inside the disc', () => {
+      // Avatar past the +X wall (x > 32 = limX) but tangentially
+      // centred → in the hole → +X clamp doesn't fire.
+      const pos = new Vector3(100, 0, 0);
+      clampToBoxInterior(pos, HALF, 8, PLUS_X_HOLE);
+      expect(pos.x).toBe(100);
+    });
+
+    it('still clamps the +X wall when the projection is outside the disc', () => {
+      // Avatar past the +X wall but tangentially way out (y = 50 >
+      // disc radius 10) → not in hole → normal clamp.
+      const pos = new Vector3(100, 50, 0);
+      clampToBoxInterior(pos, HALF, 8, PLUS_X_HOLE);
+      expect(pos.x).toBe(32);
+      // Y also clamps independently because (50 > 32 = limY).
+      expect(pos.y).toBe(32);
+    });
+
+    it('still clamps the OPPOSITE (-X) wall even when in the +X hole', () => {
+      // Hole is one-sided. An avatar in the hole's tangent zone
+      // but on the wrong side of the cube can't tunnel through to
+      // the +X wall via a non-existent -X exception.
+      const pos = new Vector3(-100, 0, 0);
+      clampToBoxInterior(pos, HALF, 8, PLUS_X_HOLE);
+      expect(pos.x).toBe(-32);
+    });
+
+    it('passes through when no portalHole is provided (back-compat)', () => {
+      const pos = new Vector3(100, 0, 0);
+      clampToBoxInterior(pos, HALF, 8);
+      expect(pos.x).toBe(32);
+    });
+  });
 });
 
 describe('setYawQuat', () => {
@@ -387,5 +432,50 @@ describe('computeCameraCollisionRatio', () => {
     // No Y collision considered — only X drives. avatar X=0, offset
     // 20 in X. X wall at 37. ratio = 37/20 = 1.85 → clamped to 1.
     expect(ratio).toBe(1);
+  });
+});
+
+describe('computeWalkLeanTarget', () => {
+  const idle = { w: false, a: false, s: false, d: false } as const;
+  const LEAN_MAX = (20 * Math.PI) / 180; // matches CursorAvatar.tsx
+
+  it('returns 0 when no forward input is active', () => {
+    expect(computeWalkLeanTarget(idle, 0, LEAN_MAX)).toBe(0);
+  });
+
+  it('W alone tilts forward by the full lean budget', () => {
+    expect(computeWalkLeanTarget({ ...idle, w: true }, 0, LEAN_MAX)).toBeCloseTo(LEAN_MAX, 10);
+  });
+
+  it('S alone tilts backward by the full lean budget (negative)', () => {
+    expect(computeWalkLeanTarget({ ...idle, s: true }, 0, LEAN_MAX)).toBeCloseTo(-LEAN_MAX, 10);
+  });
+
+  it('A and D do not contribute to the forward lean', () => {
+    expect(computeWalkLeanTarget({ ...idle, a: true }, 0, LEAN_MAX)).toBe(0);
+    expect(computeWalkLeanTarget({ ...idle, d: true }, 0, LEAN_MAX)).toBe(0);
+  });
+
+  it('partial touch throttle scales linearly inside the [-1, 1] window', () => {
+    expect(computeWalkLeanTarget(idle, 0.5, LEAN_MAX)).toBeCloseTo(0.5 * LEAN_MAX, 10);
+    expect(computeWalkLeanTarget(idle, -0.25, LEAN_MAX)).toBeCloseTo(-0.25 * LEAN_MAX, 10);
+  });
+
+  it('W + full forward touch clamps at the lean budget (no extra tilt)', () => {
+    // The clamp is the load-bearing detail: pushing harder than 1
+    // forward unit must NOT tilt the avatar past the visual budget.
+    expect(computeWalkLeanTarget({ ...idle, w: true }, 1, LEAN_MAX)).toBeCloseTo(LEAN_MAX, 10);
+  });
+
+  it('S + full backward touch clamps at -lean budget', () => {
+    expect(computeWalkLeanTarget({ ...idle, s: true }, -1, LEAN_MAX)).toBeCloseTo(-LEAN_MAX, 10);
+  });
+
+  it('W + S cancel out (both true → zero forward input → zero lean)', () => {
+    expect(computeWalkLeanTarget({ ...idle, w: true, s: true }, 0, LEAN_MAX)).toBe(0);
+  });
+
+  it('passing leanMaxRad=0 silences the lean for any input', () => {
+    expect(computeWalkLeanTarget({ ...idle, w: true }, 1, 0)).toBe(0);
   });
 });

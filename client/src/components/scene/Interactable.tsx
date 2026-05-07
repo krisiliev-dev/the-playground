@@ -185,7 +185,20 @@ export function InteractionController(): null {
   const endInteractPress = useWorldStore((s) => s.endInteractPress);
 
   const { camera, scene } = useThree();
-  const raycaster = useMemo(() => new Raycaster(), []);
+  const raycaster = useMemo(() => {
+    const r = new Raycaster();
+    // Enable every layer on the raycaster so meshes parked on
+    // non-default layers (e.g. portal surface planes on
+    // PORTAL_SURFACE_LAYER) still register hits. Layers are a
+    // *rendering* filter, not an interaction filter — what's
+    // interactable is gated by `userData.interactable` below.
+    // Without this, default raycaster.layers (only layer 0) rejects
+    // any non-zero-layer mesh before the userData check runs, so
+    // portals never light up as hovered and click-through never
+    // fires.
+    r.layers.enableAll();
+    return r;
+  }, []);
   /** NDC of the crosshair — always (0, 0) since the crosshair is
    *  fixed at screen centre. */
   const screenCentre = useMemo(() => new Vector2(0, 0), []);
@@ -263,6 +276,29 @@ export function InteractionController(): null {
       if (!state.controlsDismissed) {
         return;
       }
+      // Pause-menu open: clicks belong to the menu, not the 3D
+      // crosshair pipeline. Without this gate, clicking the menu
+      // backdrop (which closes the menu) would also fire a
+      // crosshair-driven press on whatever happens to be under
+      // screen-centre, leading to the "menu closed but I'm still
+      // controlling the avatar" symptom.
+      if (state.menuOpen) {
+        return;
+      }
+      // Pointer-lock not active: this click is a "re-engage
+      // controls" gesture (the canvas onClick will request
+      // pointer-lock on the same click). Don't *also* fire an
+      // interactable press — the user wants their controls back,
+      // not to grab the first thing their crosshair was over.
+      // Once pointer-lock is active, subsequent clicks fire
+      // presses normally.
+      if (
+        typeof document !== 'undefined' &&
+        document.pointerLockElement === null &&
+        state.controlsDismissed
+      ) {
+        return;
+      }
       const hoveredId = state.hoveredInteractableId;
       const hoveredPoint = state.hoveredInteractablePoint;
       if (!hoveredId || !hoveredPoint) {
@@ -286,6 +322,9 @@ export function InteractionController(): null {
         return;
       }
       const state = useWorldStore.getState();
+      if (state.menuOpen) {
+        return;
+      }
       const pressedId = state.pressedInteractableId;
       // Commit: only if the press still targets the currently-hovered
       // interactable (i.e. mouse-down and mouse-up landed on the same

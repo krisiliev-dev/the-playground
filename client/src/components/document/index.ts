@@ -1,0 +1,1 @@
+export { DocumentShell } from './DocumentShell';

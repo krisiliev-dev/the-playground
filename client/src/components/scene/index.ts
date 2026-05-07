@@ -1,5 +1,6 @@
 export { World } from './World';
-export { BoxEnvironment } from './BoxEnvironment';
+export { RoomBox } from './RoomBox';
+export { RouteBoxes } from './RouteBoxes';
 export { GridMaterial } from './GridMaterial';
 export { SkyBackground } from './SkyBackground';
 export { CursorAvatar } from './CursorAvatar';
@@ -7,7 +8,6 @@ export { PostFx } from './PostFx';
 export { DevTools } from './DevTools';
 export { ShakeGroup } from './ShakeGroup';
 export { useInteractable, InteractionController, INTERACTION_CONSTANTS } from './Interactable';
-export { InteractableTestCube } from './InteractableTestCube';
 export {
   Portal,
   Sword,

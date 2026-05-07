@@ -144,6 +144,29 @@ export function computeWalkVector(
 }
 
 /**
+ * Walk-lean target angle (radians, around the avatar's local X axis).
+ * Forward input — the same `(W ? 1 : 0) - (S ? 1 : 0) + touchWalkVelocity`
+ * sum used by `computeWalkVector` — is clamped to `[-1, +1]` and
+ * scaled by `leanMaxRad`. The caller smooths the result toward the
+ * current lean so the body eases in and out of the tilt instead of
+ * snapping.
+ *
+ * Clamping at the input rather than after multiplication preserves
+ * the semantics: a player holding W and pushing the touch throttle
+ * fully forward gets the same lean as either input alone — pushing
+ * harder doesn't tilt them more than the visual budget allows.
+ */
+export function computeWalkLeanTarget(
+  keys: WalkKeys,
+  touchWalkVelocity: number,
+  leanMaxRad: number,
+): number {
+  const fwdInput = (keys.w ? 1 : 0) - (keys.s ? 1 : 0) + touchWalkVelocity;
+  const clamped = Math.max(-1, Math.min(1, fwdInput));
+  return clamped * leanMaxRad;
+}
+
+/**
  * Wall-proximity factor (0..1) for the wall-ambient drone. 0 when the
  * avatar is at the cube centre, 1 when it touches a wall. Uses the
  * NEAREST wall (any axis) — the avatar is always closest to a single
@@ -167,25 +190,132 @@ export function computeWallProximity(
  * caller already owns `pos`. Used for both the avatar's body
  * (margin = AVATAR_WALL_MARGIN) and the camera's offset endpoint
  * (margin = CAMERA_WALL_MARGIN).
+ *
+ * Optional `portalHole` carves a **square** exception in *one* wall:
+ * when the position's projection onto the portal's wall plane falls
+ * within `radius` of `center` under the Chebyshev (max-norm) metric
+ * — i.e. inside an axis-aligned square of half-edge `radius` — the
+ * clamp on that wall's specific side is skipped, so the avatar can
+ * physically pass through the portal into the room beyond. The
+ * opposite wall (and the other four walls) still clamp normally —
+ * the hole is one-sided, not a tunnel through the entire cube.
+ *
+ * The portal's wall is identified by the dominant component of
+ * `normal` (axis-aligned cubes have wall normals ±1 on exactly one
+ * axis). The sign of that component tells us which side of the
+ * cube the portal is on, so we know which clamp end to relax.
  */
-export function clampToBoxInterior(pos: Vector3, half: Vector3, margin: number): void {
-  const limX = half.x - margin;
-  const limY = half.y - margin;
-  const limZ = half.z - margin;
-  if (pos.x < -limX) {
-    pos.x = -limX;
-  } else if (pos.x > limX) {
-    pos.x = limX;
+export interface PortalHole {
+  center: Vector3;
+  normal: Vector3;
+  /** Half-edge of the square hole (Chebyshev / max-norm radius). */
+  radius: number;
+  /** Wall-plane +X axis. Required when `quadrantOffset > 0`. */
+  right?: Vector3;
+  /** Wall-plane +Y axis. Required when `quadrantOffset > 0`. */
+  up?: Vector3;
+  /** When non-zero the hole becomes FOUR squares (one per quadrant)
+   *  centred at (±quadrantOffset, ±quadrantOffset) along the wall
+   *  basis. The avatar can pass through any of the four; the strips
+   *  between them clamp like solid wall. */
+  quadrantOffset?: number;
+}
+
+/**
+ * Clamp `pos` into a box of half-extents `half` centred at `center`
+ * (origin if omitted), with `margin` units of inset on every face.
+ * `portalHole`, if supplied, carves a circular gap on the wall whose
+ * outward normal matches `portalHole.normal`, so the avatar can pass
+ * through it.
+ *
+ * `center` lets the same helper clamp into the main cube (centred at
+ * world origin) AND into the hall outside the wall (centred at the
+ * hall's world position) without callers translating `pos` themselves.
+ */
+export function clampToBoxInterior(
+  pos: Vector3,
+  half: Vector3,
+  margin: number,
+  portalHole?: PortalHole,
+  center?: Vector3,
+): void {
+  const cx = center ? center.x : 0;
+  const cy = center ? center.y : 0;
+  const cz = center ? center.z : 0;
+  const minX = cx - half.x + margin;
+  const maxX = cx + half.x - margin;
+  const minY = cy - half.y + margin;
+  const maxY = cy + half.y - margin;
+  const minZ = cz - half.z + margin;
+  const maxZ = cz + half.z - margin;
+
+  // Compute whether `pos` falls inside the portal's circular hole
+  // (projection onto the wall plane is within `radius` of `center`).
+  // If no hole, all six clamp-end checks below stay enabled.
+  let insideHole = false;
+  let skipNegX = false;
+  let skipPosX = false;
+  let skipNegY = false;
+  let skipPosY = false;
+  let skipNegZ = false;
+  let skipPosZ = false;
+  if (portalHole) {
+    const dx = pos.x - portalHole.center.x;
+    const dy = pos.y - portalHole.center.y;
+    const dz = pos.z - portalHole.center.z;
+    const dotN = dx * portalHole.normal.x + dy * portalHole.normal.y + dz * portalHole.normal.z;
+    const tx = dx - dotN * portalHole.normal.x;
+    const ty = dy - dotN * portalHole.normal.y;
+    const tz = dz - dotN * portalHole.normal.z;
+    if (
+      portalHole.quadrantOffset !== undefined &&
+      portalHole.quadrantOffset > 0 &&
+      portalHole.right &&
+      portalHole.up
+    ) {
+      // Four-quadrant symmetric Chebyshev: a position is inside SOME
+      // hole iff |abs(localX) - offset| < radius AND |abs(localY) -
+      // offset| < radius — same trick the GridMaterial shader uses.
+      const localX = tx * portalHole.right.x + ty * portalHole.right.y + tz * portalHole.right.z;
+      const localY = tx * portalHole.up.x + ty * portalHole.up.y + tz * portalHole.up.z;
+      insideHole =
+        Math.abs(Math.abs(localX) - portalHole.quadrantOffset) < portalHole.radius &&
+        Math.abs(Math.abs(localY) - portalHole.quadrantOffset) < portalHole.radius;
+    } else {
+      // Single-square Chebyshev: max of absolute tangent components.
+      // For axis-aligned walls the normal-axis component is zero and
+      // falls out of the max for free.
+      const tangentMax = Math.max(Math.abs(tx), Math.abs(ty), Math.abs(tz));
+      insideHole = tangentMax < portalHole.radius;
+    }
+    if (insideHole) {
+      // The inward normal points away from the wall; its sign on
+      // the wall's axis tells us which end of the cube the wall is
+      // on, and therefore which clamp side to skip. (Threshold of
+      // 0.5 is robust given the components are ±1 on one axis.)
+      skipNegX = portalHole.normal.x > 0.5;
+      skipPosX = portalHole.normal.x < -0.5;
+      skipNegY = portalHole.normal.y > 0.5;
+      skipPosY = portalHole.normal.y < -0.5;
+      skipNegZ = portalHole.normal.z > 0.5;
+      skipPosZ = portalHole.normal.z < -0.5;
+    }
   }
-  if (pos.y < -limY) {
-    pos.y = -limY;
-  } else if (pos.y > limY) {
-    pos.y = limY;
+
+  if (!skipNegX && pos.x < minX) {
+    pos.x = minX;
+  } else if (!skipPosX && pos.x > maxX) {
+    pos.x = maxX;
   }
-  if (pos.z < -limZ) {
-    pos.z = -limZ;
-  } else if (pos.z > limZ) {
-    pos.z = limZ;
+  if (!skipNegY && pos.y < minY) {
+    pos.y = minY;
+  } else if (!skipPosY && pos.y > maxY) {
+    pos.y = maxY;
+  }
+  if (!skipNegZ && pos.z < minZ) {
+    pos.z = minZ;
+  } else if (!skipPosZ && pos.z > maxZ) {
+    pos.z = maxZ;
   }
 }
 

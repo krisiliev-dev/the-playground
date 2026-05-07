@@ -14,6 +14,7 @@ import { useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import type { Mesh, MeshBasicMaterial } from 'three';
 import { useWorldStore } from '@/store';
+import { HAZE_FADE_DURATION_S } from './reveal/constants';
 
 const HAZE_DEPTH = 0.5;
 /** Light blue-grey — the cube is already near-black, so a tint that
@@ -22,9 +23,6 @@ const HAZE_DEPTH = 0.5;
 const HAZE_COLOR = '#aabbdd';
 const HAZE_OPACITY = 0.45;
 const HAZE_RENDER_ORDER = 100;
-/** Seconds to fully fade from click → impact.
- *  ARMED_TO_SWINGING (0.5) + SWINGING_TO_IMPACT (1.8) = 2.3s. */
-const HAZE_FADE_DURATION = 2.3;
 
 export function Haze3D(): JSX.Element {
   const meshRef = useRef<Mesh>(null);
@@ -49,7 +47,7 @@ export function Haze3D(): JSX.Element {
     let opacity = HAZE_OPACITY;
     if (fadeStart.current !== null) {
       const elapsed = state.clock.elapsedTime - fadeStart.current;
-      opacity = HAZE_OPACITY * Math.max(0, 1 - elapsed / HAZE_FADE_DURATION);
+      opacity = HAZE_OPACITY * Math.max(0, 1 - elapsed / HAZE_FADE_DURATION_S);
     }
 
     const material = meshRef.current.material as MeshBasicMaterial;

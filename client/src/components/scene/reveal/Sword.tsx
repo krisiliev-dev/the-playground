@@ -63,11 +63,10 @@ const SWORD_URL = '/models/sword/scene.gltf';
  *  blade length shrink together. */
 const TARGET_FULL_HEIGHT = 10 * FORMATION_SCALE;
 
-/** End ring radius around the click point on the wall. Each sword lands
- *  on the ring at angle `slot.endAngle`. Scaled with the formation so
- *  that on narrow aspects the swords land in a tighter ring
- *  proportional to the letter size. */
-const END_RADIUS = 10 * FORMATION_SCALE;
+// End landing position: read from `slot.endOffset`, which lives on a
+// SQUARE perimeter centred on the click point (see vibeFormation.ts).
+// Scaled with the formation in vibeFormation already, so we apply it
+// raw here.
 /** Visual scale at spawn — disabled (set to 1.0). Apparent "incoming"
  *  growth now comes from real depth (spawn at ~320 lateral / 80 forward
  *  is much farther than mid at 22 forward), so perspective alone makes
@@ -450,11 +449,12 @@ export function Sword({ slot, staggerIndex = 0 }: SwordProps): JSX.Element {
       .addScaledVector(camFwd, MID_FORWARD)
       .addScaledVector(camRight, slot.midPos[0])
       .addScaledVector(camUp, slot.midPos[1]);
-    // End: ring around the click point on the wall (per-sword endAngle).
+    // End: square perimeter around the click point on the wall
+    // (per-sword endOffset, in (right, up) world units).
     endPos
       .copy(hitPoint)
-      .addScaledVector(wallRight, END_RADIUS * Math.cos(slot.endAngle))
-      .addScaledVector(wallUp, END_RADIUS * Math.sin(slot.endAngle));
+      .addScaledVector(wallRight, slot.endOffset[0])
+      .addScaledVector(wallUp, slot.endOffset[1]);
 
     // Bow control points — vertical only. With spawn → mid → end already
     // collinear, the bow gives the trajectory a gentle upward arc

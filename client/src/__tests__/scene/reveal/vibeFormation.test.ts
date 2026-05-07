@@ -1,10 +1,10 @@
 /**
  * VIBE formation — choreography data integrity. These tests pin the
  * sword count, slot ID uniqueness, stroke-direction normalisation,
- * end-angle distribution, and per-letter stroke counts. If the V/I/B/E
- * stroke definitions change (e.g. someone adds a serif), these tests
- * fail with a clear "expected 12, got 13" message instead of swords
- * appearing in unexpected positions.
+ * end-offset distribution (on a square perimeter), and per-letter
+ * stroke counts. If the V/I/B/E stroke definitions change (e.g. someone
+ * adds a serif), these tests fail with a clear "expected 12, got 13"
+ * message instead of swords appearing in unexpected positions.
  */
 import { describe, it, expect } from 'vitest';
 import {
@@ -36,11 +36,43 @@ describe('vibeFormation', () => {
     });
   });
 
-  it('end angles are evenly distributed around the wall circle', () => {
-    const expectedStep = (2 * Math.PI) / VIBE_SWORD_COUNT;
-    VIBE_SLOTS.forEach((s, i) => {
-      expect(s.endAngle).toBeCloseTo(i * expectedStep, 5);
+  it('end offsets land on the perimeter of an axis-aligned square', () => {
+    // Every slot's offset must satisfy max(|x|, |y|) === SQUARE_HALF.
+    // We don't depend on SQUARE_HALF being exported — read it back as
+    // the max chebyshev radius across all slots.
+    const chebyshevs = VIBE_SLOTS.map((s) =>
+      Math.max(Math.abs(s.endOffset[0]), Math.abs(s.endOffset[1])),
+    );
+    const half = Math.max(...chebyshevs);
+    expect(half).toBeGreaterThan(0);
+    chebyshevs.forEach((c) => {
+      expect(c).toBeCloseTo(half, 5);
     });
+  });
+
+  it('distributes the 12 swords with 3 per square side', () => {
+    // Group offsets by which side they lie on. Side identity is
+    // "the axis whose absolute coord equals SQUARE_HALF" + sign.
+    const half = Math.max(
+      ...VIBE_SLOTS.map((s) => Math.max(Math.abs(s.endOffset[0]), Math.abs(s.endOffset[1]))),
+    );
+    const counts = { right: 0, top: 0, left: 0, bottom: 0 };
+    VIBE_SLOTS.forEach((s) => {
+      const [x, y] = s.endOffset;
+      if (Math.abs(x - half) < 1e-3) {
+        counts.right++;
+      } else if (Math.abs(x + half) < 1e-3) {
+        counts.left++;
+      } else if (Math.abs(y - half) < 1e-3) {
+        counts.top++;
+      } else if (Math.abs(y + half) < 1e-3) {
+        counts.bottom++;
+      }
+    });
+    expect(counts.right).toBe(3);
+    expect(counts.top).toBe(3);
+    expect(counts.left).toBe(3);
+    expect(counts.bottom).toBe(3);
   });
 
   it('every letter (V, I, B, E) is represented', () => {

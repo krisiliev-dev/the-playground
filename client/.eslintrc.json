@@ -82,7 +82,10 @@
           "renderOrder",
           "blending",
           "map",
-          "attach"
+          "attach",
+          "quaternion",
+          "toneMapped",
+          "frustumCulled"
         ]
       }
     ]

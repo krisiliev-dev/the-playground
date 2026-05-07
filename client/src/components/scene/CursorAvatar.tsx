@@ -49,13 +49,30 @@ import {
   computeCameraCollisionRatio,
   computeInitialPanProgress,
   computeLeanTarget,
+  computeWalkLeanTarget,
   computeWalkVector,
   computeWallProximity,
   projectNDCToWorld,
-  setYawQuat,
 } from './cursorAvatarMath';
+import { FLAT_ROUTES, MAIN_CUBE_BOB } from '@/content/routes';
+import {
+  avatarWorldEntryFor,
+  clampRouteForLocalPosition,
+  routeForAvatar,
+} from '@/content/routeForPosition';
+import { floatOffset } from './floatBob';
+import { PORTAL_ENDPOINTS } from '@/content/portals';
+import {
+  bobbedEndpoint,
+  findCrossedPortal,
+  planPortalLeap,
+  teleportPose,
+} from './portal/portalMath';
+import { getScene } from '@/scenes/sceneRegistry';
 
 const MODEL_URL = '/models/3d_icon_cursor.glb';
+
+import { CASCADE_OVERLAY_LAYER, CURSOR_LAYER } from './sceneLayers';
 
 // ─── Pointer-mode constants ───────────────────────────────────────────
 /** Distance in front of the camera at which the pointer-mode cursor sits.
@@ -68,6 +85,26 @@ const AVATAR_SCALE = 0.03;
 const SCALE_LERP_RATE = 5.0;
 /** Avatar movement (world units / sec). */
 const WALK_SPEED = 60;
+/** Click-to-portal leap speed, in world units per second. ~5× walk
+ *  so a click visibly pulls the avatar through the portal in a few
+ *  frames regardless of where they were standing. */
+const LEAP_SPEED = 320;
+/** Distance at which a leap is considered "arrived" if the avatar
+ *  hasn't crossed a portal plane on the way in. Cleared at this
+ *  threshold so the avatar doesn't oscillate around the target. */
+const LEAP_ARRIVAL_EPS = 1.0;
+/** How far past the portal's plane the click-leap target sits, in
+ *  world units. Large enough that the avatar's leap segment crosses
+ *  the plane (so `findCrossedPortal` fires); small enough that if the
+ *  cross somehow misses, the leap stops just past the portal rather
+ *  than launching into the back wall. */
+const PORTAL_LEAP_OVERSHOOT = 8;
+/** Forward-lean angle (radians) applied to the cursor at FULL forward
+ *  walking velocity. The lean scales linearly with `fwdInput` (W − S
+ *  + touch throttle, clamped to ±1). Walking forward → cursor tilts
+ *  head-first; walking backward → tilts back. Sideways/strafe input
+ *  contributes no lean (would be roll, not pitch). */
+const WALK_LEAN_MAX_RAD = (20 * Math.PI) / 180; // 20°
 /** Mouse-delta → radians multiplier. */
 const MOUSE_SENSITIVITY = 0.0025;
 /** Camera offset behind+above the avatar, in the avatar's local frame.
@@ -121,9 +158,7 @@ const BODY_COLOR_HEX = '#0a1a18';
 /** Outline shell rendered as a back-faced, slightly-enlarged copy of
  *  each cursor mesh. Front faces are culled (BackSide) so only the
  *  back faces of the larger shell are visible — they appear as a
- *  halo at the cursor's silhouette. Main cursor renderOrder = 999;
- *  outline = 998 so the inside of the halo gets covered by the
- *  cursor and only the rim remains. The outline shares the cursor's
+ *  halo at the cursor's silhouette. The outline shares the cursor's
  *  `depthTest: false` so it stays on top of haze/geometry like the
  *  cursor itself. */
 const OUTLINE_COLOR_HEX = '#ffffff';
@@ -135,6 +170,16 @@ const OUTLINE_SCALE = 1.06;
  *  reads with weight toward the lower-right. */
 const OUTLINE_SHIFT_X_FRACTION = 0.012;
 const OUTLINE_SHIFT_Y_FRACTION = 0.012;
+/** Scale multiplier applied to the in-scene cursor copy (the
+ *  `CASCADE_OVERLAY_LAYER` mesh rendered inside the portal cascade's
+ *  through-view passes). The main-view cursor is sized for the
+ *  3rd-person follow rig (camera ~3 world units from the avatar); at
+ *  cascade vCam distances of 300+ world units the same size projects
+ *  to a sub-pixel speck. 5× keeps the in-scene copy recognisable at
+ *  typical cascade depths without overwhelming the level-0 view, and
+ *  has no effect on the main render (CASCADE_OVERLAY_LAYER is excluded
+ *  from mainCam.layers). */
+const INSCENE_CURSOR_SCALE = 5;
 
 useGLTF.preload(MODEL_URL);
 
@@ -189,10 +234,23 @@ interface CursorRefs {
 export function CursorAvatar(): JSX.Element | null {
   const active = useWorldStore((s) => s.cursorAvatarActive);
   const revealState = useWorldStore((s) => s.revealState);
+  const menuOpen = useWorldStore((s) => s.menuOpen);
+  const documentMode = useWorldStore((s) => s.documentMode);
   const isTouch = useIsTouchPrimary();
 
+  // Hide the OS cursor while the avatar is active — except when the
+  // pause menu is open. With the menu up the user expects a normal
+  // cursor for hovering buttons; the 3D cursor would just be in the
+  // way (and was the source of the "cursor invisible until hover"
+  // bug, since the browser only reveals the OS cursor on its own
+  // when there's an interaction surface to point at).
   useEffect(() => {
-    if (!active) {
+    // Restore the OS cursor whenever the user is interacting with
+    // chrome rather than the 3D world: the pause menu, or document
+    // mode (the latter reachable via the Simple Experience portal
+    // *or* the menu, so gating only on menuOpen leaves doc-mode
+    // users with a hidden cursor over the document).
+    if (!active || menuOpen || documentMode) {
       return;
     }
     const previous = document.body.style.cursor;
@@ -200,7 +258,7 @@ export function CursorAvatar(): JSX.Element | null {
     return () => {
       document.body.style.cursor = previous;
     };
-  }, [active]);
+  }, [active, menuOpen, documentMode]);
 
   if (!active) {
     return null;
@@ -224,6 +282,21 @@ function ActiveCursor(): JSX.Element {
 
   const revealState = useWorldStore((s) => s.revealState);
   const controlsDismissed = useWorldStore((s) => s.controlsDismissed);
+  // CursorAvatar mounts at the *root* R3F context (so `useThree`'s
+  // `pointer` reflects live mouse coords — createPortal sub-stores
+  // freeze pointer at (0, 0)). World, however, renders inside the
+  // 'cube' scene via createPortal, and SceneHost swaps the camera's
+  // active scene to it. Without re-parenting, the avatar's group
+  // lives in the root scene and the camera never sees it. Attach
+  // the group into the cube scene on mount so the camera renders
+  // it alongside the cube contents.
+  useEffect(() => {
+    const group = groupRef.current;
+    if (!group || typeof group.updateWorldMatrix !== 'function') {
+      return;
+    }
+    getScene('cube').attach(group);
+  }, []);
   /** Visual avatar mode — cursor enlarges, camera transitions to 3rd
    *  person. Deferred until the user dismisses the controls hint. */
   const isAvatar = controlsDismissed;
@@ -288,9 +361,28 @@ function ActiveCursor(): JSX.Element {
         // Always draw above haze (and any other 3D geometry) — the
         // cursor is a foreground UI affordance, not part of the scene.
         depthTest: false,
+        // depthWrite must be off too: the cursor renders inside the
+        // portal cascade's through-view passes (CURSOR_LAYER is in
+        // each vCam's layer mask), and any depth value it leaves in
+        // the framebuffer will block the *next* recursion level's
+        // surface-plane stencil mark via depth-LESS rejection. With
+        // depthWrite=true, deep-cascade pixels covered by the cursor
+        // turn black — Phase A of level N+1 fails wherever cursor
+        // depth from level N's Phase D was closer than surface_A's
+        // projected depth.
+        depthWrite: false,
         transparent: true,
       });
-      mesh.renderOrder = 999;
+      // Cursor body must draw AFTER the (BackSide) outline shell so
+      // the body covers the outline's interior and only the
+      // silhouette halo remains. Both stay above haze (which is at
+      // renderOrder 100).
+      mesh.renderOrder = 102;
+      // Cursor mesh on its own layer (enabled by SceneHost on the
+      // main camera). The layer + `depthTest: false` is what keeps
+      // it visually on top in the player's view.
+      mesh.layers.disable(0);
+      mesh.layers.enable(CURSOR_LAYER);
 
       // Outline shell — see OUTLINE_* constants for the rationale.
       const outlineGeom = mesh.geometry.clone();
@@ -306,6 +398,9 @@ function ActiveCursor(): JSX.Element {
           color: new Color(OUTLINE_COLOR_HEX),
           side: BackSide,
           depthTest: false,
+          // Same rationale as the cursor body: don't pollute the depth
+          // buffer inside the portal cascade's through-view passes.
+          depthWrite: false,
           transparent: true,
         }),
       );
@@ -319,9 +414,82 @@ function ActiveCursor(): JSX.Element {
           ),
         );
       outlineMesh.scale.setScalar(OUTLINE_SCALE);
-      outlineMesh.renderOrder = 998;
+      outlineMesh.renderOrder = 101;
+      outlineMesh.layers.disable(0);
+      outlineMesh.layers.enable(CURSOR_LAYER);
       mesh.add(outlineMesh);
       outlineMeshes.push(outlineMesh);
+
+      // === In-scene cursor copy ===========================================
+      // A second cursor on `CASCADE_OVERLAY_LAYER` for the portal cascade's
+      // through-view renders. Same geometry and same world position as the
+      // main-view cursor, but with `depthTest: true` so closer scene
+      // geometry (portal rims, cube walls) properly occludes it instead of
+      // the cursor drawing over them. Without this dual-mesh setup, the
+      // cursor's `depthTest: false` (correct for main-view always-on-top)
+      // makes it overlay the pink rim's particles inside the cascade's
+      // through-view, hiding the rim wherever the cursor projects to the
+      // same screen pixels — visible as "pink portal not rendering" in
+      // certain camera-cursor configurations.
+      //
+      // Both copies share the parent group, so they track the same world
+      // position. Layer mask determines which copy renders in which pass:
+      // - Phase D (cascade through-views): includes CASCADE_OVERLAY_LAYER.
+      // - Phase 3 (main-view top render): includes CURSOR_LAYER.
+      //
+      // Scaled `INSCENE_CURSOR_SCALE` × the main cursor so the in-scene
+      // copy stays visible at typical cascade vCam distances. The main
+      // cursor is sized for a ~3-unit camera distance (3rd-person follow
+      // rig); at cascade vCam distances of 300+ world units, the same
+      // size projects to ~2 pixels. Scaling up here keeps the cursor
+      // recognisable through the portal without affecting main view
+      // (CASCADE_OVERLAY_LAYER is excluded from mainCam.layers). The
+      // outline shell uses the same multiplier so it stays in proportion.
+      const inSceneBody = new Mesh(
+        mesh.geometry,
+        new MeshStandardMaterial({
+          color: new Color(BODY_COLOR_HEX),
+          emissive: new Color(EMISSIVE_HEX),
+          emissiveIntensity: EMISSIVE_INTENSITY,
+          metalness: 0.4,
+          roughness: 0.35,
+          depthTest: true,
+          depthWrite: false,
+          transparent: true,
+        }),
+      );
+      inSceneBody.scale.setScalar(INSCENE_CURSOR_SCALE);
+      inSceneBody.renderOrder = 102;
+      inSceneBody.layers.disable(0);
+      inSceneBody.layers.enable(CASCADE_OVERLAY_LAYER);
+      // Frustum-culling defaults to the geometry's bounding sphere
+      // computed at load time. For deep cascade levels, the vCam sits
+      // thousands of units from the avatar — combined with the per-
+      // frame `group.position` updates and the in-scene body's parent
+      // chain (group → gltf.scene → mesh → inSceneBody), the bounding
+      // sphere can fail Three.js's frustum test in ways that culling
+      // a one-pixel mesh wouldn't normally matter for, but here we
+      // want it to render reliably across all cascade depths.
+      inSceneBody.frustumCulled = false;
+      const inSceneOutline = new Mesh(
+        outlineGeom,
+        new MeshBasicMaterial({
+          color: new Color(OUTLINE_COLOR_HEX),
+          side: BackSide,
+          depthTest: true,
+          depthWrite: false,
+          transparent: true,
+        }),
+      );
+      inSceneOutline.position.copy(outlineMesh.position);
+      inSceneOutline.scale.copy(outlineMesh.scale);
+      inSceneOutline.renderOrder = 101;
+      inSceneOutline.layers.disable(0);
+      inSceneOutline.layers.enable(CASCADE_OVERLAY_LAYER);
+      inSceneOutline.frustumCulled = false;
+      inSceneBody.add(inSceneOutline);
+      mesh.add(inSceneBody);
+      outlineMeshes.push(inSceneBody, inSceneOutline);
     });
 
     // Measure where the cursor's visible tip is relative to the model
@@ -439,6 +607,12 @@ function ActiveCursor(): JSX.Element {
       avatarPitch.current = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, next));
     };
     const onClick = (): void => {
+      // Skip pointer-lock acquisition while the menu is open — the
+      // user is interacting with the menu, and re-grabbing the
+      // cursor here would yank it back into the 3D world mid-click.
+      if (useWorldStore.getState().menuOpen) {
+        return;
+      }
       if (document.pointerLockElement !== canvas) {
         // Synchronous in click handler — user gesture is valid here.
         void canvas.requestPointerLock?.();
@@ -831,21 +1005,62 @@ function AvatarCursor({ refs }: ModeProps): null {
   const initialCursorPos = useRef(new Vector3());
   const initialCursorQuat = useRef(new Quaternion());
   const initialScale = useRef(POINTER_SCALE);
+  /** When true, the next frame's camera + cursor position lerps run
+   *  with rate = 1 (effectively `copy` instead of `lerp`) so a
+   *  teleport reads as an instant cut, not a long visible slide.
+   *  Reserved for the next portal design — currently unused but kept
+   *  so the camera-snap plumbing downstream stays exercised. */
+  const teleportSnapRef = useRef(false);
+  /** Scratch for the per-frame clamp call. Reused so the per-route
+   *  clamp lookup doesn't allocate. */
+  const clampCenter = useRef(new Vector3());
+  const clampHalf = useRef(new Vector3());
+  /** Avatar position at the START of each frame (before walking is
+   *  applied). Used by the portal-crossing detector to test prev →
+   *  cur traversal against each portal's plane. */
+  const prevAvatarPos = useRef(new Vector3());
+  /** Smoothly interpolated walk-lean angle in radians. Lerps toward
+   *  `fwdInput * WALK_LEAN_MAX_RAD` each frame, so the cursor visibly
+   *  tilts in/out of the lean instead of snapping. */
+  const currentWalkLean = useRef(0);
 
   // Lean-target scratch buffers.
   const leanTarget = useRef(new Vector3());
   const tipWorldBuffer = useRef(new Vector3());
 
-  // Anchor avatar position + reset yaw/pitch the moment AvatarCursor mounts
-  // (was previously gated on `isAvatar` flipping true; same effect now that
-  // mount IS that transition).
+  // Anchor avatar position + reset yaw/pitch the moment AvatarCursor
+  // mounts. The Canvas stays mounted across Simple Experience toggles
+  // (App pauses the render loop + visibility:hidden), so this effect
+  // runs *once* per session — transient ref state is preserved
+  // across mode flips for free.
+  //
+  // Spawn rule: stand `SPAWN_WALL_INSET` units from the clicked wall,
+  // facing the swords. clickHit.normal points INTO the cube, so
+  // `clickHit.point + normal * inset` lands the avatar inside the
+  // cube near the impacted wall. Yaw orients the avatar so its
+  // forward direction is `-normal` (toward the wall) — derived from
+  // `atan2(normal.x, normal.z)` since yaw=0 means "looking down -Z".
   useEffect(() => {
-    refs.avatarPos.current.set(
-      camera.position.x,
-      camera.position.y - FOLLOW_OFFSET.y,
-      camera.position.z - FOLLOW_OFFSET.z,
-    );
-    refs.avatarYaw.current = 0;
+    const clickHit = useWorldStore.getState().clickHit;
+    if (clickHit) {
+      const SPAWN_WALL_INSET = 60;
+      refs.avatarPos.current.set(
+        clickHit.point[0] + clickHit.normal[0] * SPAWN_WALL_INSET,
+        clickHit.point[1] + clickHit.normal[1] * SPAWN_WALL_INSET,
+        clickHit.point[2] + clickHit.normal[2] * SPAWN_WALL_INSET,
+      );
+      refs.avatarYaw.current = Math.atan2(clickHit.normal[0], clickHit.normal[2]);
+    } else {
+      // Fallback for the unusual case of mounting without a clickHit
+      // (e.g. tests, or future code paths that bypass the reveal):
+      // start where the camera was, FOLLOW_OFFSET behind it.
+      refs.avatarPos.current.set(
+        camera.position.x,
+        camera.position.y - FOLLOW_OFFSET.y,
+        camera.position.z - FOLLOW_OFFSET.z,
+      );
+      refs.avatarYaw.current = 0;
+    }
     refs.avatarPitch.current = 0;
     sfx.unlock();
     void sfx.play('uiClick');
@@ -868,14 +1083,78 @@ function AvatarCursor({ refs }: ModeProps): null {
       initialCursorQuat.current.copy(group.quaternion);
     }
 
-    const yaw = refs.avatarYaw.current;
+    // Snapshot pre-walk position for portal-crossing detection. The
+    // detector tests whether the (prev → cur) segment crosses any
+    // portal's plane this frame; if so, we teleport the avatar to
+    // the paired portal's emergence pose before the clamp/route
+    // resolution steps below run on the new position.
+    prevAvatarPos.current.copy(refs.avatarPos.current);
+
+    // `let` (not const) because portal teleport below may rewrite
+    // `refs.avatarYaw.current`, and the avatar's target orientation +
+    // camera follow-offset (computed further down this frame) need to
+    // pick up the post-teleport yaw on the same frame — otherwise the
+    // first post-teleport frame uses the pre-teleport yaw and the
+    // camera/avatar visibly rotate the difference on the next tick.
+    let yaw = refs.avatarYaw.current;
     const walk = computeWalkVector(
       refs.keys.current,
       yaw,
       refs.avatarPitch.current,
       refs.touchWalkVelocity.current,
     );
-    if (walk.len > 0) {
+    // Click-to-portal: PortalMesh queued a portal id; resolve it
+    // here, where the live avatar position + cube bob are available
+    // for the active-side gate. `planPortalLeap` returns null for an
+    // invalid click (e.g. clicking the back of a single-sided portal),
+    // in which case we just clear the request — the click is
+    // silently consumed, the avatar doesn't move.
+    {
+      const pendingClickId = useWorldStore.getState().pendingPortalClick;
+      if (pendingClickId) {
+        const bobYNow = floatOffset(state.clock.elapsedTime, MAIN_CUBE_BOB);
+        const sourceEp = PORTAL_ENDPOINTS.find((ep) => ep.id === pendingClickId);
+        if (sourceEp) {
+          const bobbedSource = bobbedEndpoint(sourceEp, bobYNow);
+          const target = planPortalLeap(
+            {
+              x: refs.avatarPos.current.x,
+              y: refs.avatarPos.current.y,
+              z: refs.avatarPos.current.z,
+            },
+            bobbedSource,
+            PORTAL_LEAP_OVERSHOOT,
+          );
+          if (target) {
+            useWorldStore.getState().setLeapTarget(target);
+          }
+        }
+        useWorldStore.getState().setPendingPortalClick(null);
+      }
+    }
+
+    // Leap mode (click-to-portal): when a leap target is set, ignore
+    // walk input entirely and pull the avatar straight at the target
+    // at LEAP_SPEED. The natural walk-through crossing detector below
+    // catches the portal cross during the leap and runs the same
+    // teleportPose pipeline a manual walk-in would. If the target is
+    // reached without a cross (defensive fallback), clear the leap so
+    // the avatar can resume normal movement.
+    const leapTarget = useWorldStore.getState().leapTarget;
+    if (leapTarget) {
+      const dx = leapTarget[0] - refs.avatarPos.current.x;
+      const dy = leapTarget[1] - refs.avatarPos.current.y;
+      const dz = leapTarget[2] - refs.avatarPos.current.z;
+      const dist = Math.hypot(dx, dy, dz);
+      if (dist < LEAP_ARRIVAL_EPS) {
+        useWorldStore.getState().setLeapTarget(null);
+      } else {
+        const step = Math.min(LEAP_SPEED * delta, dist);
+        refs.avatarPos.current.x += (dx / dist) * step;
+        refs.avatarPos.current.y += (dy / dist) * step;
+        refs.avatarPos.current.z += (dz / dist) * step;
+      }
+    } else if (walk.len > 0) {
       // Cap normalisation at 1 so partial throttles (touch pinch at
       // half spread) move at half speed instead of being scaled back
       // to full. Diagonals (W+D = √2) still get anti-fast-diagonal
@@ -887,8 +1166,150 @@ function AvatarCursor({ refs }: ModeProps): null {
       refs.avatarPos.current.z += walk.mz * step;
     }
 
+    // URL → avatar teleport: a deep-link / browser-back set
+    // pendingAvatarTeleport in the store. Snap the avatar to the
+    // matching route's bob-compensated entry point, then clear the
+    // signal. Done before clamp so the new position is what gets
+    // clamped + routed below.
+    {
+      const pendingTeleport = useWorldStore.getState().pendingAvatarTeleport;
+      if (pendingTeleport) {
+        const match = FLAT_ROUTES.find((fr) => fr.route.path === pendingTeleport);
+        if (match) {
+          const entry = avatarWorldEntryFor(
+            match.route.bounds,
+            match.route.entryPoint,
+            state.clock.elapsedTime,
+            MAIN_CUBE_BOB,
+          );
+          refs.avatarPos.current.set(entry[0], entry[1], entry[2]);
+        }
+        useWorldStore.getState().setPendingAvatarTeleport(null);
+      }
+    }
+
+    // Portal crossing: if the avatar's prev → cur segment crossed a
+    // portal's plane this frame (with sidedness gate), teleport to
+    // the paired portal's emergence pose. Portals are authored in
+    // cube-local frame; the cube bobs in Y, so we bob-compensate
+    // their world Y before the geometric crossing check.
+    {
+      const bobY = floatOffset(state.clock.elapsedTime, MAIN_CUBE_BOB);
+      const bobbedEndpoints = PORTAL_ENDPOINTS.map((ep) => bobbedEndpoint(ep, bobY));
+      const crossing = findCrossedPortal(
+        {
+          x: prevAvatarPos.current.x,
+          y: prevAvatarPos.current.y,
+          z: prevAvatarPos.current.z,
+        },
+        {
+          x: refs.avatarPos.current.x,
+          y: refs.avatarPos.current.y,
+          z: refs.avatarPos.current.z,
+        },
+        bobbedEndpoints,
+      );
+      if (crossing) {
+        // findCrossedPortal returns position via teleportPose internally
+        // but with yaw=0 placeholder. Re-call teleportPose with the
+        // avatar's actual yaw to get the correct post-teleport
+        // orientation (paired portals are identified front-to-front,
+        // so the resulting yaw is the source-relative yaw rotated 180°
+        // around Y and re-anchored in dest's frame).
+        const pose = teleportPose(
+          {
+            x: refs.avatarPos.current.x,
+            y: refs.avatarPos.current.y,
+            z: refs.avatarPos.current.z,
+          },
+          refs.avatarYaw.current,
+          crossing.source,
+          crossing.destination,
+        );
+        refs.avatarPos.current.set(pose.position.x, pose.position.y, pose.position.z);
+        refs.avatarYaw.current = pose.yaw;
+        // Refresh the local `yaw` so downstream computations (camera
+        // follow-offset rotation, avatarTargetQuat) use the post-
+        // teleport orientation on this frame.
+        yaw = pose.yaw;
+        // Tell the camera-follow rig downstream to snap (lerp rate=1)
+        // instead of sliding across the world. Without this the
+        // camera would visibly travel from the source-side follow
+        // point to the dest-side follow point over multiple frames.
+        teleportSnapRef.current = true;
+        // The click-leap (if any) drove us into this crossing; clear
+        // the leap target now so the avatar emerges at the destination
+        // without continuing to chase the source-side leap target
+        // (which, post-teleport, would point them back into the
+        // source portal from the dest side).
+        if (useWorldStore.getState().leapTarget !== null) {
+          useWorldStore.getState().setLeapTarget(null);
+        }
+      }
+    }
+
     tmpCubeHalf.current.set(dimensions[0] * 0.5, dimensions[1] * 0.5, dimensions[2] * 0.5);
-    clampToBoxInterior(refs.avatarPos.current, tmpCubeHalf.current, AVATAR_WALL_MARGIN);
+    // Per-route clamp: the avatar is confined to whichever route's
+    // bbox they're currently inside (the deepest route whose `box`
+    // declares `clamp.enabled`). Walking + teleporting both move
+    // the avatar; THIS step is what keeps them from leaving the
+    // current room.
+    //
+    // Coordinate frame: routes' bounds are in cube-local space, but
+    // the avatar lives in world space and the cube bobs in Y.
+    // Convert the avatar to local for the lookup, then translate
+    // the chosen bbox back to world (Y + bob) for the clamp call.
+    {
+      const avatarWorld = refs.avatarPos.current;
+      const bobY = floatOffset(state.clock.elapsedTime, MAIN_CUBE_BOB);
+      const localPos: [number, number, number] = [
+        avatarWorld.x,
+        avatarWorld.y - bobY,
+        avatarWorld.z,
+      ];
+      const clampRoute = clampRouteForLocalPosition(localPos, FLAT_ROUTES);
+      if (clampRoute) {
+        const b = clampRoute.route.bounds;
+        const clampMargin = clampRoute.route.box?.clamp?.margin ?? AVATAR_WALL_MARGIN;
+        // World-space center: lift by bob on Y; X/Z untouched.
+        clampCenter.current.set(
+          (b.min[0] + b.max[0]) / 2,
+          (b.min[1] + b.max[1]) / 2 + bobY,
+          (b.min[2] + b.max[2]) / 2,
+        );
+        clampHalf.current.set(
+          (b.max[0] - b.min[0]) / 2,
+          (b.max[1] - b.min[1]) / 2,
+          (b.max[2] - b.min[2]) / 2,
+        );
+        clampToBoxInterior(
+          avatarWorld,
+          clampHalf.current,
+          clampMargin,
+          undefined,
+          clampCenter.current,
+        );
+      }
+    }
+
+    // Route resolution: derive the avatar's URL from its position.
+    // We pass the avatar's WORLD position + the current time;
+    // routeForAvatar transforms into the cube's local frame
+    // (subtracting the float bob) before doing the bbox test, so
+    // the route is stable across the cube's vertical bob.
+    {
+      const avatarWorld = refs.avatarPos.current;
+      const newRoute = routeForAvatar(
+        [avatarWorld.x, avatarWorld.y, avatarWorld.z],
+        state.clock.elapsedTime,
+        FLAT_ROUTES,
+        MAIN_CUBE_BOB,
+      );
+      const prevRoute = useWorldStore.getState().currentRoute;
+      if (newRoute !== prevRoute) {
+        useWorldStore.getState().setCurrentRoute(newRoute);
+      }
+    }
 
     // Wall-proximity ambient — louder near walls, silent at centre.
     {
@@ -903,8 +1324,25 @@ function AvatarCursor({ refs }: ModeProps): null {
       sfx.setLoopVolume('wallAmbient', WALL_AMBIENT_BASE_VOLUME * proximity);
     }
 
-    // Avatar's target rotation (Y-axis yaw).
-    setYawQuat(avatarTargetQuat, yaw);
+    // Avatar's target rotation (Y-axis yaw + X-axis walk-lean).
+    // Forward input (W/S/touch throttle) scales the lean angle from
+    // 0 to ±WALK_LEAN_MAX_RAD; the smoothed lean lerps toward the
+    // target each frame so it eases in/out instead of snapping.
+    {
+      const targetLean = computeWalkLeanTarget(
+        refs.keys.current,
+        refs.touchWalkVelocity.current,
+        WALK_LEAN_MAX_RAD,
+      );
+      const leanK = 1 - Math.exp(-LEAN_LERP_RATE * delta);
+      currentWalkLean.current += (targetLean - currentWalkLean.current) * leanK;
+    }
+    // Euler order YXZ: yaw first (around world Y), then lean
+    // (around the post-yaw local X = right axis). Positive X
+    // rotation in YXZ tilts local -Z (forward) toward local -Y
+    // (down) — that's the "head-first lean" direction.
+    tmpEuler.current.set(currentWalkLean.current, yaw, 0, 'YXZ');
+    avatarTargetQuat.setFromEuler(tmpEuler.current);
 
     // Default 3rd-person offset rotated into world-space.
     tmpEuler.current.set(refs.avatarPitch.current, yaw, 0, 'YXZ');
@@ -951,9 +1389,10 @@ function AvatarCursor({ refs }: ModeProps): null {
       // Steady-state. Camera lerps; cursor position + orientation lerp
       // toward press-aware targets so the lean motion accumulates
       // frame-to-frame instead of resetting from the follow rig.
-      const camK = 1 - Math.exp(-CAMERA_LERP_RATE * delta);
-      camera.position.lerp(tmpCamTarget.current, camK);
-      camera.quaternion.copy(targetCamQuat);
+      // After a teleport, snap by setting the lerp rate to 1 — the
+      // camera and cursor cut directly to their new follow positions
+      // instead of sliding across the world.
+      const snapping = teleportSnapRef.current;
 
       let cursorPosTarget: Vector3;
       let cursorQuatTarget: Quaternion;
@@ -979,12 +1418,63 @@ function AvatarCursor({ refs }: ModeProps): null {
         cursorQuatTarget = avatarTargetQuat;
       }
 
-      const leanK = 1 - Math.exp(-LEAN_LERP_RATE * delta);
-      refs.renderedCursorPos.current.lerp(cursorPosTarget, leanK);
-      group.position.copy(refs.renderedCursorPos.current);
-      group.quaternion.slerp(cursorQuatTarget, leanK);
+      if (snapping) {
+        // After a teleport: don't snap to "no lag" (which would cause
+        // a 5-10-frame transient as the lerp builds up steady-state
+        // lag), but to "steady-state lag" position. The avatar's
+        // post-teleport walking velocity (in the NEW yaw direction)
+        // tells us how much the camera/cursor should trail behind the
+        // ideal target. Pre-applying that lag means the lerp on
+        // subsequent frames maintains it instead of building it up,
+        // and the rubber band that scaled with walking speed disappears.
+        //
+        // Math: for lerp `c[n+1] = c[n] + (target - c[n]) * k`, the
+        // steady-state lag when target moves at velocity v per frame
+        // is `lag = ((1-k)/k) * v`.
+        const postWalk = computeWalkVector(
+          refs.keys.current,
+          yaw,
+          refs.avatarPitch.current,
+          refs.touchWalkVelocity.current,
+        );
+        const camK = 1 - Math.exp(-CAMERA_LERP_RATE * delta);
+        const leanK = 1 - Math.exp(-LEAN_LERP_RATE * delta);
+        const camLagFactor = camK > 0 ? (1 - camK) / camK : 0;
+        const cursorLagFactor = leanK > 0 ? (1 - leanK) / leanK : 0;
+
+        camera.position.copy(tmpCamTarget.current);
+        refs.renderedCursorPos.current.copy(cursorPosTarget);
+        if (postWalk.len > 0) {
+          const cappedLen = Math.max(1, postWalk.len);
+          const step = (WALK_SPEED * delta) / cappedLen;
+          // Camera trails BEHIND avatar in walking direction by
+          // steady-state lag, so the camera target's per-frame
+          // motion exactly cancels the lerp's catch-up.
+          camera.position.x -= postWalk.mx * step * camLagFactor;
+          camera.position.y -= postWalk.my * step * camLagFactor;
+          camera.position.z -= postWalk.mz * step * camLagFactor;
+          refs.renderedCursorPos.current.x -= postWalk.mx * step * cursorLagFactor;
+          refs.renderedCursorPos.current.y -= postWalk.my * step * cursorLagFactor;
+          refs.renderedCursorPos.current.z -= postWalk.mz * step * cursorLagFactor;
+        }
+        camera.quaternion.copy(targetCamQuat);
+        camera.updateMatrixWorld(true);
+        group.position.copy(refs.renderedCursorPos.current);
+        group.quaternion.copy(cursorQuatTarget);
+        group.updateMatrixWorld(true);
+      } else {
+        const camK = 1 - Math.exp(-CAMERA_LERP_RATE * delta);
+        camera.position.lerp(tmpCamTarget.current, camK);
+        camera.quaternion.copy(targetCamQuat);
+
+        const leanK = 1 - Math.exp(-LEAN_LERP_RATE * delta);
+        refs.renderedCursorPos.current.lerp(cursorPosTarget, leanK);
+        group.position.copy(refs.renderedCursorPos.current);
+        group.quaternion.slerp(cursorQuatTarget, leanK);
+      }
 
       refs.renderedScale.current += (AVATAR_SCALE - refs.renderedScale.current) * k;
+      teleportSnapRef.current = false;
     }
     group.scale.setScalar(refs.renderedScale.current);
   }, 2);

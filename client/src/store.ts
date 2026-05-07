@@ -51,6 +51,59 @@ interface AppActions {
   /** Mark the post-impact controls hint as dismissed. Triggers the
    *  camera transition into 3rd-person avatar mode. */
   setControlsDismissed: (dismissed: boolean) => void;
+  /** True while the pause menu overlay is open. While set, the
+   *  cursor avatar's OS-cursor hide is paused (so the user gets a
+   *  real cursor for the menu), pointer-lock is forcibly released,
+   *  and the InteractionController bails on mousedown/mouseup so
+   *  clicks inside the menu can't drive 3D interactions. */
+  setMenuOpen: (open: boolean) => void;
+  /** Toggle the Simple Experience document layout. Persisted to
+   *  localStorage so the user's choice survives reload. */
+  setDocumentMode: (mode: boolean) => void;
+  /** Set the one-shot pointer-lock signal — true when the user has
+   *  asked to return to 3D from document mode and we should reclaim
+   *  the lock on the next render. App clears it back to false
+   *  after consuming. */
+  setPendingPointerLock: (pending: boolean) => void;
+  /** Set the one-shot navigation request — a route path that an
+   *  in-world Portal wants App's NavigationConsumer to navigate to.
+   *  Pass `null` to clear after consumption. */
+  setPendingNavigation: (path: string | null) => void;
+  /** Set which Room (id from ROOMS in scene/Rooms.tsx) the avatar
+   *  is currently inside, or null when in the main cube. Drives
+   *  the avatar's clamping bounds (room cube vs main cube) and
+   *  URL sync (room.path vs '/'). */
+  setCurrentRoom: (roomId: string | null) => void;
+  /** Update the avatar's current bbox-derived route. Driven by
+   *  CursorAvatar's per-frame routing loop; consumed by RouteSync
+   *  to push to react-router. */
+  setCurrentRoute: (path: string) => void;
+  /** Request that the avatar be repositioned at the entry point of
+   *  the named route. Set by RouteSync when the URL changes
+   *  externally (deep link, browser back); consumed by
+   *  RouteTeleportConsumer inside the Canvas, which actually moves
+   *  the avatar's position ref and clears the request. */
+  setPendingAvatarTeleport: (path: string | null) => void;
+  /** Request a "leap to here" — CursorAvatar drives the avatar toward
+   *  this world-space target at LEAP_SPEED until it arrives or
+   *  crosses a portal plane (whichever happens first). Used by
+   *  click-to-portal: `PortalMesh`'s click handler sets the leap
+   *  target slightly past the portal's active face so the natural
+   *  walk-through crossing detector picks up the cross and runs the
+   *  same `teleportPose` pipeline as a manual walk-in. */
+  setLeapTarget: (target: [number, number, number] | null) => void;
+  /** Queue a click-to-portal request. Validation (single-sided gate,
+   *  bob compensation) happens in CursorAvatar on consume. */
+  setPendingPortalClick: (sourcePortalId: string | null) => void;
+  /** Record which room the avatar most recently *exited*. Updated
+   *  by CursorAvatar when it teleports the avatar back to the
+   *  cube; consumed by the menu's Back button to "pull" the
+   *  avatar back into that same room — Back is just another
+   *  portal activation under the hood. */
+  setLastExitedRoom: (roomId: string | null) => void;
+  /** Toggle the explicit user mute. Combined with documentMode by
+   *  App's audio-mute effect to set the live master volume. */
+  setMuted: (muted: boolean) => void;
   /** Set which interactable the crosshair is currently aimed at, or
    *  null if nothing is in range. The InteractionController updates
    *  this each frame; individual `useInteractable` consumers read it
@@ -86,6 +139,112 @@ interface RevealSlice {
   /** Whether the user has dismissed the post-impact controls hint.
    *  CursorAvatar gates its 3rd-person camera transition on this. */
   controlsDismissed: boolean;
+  /** True while the pause menu overlay is open. Read by
+   *  CursorAvatar (to restore the OS cursor + skip mouselook) and
+   *  by InteractionController (to bail on mousedown/mouseup). */
+  menuOpen: boolean;
+  /** Simple Experience mode — when true, the site renders as a
+   *  document (clean header + nav + scrollable content) instead of
+   *  the 3D Canvas-and-overlays layout. Persisted to localStorage. */
+  documentMode: boolean;
+  /** One-shot signal set by DocumentShell when the user clicks
+   *  "Switch to 3D experience" *while in avatar mode*. App reads
+   *  + clears it on the doc → 3D render and reclaims pointer-lock,
+   *  so the user resumes mouselook without a second confirming
+   *  click. */
+  pendingPointerLock: boolean;
+  /** One-shot signal set by an in-world Portal (or other Canvas
+   *  child) when the user activates a section portal. App's
+   *  NavigationConsumer (which lives inside BrowserRouter, where
+   *  react-router hooks are usable) reads + clears it and calls
+   *  `navigate()`. The store mediates because react-router's
+   *  context doesn't reliably bridge across R3F's reconciler. */
+  pendingNavigation: string | null;
+  /** Which Room (id from ROOMS in scene/Rooms.tsx) the avatar is
+   *  currently inside, or null when in the main cube. Updated by
+   *  CursorAvatar after a teleport; consumed by the avatar's
+   *  clamping logic and the URL-sync effect in NavigationConsumer. */
+  currentRoom: string | null;
+  /** The avatar's current bbox-derived route — the deepest
+   *  registered `Route` (see `content/routes.ts`) whose bbox
+   *  contains the avatar's cube-local position. Updated each frame
+   *  by CursorAvatar's routing loop; the source of truth for the
+   *  URL (RouteSync mirrors it into react-router) and for which
+   *  document slice the Simple Experience renders. */
+  currentRoute: string;
+  /** One-shot teleport request, set by RouteSync when the URL
+   *  changes externally and the avatar needs to be moved into the
+   *  matching route's bbox. Cleared by RouteTeleportConsumer once
+   *  the avatar position ref has been updated. */
+  pendingAvatarTeleport: string | null;
+  /** Active leap target in cube-local world coords, or null when no
+   *  leap is in progress. Set by CursorAvatar after `planPortalLeap`
+   *  validates a click against the avatar's current side of the
+   *  portal. CursorAvatar's per-frame loop overrides walk input and
+   *  moves toward this target at LEAP_SPEED. Cleared on arrival or
+   *  when the walk-through crossing detector fires (whichever
+   *  happens first). */
+  leapTarget: [number, number, number] | null;
+  /** One-shot click-to-portal request. The string is a
+   *  `PortalEndpoint.id` (the portal the user clicked). CursorAvatar
+   *  consumes this each frame: bob-shifts the source endpoint, runs
+   *  `planPortalLeap` with the avatar's live position to pick a
+   *  target (or reject the click as invalid — e.g. clicked on the
+   *  back of a single-sided portal), and clears the field. */
+  pendingPortalClick: string | null;
+  /** Last room the avatar exited back to the cube. Persists past
+   *  exit so the pause-menu Back button can re-enter it. Cleared
+   *  when the user enters a new room (so Back from the cube always
+   *  goes to the most recently exited one, not "two rooms ago"). */
+  lastExitedRoom: string | null;
+  /** Explicit user mute toggled from PauseMenu's audio control. The
+   *  effective master volume is `documentMode || muted ? 0 : 1`,
+   *  so document mode silences audio independently of the user's
+   *  preference (the AudioContext is independent of the render
+   *  loop, so wallAmbient and friends would keep playing into the
+   *  document otherwise) and restores it on the way back. */
+  muted: boolean;
+}
+
+/**
+ * Read the persisted documentMode preference.
+ *
+ * SSR / prerender path: returns `true`. The build-time prerender
+ * step renders the flat document variant so crawlers, link-preview
+ * bots, and screen readers see real content; the runtime swap to
+ * the 3D experience happens client-side after hydration. Initial-
+ * izing the store to `true` for SSR ensures components like
+ * `RoomPage` and `Home` that branch on this flag emit their
+ * document-mode JSX during `renderToString` — without this default,
+ * SSR would emit the 3D-mode variants, and the prerendered HTML
+ * would be useless to crawlers.
+ *
+ * Browser runtime path: reads `localStorage`, defaulting to `false`
+ * so JS users get the 3D experience unless they explicitly opted
+ * into Simple Experience.
+ */
+const DOCUMENT_MODE_STORAGE_KEY = 'documentMode';
+function readPersistedDocumentMode(): boolean {
+  if (typeof window === 'undefined') {
+    return true;
+  }
+  try {
+    return window.localStorage.getItem(DOCUMENT_MODE_STORAGE_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+function persistDocumentMode(mode: boolean): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  try {
+    window.localStorage.setItem(DOCUMENT_MODE_STORAGE_KEY, String(mode));
+  } catch {
+    /* localStorage may be blocked in private windows / specific
+       embed contexts. Mode then becomes session-only, which is an
+       acceptable degradation. */
+  }
 }
 
 interface InteractionSlice {
@@ -123,6 +282,17 @@ export const useWorldStore = create<AppState & AppActions & RevealSlice & Intera
     revealState: 'idle',
     clickHit: null,
     controlsDismissed: false,
+    menuOpen: false,
+    documentMode: readPersistedDocumentMode(),
+    pendingPointerLock: false,
+    pendingNavigation: null,
+    currentRoom: null,
+    currentRoute: '/',
+    pendingAvatarTeleport: null,
+    leapTarget: null,
+    pendingPortalClick: null,
+    lastExitedRoom: null,
+    muted: false,
     // Avatar lives from page load — small at first (cursor-sized), then grows
     // once the reveal completes. See CursorAvatar.tsx for the scale logic.
     cursorAvatarActive: true,
@@ -163,6 +333,22 @@ export const useWorldStore = create<AppState & AppActions & RevealSlice & Intera
 
     resetReveal: () => set({ revealState: 'idle', clickHit: null, controlsDismissed: false }),
 
+    setPendingPointerLock: (pending) => set({ pendingPointerLock: pending }),
+
+    setPendingNavigation: (path) => set({ pendingNavigation: path }),
+
+    setCurrentRoom: (roomId) => set({ currentRoom: roomId }),
+
+    setCurrentRoute: (path) => set({ currentRoute: path }),
+
+    setPendingAvatarTeleport: (path) => set({ pendingAvatarTeleport: path }),
+    setLeapTarget: (target) => set({ leapTarget: target }),
+    setPendingPortalClick: (sourcePortalId) => set({ pendingPortalClick: sourcePortalId }),
+
+    setLastExitedRoom: (roomId) => set({ lastExitedRoom: roomId }),
+
+    setMuted: (muted) => set({ muted }),
+
     setClickHit: (hit) => set({ clickHit: hit }),
 
     toggleCursorAvatar: () => set((state) => ({ cursorAvatarActive: !state.cursorAvatarActive })),
@@ -170,6 +356,13 @@ export const useWorldStore = create<AppState & AppActions & RevealSlice & Intera
     setCursorAvatarActive: (active) => set({ cursorAvatarActive: active }),
 
     setControlsDismissed: (dismissed) => set({ controlsDismissed: dismissed }),
+
+    setMenuOpen: (open) => set({ menuOpen: open }),
+
+    setDocumentMode: (mode) => {
+      persistDocumentMode(mode);
+      set({ documentMode: mode });
+    },
 
     setHoveredInteractable: (id, point = null) =>
       // Always pair id + point: when id is null, point should also be
