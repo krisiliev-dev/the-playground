@@ -16,11 +16,7 @@ import { Sword } from './Sword';
 import { BulletTimeDirector } from './BulletTimeDirector';
 import { VIBE_SLOTS } from './vibeFormation';
 import { sfx } from '../../audio/SfxManager';
-import {
-  ARMED_DURATION_MS,
-  SWINGING_DURATION_MS,
-  IMPACT_DURATION_MS,
-} from './constants';
+import { ARMED_DURATION_MS, SWINGING_DURATION_MS, IMPACT_DURATION_MS } from './constants';
 
 export function RevealOrchestrator(): JSX.Element {
   const revealState = useWorldStore((s) => s.revealState);

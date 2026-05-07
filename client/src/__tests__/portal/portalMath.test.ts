@@ -251,11 +251,10 @@ describe('findCrossedPortal', () => {
   it('does teleport from the inactive side when sidedness is double', () => {
     const doubleA = { ...A, sidedness: 'double' as const };
     const doubleB = { ...B, sidedness: 'double' as const };
-    const result = findCrossedPortal(
-      { x: -100, y: 0, z: -390 },
-      { x: -100, y: 0, z: -370 },
-      [doubleA, doubleB],
-    );
+    const result = findCrossedPortal({ x: -100, y: 0, z: -390 }, { x: -100, y: 0, z: -370 }, [
+      doubleA,
+      doubleB,
+    ]);
     expect(result?.source.id).toBe('A');
   });
 });
@@ -285,9 +284,7 @@ describe('getPaired', () => {
   });
 
   it('returns null when pairedWith resolves to nothing', () => {
-    const dangling: ReadonlyArray<PortalEndpoint> = [
-      { ...A, pairedWith: 'nonexistent' },
-    ];
+    const dangling: ReadonlyArray<PortalEndpoint> = [{ ...A, pairedWith: 'nonexistent' }];
     expect(getPaired('A', dangling)).toBeNull();
   });
 });

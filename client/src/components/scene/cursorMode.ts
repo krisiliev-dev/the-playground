@@ -78,9 +78,7 @@ export function computeCursorMode(input: CursorModeInput): CursorMode {
     return CursorMode.PointerWorldFrozen;
   }
   if (revealState === 'swinging') {
-    return swingTime < SWING_PRE
-      ? CursorMode.PointerWorldFrozen
-      : CursorMode.PointerCameraAnchored;
+    return swingTime < SWING_PRE ? CursorMode.PointerWorldFrozen : CursorMode.PointerCameraAnchored;
   }
 
   // idle, impact, revealed — live pointer.

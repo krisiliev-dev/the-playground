@@ -336,7 +336,6 @@ describe('App', () => {
     });
   });
 
-
   // ── In-world Portal navigation bridge (ADR-003 step 5) ──────────
   describe('NavigationConsumer', () => {
     beforeEach(() => {

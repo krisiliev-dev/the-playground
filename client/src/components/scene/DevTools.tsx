@@ -110,9 +110,10 @@ function PerfOverlay(): null {
 
     const info = gl.info;
     const fps = frames.length;
-    const ms = frames.length >= 2
-      ? ((frames[frames.length - 1]! - frames[0]!) / Math.max(1, frames.length - 1)).toFixed(1)
-      : '–';
+    const ms =
+      frames.length >= 2
+        ? ((frames[frames.length - 1]! - frames[0]!) / Math.max(1, frames.length - 1)).toFixed(1)
+        : '–';
     const programs = info.programs?.length ?? 0;
     div.textContent = [
       `FPS  ${fps.toString().padStart(3)}   ${ms} ms/frame`,

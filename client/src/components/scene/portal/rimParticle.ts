@@ -120,8 +120,7 @@ export function respawnRimParticle(
   p.velocity.set(vx, vy, vz).normalize().multiplyScalar(speed);
 
   p.lifetime =
-    RIM_PARTICLE_LIFETIME_MIN +
-    random() * (RIM_PARTICLE_LIFETIME_MAX - RIM_PARTICLE_LIFETIME_MIN);
+    RIM_PARTICLE_LIFETIME_MIN + random() * (RIM_PARTICLE_LIFETIME_MAX - RIM_PARTICLE_LIFETIME_MIN);
   p.age = stagger ? random() * p.lifetime : 0;
 
   const idx = Math.floor(random() * palette.length);

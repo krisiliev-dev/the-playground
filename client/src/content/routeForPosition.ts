@@ -104,11 +104,7 @@ export function routeForAvatar(
   bob: BobConfig | undefined,
 ): string {
   const offset = floatOffset(time, bob);
-  const localPos: Vector3Tuple = [
-    avatarWorldPos[0],
-    avatarWorldPos[1] - offset,
-    avatarWorldPos[2],
-  ];
+  const localPos: Vector3Tuple = [avatarWorldPos[0], avatarWorldPos[1] - offset, avatarWorldPos[2]];
   return routeForLocalPosition(localPos, flatRoutes);
 }
 

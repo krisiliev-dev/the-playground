@@ -1481,4 +1481,3 @@ function AvatarCursor({ refs }: ModeProps): null {
 
   return null;
 }
-

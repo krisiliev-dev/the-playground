@@ -1,13 +1,7 @@
 import { Suspense, lazy, useCallback, useEffect, useState } from 'react';
 import { Canvas, useFrame, useThree, type RootState } from '@react-three/fiber';
 import { BrowserRouter, Route, Routes, useNavigate } from 'react-router-dom';
-import {
-  World,
-  PostFx,
-  DevTools,
-  ShakeGroup,
-  CursorAvatar,
-} from '@/components/scene';
+import { World, PostFx, DevTools, ShakeGroup, CursorAvatar } from '@/components/scene';
 import {
   CursorText,
   Crosshair,

@@ -49,7 +49,10 @@ const TEST_ROUTES: ReadonlyArray<Route> = [
 const FLAT = flattenRoutes(TEST_ROUTES);
 
 describe('aabbContains', () => {
-  const box = { min: [0, 0, 0] as [number, number, number], max: [10, 10, 10] as [number, number, number] };
+  const box = {
+    min: [0, 0, 0] as [number, number, number],
+    max: [10, 10, 10] as [number, number, number],
+  };
 
   it('returns true for a point inside the bbox', () => {
     expect(aabbContains(box, [5, 5, 5])).toBe(true);
@@ -119,16 +122,12 @@ describe('routeForAvatar (with bob compensation)', () => {
     // at one bob phase and below at another:
     const worldY = 100 + FLOAT_AMPLITUDE / 2; // local Y oscillates [99.7, 100.7] over the cycle
     // At quarter phase, offset = +0.6, local Y = worldY - 0.6 = 99.9 → inside
-    expect(routeForAvatar([100, worldY, 0], FLOAT_PERIOD / 4, FLAT, MAIN_CUBE_BOB)).toBe(
-      '/about',
-    );
+    expect(routeForAvatar([100, worldY, 0], FLOAT_PERIOD / 4, FLAT, MAIN_CUBE_BOB)).toBe('/about');
     // At three-quarter phase, offset = -0.6, local Y = worldY + 0.6 = 101.1 → OUTSIDE
     // The avatar IS in fact outside /about's bbox at that time — the
     // bob shifted the cube down, so the floor of /about (relative to
     // world) rose. Routing reflects truth.
-    expect(routeForAvatar([100, worldY, 0], (3 * FLOAT_PERIOD) / 4, FLAT, MAIN_CUBE_BOB)).toBe(
-      '/',
-    );
+    expect(routeForAvatar([100, worldY, 0], (3 * FLOAT_PERIOD) / 4, FLAT, MAIN_CUBE_BOB)).toBe('/');
   });
 
   it('floatOffset is zero at t=0 and at t=FLOAT_PERIOD', () => {
@@ -144,7 +143,10 @@ describe('routeForAvatar (with bob compensation)', () => {
 });
 
 describe('avatarWorldEntryFor', () => {
-  const bbox = { min: [0, 0, 0] as [number, number, number], max: [100, 100, 100] as [number, number, number] };
+  const bbox = {
+    min: [0, 0, 0] as [number, number, number],
+    max: [100, 100, 100] as [number, number, number],
+  };
 
   it('uses the explicit entryPoint when provided, lifted by the bob', () => {
     const entry = avatarWorldEntryFor(bbox, [50, 25, 50], 0, MAIN_CUBE_BOB);

@@ -184,28 +184,14 @@ describe('respawnRimParticle — velocity outward bias', () => {
     // t = 0.6 * 280 = 168 → bottom edge, normal (0, -1, 0). Same draws
     // as above so the only difference is the flipped edge normal.
     const p = makeParticle();
-    respawnRimParticle(
-      p,
-      WIDTH,
-      HEIGHT,
-      palette,
-      false,
-      seq([0.6, 0.0, 0.5, 0.5, 0.5, 0]),
-    );
+    respawnRimParticle(p, WIDTH, HEIGHT, palette, false, seq([0.6, 0.0, 0.5, 0.5, 0.5, 0]));
     expect(p.velocity.y).toBeLessThan(0);
   });
 
   it('a left-edge spawn carries a negative x-component (outward = -x)', () => {
     // t = 0.85 * 280 = 238 → left edge.
     const p = makeParticle();
-    respawnRimParticle(
-      p,
-      WIDTH,
-      HEIGHT,
-      palette,
-      false,
-      seq([0.85, 0.0, 0.5, 0.5, 0.5, 0]),
-    );
+    respawnRimParticle(p, WIDTH, HEIGHT, palette, false, seq([0.85, 0.0, 0.5, 0.5, 0.5, 0]));
     expect(p.velocity.x).toBeLessThan(0);
   });
 
@@ -268,14 +254,7 @@ describe('respawnRimParticle — color from palette', () => {
     const p = makeParticle();
     // Perimeter pick → 0, angle → 0, elevation → 0, speed → 0,
     // lifetime → 0, palette pick → 0.99 → floor(0.99*11) = 10 (accent).
-    respawnRimParticle(
-      p,
-      WIDTH,
-      HEIGHT,
-      palette,
-      false,
-      seq([0, 0, 0, 0, 0, 0.99]),
-    );
+    respawnRimParticle(p, WIDTH, HEIGHT, palette, false, seq([0, 0, 0, 0, 0, 0.99]));
     expect(p.color.equals(palette[10]!)).toBe(true);
   });
 
@@ -284,14 +263,7 @@ describe('respawnRimParticle — color from palette', () => {
     const base = new Color('#ff6ec7');
     const p = makeParticle();
     // palette pick 0.4 → floor(0.4*11)=4 → still in base slots.
-    respawnRimParticle(
-      p,
-      WIDTH,
-      HEIGHT,
-      palette,
-      false,
-      seq([0, 0, 0, 0, 0, 0.4]),
-    );
+    respawnRimParticle(p, WIDTH, HEIGHT, palette, false, seq([0, 0, 0, 0, 0, 0.4]));
     expect(p.color.equals(base)).toBe(true);
   });
 });

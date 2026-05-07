@@ -248,9 +248,9 @@ export function teleportPose(
   ).applyQuaternion(sourceQuat.clone().invert());
   // R₁₈₀ around local Y: negate x and z, keep y.
   const flipped = new Vector3(-local.x, local.y, -local.z);
-  const newWorld = flipped.applyQuaternion(destQuat).add(
-    new Vector3(destination.position[0], destination.position[1], destination.position[2]),
-  );
+  const newWorld = flipped
+    .applyQuaternion(destQuat)
+    .add(new Vector3(destination.position[0], destination.position[1], destination.position[2]));
 
   // Yaw: source-local yaw → flip 180° around Y → re-anchor in dest
   // frame. For the common case (portals with up = world up) this
@@ -321,9 +321,9 @@ export function virtualCameraPose(
   ).applyQuaternion(sourceQuat.clone().invert());
   // R₁₈₀_Y in source local frame.
   const flipped = new Vector3(-local.x, local.y, -local.z);
-  const newWorld = flipped.applyQuaternion(destQuat).add(
-    new Vector3(destination.position[0], destination.position[1], destination.position[2]),
-  );
+  const newWorld = flipped
+    .applyQuaternion(destQuat)
+    .add(new Vector3(destination.position[0], destination.position[1], destination.position[2]));
 
   // Quaternion: same flip composition as `teleportPose`, but
   // applied to the full camera quaternion (preserves pitch/roll).

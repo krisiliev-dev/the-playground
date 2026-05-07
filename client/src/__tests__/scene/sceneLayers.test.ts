@@ -28,12 +28,7 @@ describe('scene layer constants', () => {
   it('all constants are valid layer indices in [1, 31]', () => {
     // Bit 0 is the default layer (every Object3D has it on by default).
     // Reserve roles to bits 1-31 so they coexist with default content.
-    for (const layer of [
-      CURSOR_LAYER,
-      PORTAL_LAYER,
-      PORTAL_SURFACE_LAYER,
-      CASCADE_OVERLAY_LAYER,
-    ]) {
+    for (const layer of [CURSOR_LAYER, PORTAL_LAYER, PORTAL_SURFACE_LAYER, CASCADE_OVERLAY_LAYER]) {
       expect(layer).toBeGreaterThanOrEqual(1);
       expect(layer).toBeLessThanOrEqual(31);
       expect(Number.isInteger(layer)).toBe(true);
@@ -41,12 +36,7 @@ describe('scene layer constants', () => {
   });
 
   it('all constants are distinct (no role aliases another)', () => {
-    const layers = [
-      CURSOR_LAYER,
-      PORTAL_LAYER,
-      PORTAL_SURFACE_LAYER,
-      CASCADE_OVERLAY_LAYER,
-    ];
+    const layers = [CURSOR_LAYER, PORTAL_LAYER, PORTAL_SURFACE_LAYER, CASCADE_OVERLAY_LAYER];
     const unique = new Set(layers);
     expect(unique.size).toBe(layers.length);
   });

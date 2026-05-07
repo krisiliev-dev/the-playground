@@ -427,13 +427,7 @@ function drawPortalRecursive(
   // stencilWrite=false, so directly setting gl state isn't enough —
   // we have to set stencilWrite=true on every material we want
   // masked, with the right func/ref/op.
-  setSceneStencilTest(
-    scene,
-    EqualStencilFunc,
-    stencilRef + 1,
-    KeepStencilOp,
-    portalSurfaceMats,
-  );
+  setSceneStencilTest(scene, EqualStencilFunc, stencilRef + 1, KeepStencilOp, portalSurfaceMats);
 
   ps.vCam.layers.set(0);
   ps.vCam.layers.enable(PORTAL_LAYER);
@@ -522,13 +516,7 @@ function drawPortalRecursive(
   // stencilFunc to deeper values (stencilRef+2, +3, …). Re-call
   // setSceneStencilTest so materials test against THIS level's
   // stencil mask (stencilRef+1 = R_N).
-  setSceneStencilTest(
-    scene,
-    EqualStencilFunc,
-    stencilRef + 1,
-    KeepStencilOp,
-    portalSurfaceMats,
-  );
+  setSceneStencilTest(scene, EqualStencilFunc, stencilRef + 1, KeepStencilOp, portalSurfaceMats);
   ps.vCam.layers.set(CASCADE_OVERLAY_LAYER);
   // Mutating the depth-clear material's stencilRef here would be
   // wrong — depth IS the depth left by the inner recursion's Phase D
@@ -583,11 +571,7 @@ function drawPortalRecursive(
  * (inverse-pair cancellation), collapsing recursion to 2-pose
  * alternation.
  */
-function computeChainPose(
-  ps: PortalState,
-  parentCam: PerspectiveCamera,
-  bobY: number,
-): void {
+function computeChainPose(ps: PortalState, parentCam: PerspectiveCamera, bobY: number): void {
   const endpoint = ps.endpoint;
   const paired = getPaired(endpoint.id);
   if (!paired) {
@@ -813,7 +797,6 @@ function setSceneStencilDisabled(scene: Scene, exclude: Set<Material>): void {
     }
   });
 }
-
 
 interface PortalMeshProps {
   endpoint: PortalEndpoint;
@@ -1052,18 +1035,14 @@ function PortalRim({ width, height, color, portalPosition }: PortalRimProps): JS
     const dist = camera.position.distanceTo(portalCenter);
     const proximity = Math.max(
       0,
-      Math.min(
-        1,
-        (RIM_PROXIMITY_FAR - dist) / (RIM_PROXIMITY_FAR - RIM_PROXIMITY_NEAR),
-      ),
+      Math.min(1, (RIM_PROXIMITY_FAR - dist) / (RIM_PROXIMITY_FAR - RIM_PROXIMITY_NEAR)),
     );
     const speedScale =
       RIM_SPEED_SCALE_IDLE + (RIM_SPEED_SCALE_ACTIVE - RIM_SPEED_SCALE_IDLE) * proximity;
     const brightness =
       RIM_BRIGHTNESS_IDLE + (RIM_BRIGHTNESS_ACTIVE - RIM_BRIGHTNESS_IDLE) * proximity;
     const countFraction =
-      RIM_COUNT_FRACTION_IDLE +
-      (RIM_COUNT_FRACTION_ACTIVE - RIM_COUNT_FRACTION_IDLE) * proximity;
+      RIM_COUNT_FRACTION_IDLE + (RIM_COUNT_FRACTION_ACTIVE - RIM_COUNT_FRACTION_IDLE) * proximity;
     // `mesh.count` clips the InstancedMesh draw call to the first N
     // instances regardless of buffer length — the GPU just doesn't
     // process the rest. A larger floor than 1 keeps a visible halo
@@ -1108,13 +1087,9 @@ function PortalRim({ width, height, color, portalPosition }: PortalRimProps): JS
   });
 
   return (
-    <instancedMesh
-      ref={meshRef}
-      args={[undefined, undefined, RIM_PARTICLE_COUNT]}
-    >
+    <instancedMesh ref={meshRef} args={[undefined, undefined, RIM_PARTICLE_COUNT]}>
       <boxGeometry args={[1, 1, 1]} />
       <meshBasicMaterial toneMapped={false} />
     </instancedMesh>
   );
 }
-
