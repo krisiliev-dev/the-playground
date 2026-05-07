@@ -2,7 +2,11 @@
 
 ## Status
 
-Accepted
+**Superseded by [ADR-004](./adr-004-authoritative-multiplayer-server.md)** (2026-05-07).
+
+The relay-style design described here was a placeholder while the project was single-player. ADR-004 replaces it with an authoritative, entity-component server motivated by the admin-tooling end goal — see ADR-004 for the migration scope.
+
+Original status: Accepted
 
 ## Date
 
