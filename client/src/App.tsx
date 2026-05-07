@@ -17,6 +17,7 @@ import { DocumentShell } from '@/components/document';
 import { useWorldStore } from '@/store';
 import { useMultiplayerSync } from '@/multiplayer/useMultiplayerSync';
 import { MultiplayerDebugHud } from '@/multiplayer/MultiplayerDebugHud';
+import { MultiplayerEffectsReceiver } from '@/multiplayer/MultiplayerEffectsReceiver';
 import { acquirePointerLock } from '@/utils';
 import { CubeScene } from '@/scenes/CubeScene';
 import { SceneHost } from '@/scenes/SceneHost';
@@ -257,9 +258,10 @@ export function App(): JSX.Element {
   useGlobalMouseFeedback();
   useAvatarDevHotkey();
   useAudioMute();
+  const multiplayerEnabled = MULTIPLAYER_URL.length > 0;
   useMultiplayerSync({
     url: MULTIPLAYER_URL,
-    enabled: MULTIPLAYER_URL.length > 0,
+    enabled: multiplayerEnabled,
   });
   // Simple Experience document mode. When true, the 3D scene
   // (Canvas + cursor + animations) is *paused and hidden* rather
@@ -458,7 +460,12 @@ export function App(): JSX.Element {
             <CursorText />
             <PauseMenu />
             <SectionRoutes />
-            {MULTIPLAYER_URL.length > 0 && <MultiplayerDebugHud />}
+            {multiplayerEnabled && (
+              <>
+                <MultiplayerDebugHud />
+                <MultiplayerEffectsReceiver />
+              </>
+            )}
           </>
         )}
       </div>

@@ -245,15 +245,15 @@ export function Sword({ slot, staggerIndex = 0 }: SwordProps): JSX.Element {
       // Use a moderate default velocity for catch-up slams since the
       // sword may not have completed its arc to peak speed.
       const fallbackVel = 60;
-      void sfx.play('swordSlam', {
+      const slamPos: [number, number, number] = [
+        clickHit.point[0] + jitterAxis(Math.random, SLAM_POS_JITTER),
+        clickHit.point[1] + jitterAxis(Math.random, SLAM_POS_JITTER),
+        clickHit.point[2] + jitterAxis(Math.random, SLAM_POS_JITTER),
+      ];
+      void sfx.playWorld('swordSlam', slamPos, {
         volumeMultiplier: 0.55,
         pitchJitter: computeSlamPitchJitter(fallbackVel),
         filterGain: jitterAxis(Math.random, 20),
-        position: {
-          x: clickHit.point[0] + jitterAxis(Math.random, SLAM_POS_JITTER),
-          y: clickHit.point[1] + jitterAxis(Math.random, SLAM_POS_JITTER),
-          z: clickHit.point[2] + jitterAxis(Math.random, SLAM_POS_JITTER),
-        },
       });
     }
   }, [revealState, clickHit]);
@@ -551,15 +551,15 @@ export function Sword({ slot, staggerIndex = 0 }: SwordProps): JSX.Element {
       // values: each slam pans to a different stereo location and
       // gets a slightly different per-fire high-shelf EQ.
       const SLAM_POS_JITTER = 20;
-      void sfx.play('swordSlam', {
+      const slamPos: [number, number, number] = [
+        hitPoint.x + jitterAxis(Math.random, SLAM_POS_JITTER),
+        hitPoint.y + jitterAxis(Math.random, SLAM_POS_JITTER),
+        hitPoint.z + jitterAxis(Math.random, SLAM_POS_JITTER),
+      ];
+      void sfx.playWorld('swordSlam', slamPos, {
         volumeMultiplier: 0.55 * computeSlamVelocityFactor(v),
         pitchJitter: computeSlamPitchJitter(v),
         filterGain: jitterAxis(Math.random, 20),
-        position: {
-          x: hitPoint.x + jitterAxis(Math.random, SLAM_POS_JITTER),
-          y: hitPoint.y + jitterAxis(Math.random, SLAM_POS_JITTER),
-          z: hitPoint.z + jitterAxis(Math.random, SLAM_POS_JITTER),
-        },
       });
     }
 

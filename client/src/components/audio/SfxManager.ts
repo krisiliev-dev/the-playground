@@ -33,6 +33,7 @@
  * (sword flying audio) get a `PositionalLoopHandle` instead.
  */
 import { SFX, type SfxEntry, type SfxId } from './sfxManifest';
+import { emitSceneEvent } from '@/multiplayer/sceneEvents';
 
 interface PlayOpts {
   /** Multiplied with the cue's manifest volume (0..1+). */
@@ -411,6 +412,40 @@ class SfxManager {
       // eslint-disable-next-line no-console
       console.error('[sfx] play failed for', id, e);
     }
+  }
+
+  /**
+   * World-positioned cue that ALSO broadcasts to other connected
+   * clients via the SceneEvent channel (per ADR-006). Use this for
+   * any sound that should be audible to remote viewers — sword
+   * impacts, footsteps, hits, etc.
+   *
+   * For local-only cues (UI clicks, mousedown feedback, hover
+   * affordances) keep using `play()` directly — those shouldn't
+   * propagate.
+   *
+   * The local play happens immediately (optimistic-local); the
+   * broadcast goes out on the next outbound tick of
+   * `useMultiplayerSync`. If multiplayer is disabled, the
+   * `emitSceneEvent` call accumulates in the queue harmlessly
+   * and is dropped when no connection is established.
+   */
+  playWorld(id: SfxId, position: [number, number, number], opts: PlayOpts = {}): void {
+    // 1. Local play — caller hears it now without waiting for the
+    //    server round-trip. The play() promise is fire-and-forget;
+    //    failures are logged inside play().
+    void this.play(id, {
+      ...opts,
+      position: { x: position[0], y: position[1], z: position[2] },
+    });
+    // 2. Broadcast — server validates + fans out (excludes self
+    //    via the existing self-echo filter, so we don't double-play).
+    emitSceneEvent({
+      kind: 'audio',
+      sound_id: id,
+      position,
+      volume: opts.volumeMultiplier ?? 1.0,
+    });
   }
 
   /** Start a per-instance positional loop. Returns a handle whose

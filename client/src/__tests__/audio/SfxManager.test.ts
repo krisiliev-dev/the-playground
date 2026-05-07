@@ -12,6 +12,7 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { sfx } from '@/components/audio/SfxManager';
+import { drainOutboundQueue, _resetSceneEventBusForTest } from '@/multiplayer/sceneEvents';
 
 describe('SfxManager (jsdom: no AudioContext)', () => {
   beforeEach(() => {
@@ -137,6 +138,45 @@ describe('SfxManager (jsdom: no AudioContext)', () => {
   describe('getContext()', () => {
     it('returns null when no AudioContext has been created', () => {
       expect(sfx.getContext()).toBeNull();
+    });
+  });
+
+  describe('playWorld() — broadcasts via the SceneEvent channel', () => {
+    beforeEach(() => {
+      _resetSceneEventBusForTest();
+    });
+
+    it('queues an Audio scene event with the supplied position', () => {
+      sfx.playWorld('swordSlam', [12, 4, -3]);
+      const drained = drainOutboundQueue();
+      expect(drained).toHaveLength(1);
+      expect(drained[0]).toEqual({
+        kind: 'audio',
+        sound_id: 'swordSlam',
+        position: [12, 4, -3],
+        volume: 1.0,
+      });
+    });
+
+    it('forwards volumeMultiplier as the event volume', () => {
+      sfx.playWorld('swordSlam', [0, 0, 0], { volumeMultiplier: 0.7 });
+      const drained = drainOutboundQueue();
+      expect(drained[0]).toMatchObject({ volume: 0.7 });
+    });
+
+    it('defaults volume to 1.0 when no multiplier is supplied', () => {
+      sfx.playWorld('swordSlam', [0, 0, 0]);
+      expect(drainOutboundQueue()[0]).toMatchObject({ volume: 1.0 });
+    });
+
+    it('does not throw without an AudioContext (jsdom)', () => {
+      expect(() => sfx.playWorld('swordSlam', [0, 0, 0])).not.toThrow();
+    });
+
+    it('emits exactly one event per call (no implicit echo)', () => {
+      sfx.playWorld('swordSlam', [0, 0, 0]);
+      sfx.playWorld('swordSlam', [1, 0, 0]);
+      expect(drainOutboundQueue()).toHaveLength(2);
     });
   });
 });
