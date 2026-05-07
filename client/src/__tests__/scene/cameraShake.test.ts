@@ -176,7 +176,7 @@ describe('triggerWorldImpactShake', () => {
     const event = drainOutboundQueue()[0];
     expect(event).toMatchObject({
       kind: 'camera_shake',
-      radius: 60,
+      radius: 500,
       intensity: 1,
     });
   });

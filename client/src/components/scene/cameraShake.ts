@@ -23,11 +23,16 @@ const SHAKE_DURATION = 0.18;
 const SHAKE_MAGNITUDE = 0.45;
 const SHAKE_MAX_INTENSITY = 1.5;
 
-/** Default radius and intensity for world-impact shakes. Tuned so a
- *  sword slam at the center of the cube gently shakes the camera of
- *  a player anywhere inside; outside this radius the receiver does
- *  nothing. */
-const DEFAULT_WORLD_RADIUS = 60;
+/** Default radius and intensity for world-impact shakes. Sized to
+ *  cover the typical avatar-to-impact distance with the camera at
+ *  its default ~z=-360 spawn — sword slams against the main cube's
+ *  far wall need to reach a player whose camera is hundreds of units
+ *  back. Linear falloff means closer players still feel a stronger
+ *  shake; this just extends the *audible* radius.
+ *
+ *  Per-effect callers can override via opts.radius for tighter
+ *  effects (e.g. a footstep would use ~30, a thunderclap ~1000). */
+const DEFAULT_WORLD_RADIUS = 500;
 const DEFAULT_WORLD_INTENSITY = 1.0;
 const DEFAULT_WORLD_DURATION_MS = SHAKE_DURATION * 1000;
 
