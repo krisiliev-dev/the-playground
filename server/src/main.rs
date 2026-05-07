@@ -14,6 +14,7 @@ mod entity;
 mod handlers;
 mod protocol;
 mod registry;
+mod snapshot;
 mod state;
 mod tick;
 
@@ -40,12 +41,43 @@ async fn main() {
         tracing::warn!("ADMIN_TOKEN is not set — admin mutations will be rejected");
     }
 
+    let snapshot_path: std::path::PathBuf = std::env::var("STATE_FILE")
+        .unwrap_or_else(|_| "state.json".to_string())
+        .into();
+    let snapshot_interval: u64 = std::env::var("SNAPSHOT_INTERVAL_SECS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(snapshot::DEFAULT_SNAPSHOT_INTERVAL_SECS);
+
     let state = AppState::new(admin_token);
+
+    // Restore prior admin-authored scene state from disk. Missing
+    // file is OK (cold start). Corrupt or version-mismatched file
+    // is logged and we proceed empty rather than refuse to start
+    // — losing operator scenes is preferable to a server stuck on
+    // boot.
+    {
+        let mut registry = state.registry.write().await;
+        match snapshot::load(&snapshot_path, &mut registry).await {
+            Ok(count) => tracing::info!(
+                restored = count,
+                path = %snapshot_path.display(),
+                "loaded scene snapshot"
+            ),
+            Err(e) => tracing::warn!(
+                error = %e,
+                path = %snapshot_path.display(),
+                "snapshot load failed; starting empty"
+            ),
+        }
+    }
+    snapshot::precheck_writable(&snapshot_path).await;
 
     // Spawn the 30 Hz authoritative tick loop. Returns a JoinHandle
     // we deliberately drop — the task lives for the lifetime of
     // the process; tokio cancels it on graceful shutdown.
     let _tick_handle = tick::spawn(state.clone());
+    let _snapshot_handle = snapshot::spawn(state.clone(), snapshot_path, snapshot_interval);
 
     let cors = CorsLayer::new()
         .allow_origin(Any)

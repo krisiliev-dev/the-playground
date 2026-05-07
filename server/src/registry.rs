@@ -55,10 +55,6 @@ impl EntityRegistry {
         }
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &Entity> {
-        self.entities.values()
-    }
-
     pub fn len(&self) -> usize {
         self.entities.len()
     }
