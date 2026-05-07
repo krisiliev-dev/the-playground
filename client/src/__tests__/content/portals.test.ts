@@ -246,6 +246,41 @@ describe('buildPortalEndpoints — runtime factory', () => {
     }
   });
 
+  it('actorId namespaces every id with `<actorId>::` and rewrites pairedWith within the set', () => {
+    const eps = buildPortalEndpoints(NEG_Z_WALL_CLICK, 1, 'player-A');
+    // Every id is namespaced.
+    for (const ep of eps) {
+      expect(ep.id.startsWith('player-A::')).toBe(true);
+    }
+    // pairedWith pointers stay within the actor's set (so A's
+    // formation portal pairs to A's room exit, not the global one).
+    for (const ep of eps) {
+      if (ep.trigger) {
+        // Trigger endpoints don't teleport; pairedWith is a marker.
+        continue;
+      }
+      expect(ep.pairedWith.startsWith('player-A::')).toBe(true);
+      // The paired portal must exist within the same set.
+      expect(eps.some((e) => e.id === ep.pairedWith)).toBe(true);
+    }
+  });
+
+  it('omitting actorId keeps the legacy non-namespaced ids', () => {
+    const eps = buildPortalEndpoints(NEG_Z_WALL_CLICK);
+    expect(eps.some((e) => e.id === 'formation-writing')).toBe(true);
+    expect(eps.some((e) => e.id === 'room-writing-exit')).toBe(true);
+  });
+
+  it('two actors produce disjoint id sets', () => {
+    const a = buildPortalEndpoints(NEG_Z_WALL_CLICK, 1, 'A');
+    const b = buildPortalEndpoints(NEG_Z_WALL_CLICK, 1, 'B');
+    const aIds = new Set(a.map((e) => e.id));
+    const bIds = new Set(b.map((e) => e.id));
+    for (const id of aIds) {
+      expect(bIds.has(id)).toBe(false);
+    }
+  });
+
   it('scale parameter scales formation portal size linearly', () => {
     const e1 = buildPortalEndpoints(NEG_Z_WALL_CLICK, 1);
     const e2 = buildPortalEndpoints(NEG_Z_WALL_CLICK, 2);

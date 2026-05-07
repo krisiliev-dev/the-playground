@@ -126,8 +126,24 @@ interface AppActions {
   setPendingPortalClick: (sourcePortalId: string | null) => void;
   /** Replace the active portal endpoint set. Called by the reveal
    *  orchestrator with `buildPortalEndpoints(clickHit)` output once
-   *  the formation has landed; called with `[]` on `resetReveal`. */
+   *  the formation has landed; called with `[]` on `resetReveal`.
+   *
+   *  Prefer `addPortalEndpoints` for multiplayer-aware callers —
+   *  it keeps other actors' portal sets intact instead of stomping
+   *  the whole array. */
   setPortalEndpoints: (endpoints: ReadonlyArray<PortalEndpoint>) => void;
+  /** Add (or replace) a single actor's portal set. The set is
+   *  identified by the `<actorId>::` id prefix that
+   *  `buildPortalEndpoints` writes when called with an actorId.
+   *  Calling this for actor X replaces only X's portals — every
+   *  other actor's set is preserved. So when player A reveals and
+   *  later player B reveals, both portal clusters coexist in the
+   *  scene. */
+  addPortalEndpoints: (actorId: string, endpoints: ReadonlyArray<PortalEndpoint>) => void;
+  /** Remove all portals tagged with `<actorId>::`. Called when a
+   *  remote player disconnects (so their portals don't linger
+   *  forever) and when the local player resets their reveal. */
+  removePortalEndpointsByActor: (actorId: string) => void;
   /** Record which room the avatar most recently *exited*. Updated
    *  by CursorAvatar when it teleports the avatar back to the
    *  cube; consumed by the menu's Back button to "pull" the
@@ -414,13 +430,22 @@ export const useWorldStore = create<
     }),
 
   resetReveal: () =>
-    set({
-      revealState: 'idle',
-      clickHit: null,
-      clickCamPose: null,
-      revealStateEnteredAt: 0,
-      controlsDismissed: false,
-      portalEndpoints: [],
+    set((state) => {
+      // Multiplayer-aware reset: clear only the local actor's
+      // portal set, preserving any portals belonging to remote
+      // players. The local actor's id is `localPlayerId ?? 'local'`
+      // (the `'local'` fallback covers single-player mode where
+      // no multiplayer id has been assigned yet).
+      const localActorId = state.localPlayerId ?? 'local';
+      const prefix = `${localActorId}::`;
+      return {
+        revealState: 'idle',
+        clickHit: null,
+        clickCamPose: null,
+        revealStateEnteredAt: 0,
+        controlsDismissed: false,
+        portalEndpoints: state.portalEndpoints.filter((p) => !p.id.startsWith(prefix)),
+      };
     }),
 
   setPendingPointerLock: (pending) => set({ pendingPointerLock: pending }),
@@ -435,6 +460,21 @@ export const useWorldStore = create<
   setLeapTarget: (target) => set({ leapTarget: target }),
   setPendingPortalClick: (sourcePortalId) => set({ pendingPortalClick: sourcePortalId }),
   setPortalEndpoints: (endpoints) => set({ portalEndpoints: endpoints }),
+
+  addPortalEndpoints: (actorId, endpoints) =>
+    set((state) => {
+      const prefix = `${actorId}::`;
+      const others = state.portalEndpoints.filter((p) => !p.id.startsWith(prefix));
+      return { portalEndpoints: [...others, ...endpoints] };
+    }),
+
+  removePortalEndpointsByActor: (actorId) =>
+    set((state) => {
+      const prefix = `${actorId}::`;
+      return {
+        portalEndpoints: state.portalEndpoints.filter((p) => !p.id.startsWith(prefix)),
+      };
+    }),
 
   setLastExitedRoom: (roomId) => set({ lastExitedRoom: roomId }),
 

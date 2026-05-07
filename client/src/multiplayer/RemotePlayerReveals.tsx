@@ -118,15 +118,18 @@ interface RemotePlayerCascadeProps {
   presence: RevealPresence;
 }
 
-function RemotePlayerCascade({ presence }: RemotePlayerCascadeProps): JSX.Element {
+function RemotePlayerCascade({ actorId, presence }: RemotePlayerCascadeProps): JSX.Element {
   // Materialize portal endpoints in the local store the moment
   // we observe the remote player's reveal hit `impact`. Mirrors
   // what `RevealOrchestrator` does locally: portals appear at
   // the click hit one beat before the formation settles. The
   // local `<Portals>` component picks them up from the store —
   // they're functional (clickable, navigable) for the local
-  // player without any additional wiring. Last-impact-wins if
-  // multiple players reveal in close succession.
+  // player without any additional wiring.
+  //
+  // Multiplayer: tagging by `actorId` keeps each player's set
+  // independent. `addPortalEndpoints` replaces only this
+  // actor's portals — other players' clusters survive.
   useEffect(() => {
     if (presence.reveal_state !== 'impact' && presence.reveal_state !== 'revealed') {
       return;
@@ -137,13 +140,26 @@ function RemotePlayerCascade({ presence }: RemotePlayerCascadeProps): JSX.Elemen
         normal: presence.click_hit_normal,
       },
       FORMATION_SCALE,
+      actorId,
     );
-    useWorldStore.getState().setPortalEndpoints(endpoints);
+    useWorldStore.getState().addPortalEndpoints(actorId, endpoints);
   }, [
+    actorId,
     presence.reveal_state,
     presence.click_hit_point,
     presence.click_hit_normal,
   ]);
+
+  // Clean up this actor's portals when the cascade unmounts —
+  // either because the remote player reset their reveal (state
+  // returns to idle, presence drops the reveal fields) or
+  // because they disconnected (entity removed from store).
+  // Without this, dead actors' portals would linger forever.
+  useEffect(() => {
+    return () => {
+      useWorldStore.getState().removePortalEndpointsByActor(actorId);
+    };
+  }, [actorId]);
 
   // Each Sword reads from its own `context` prop; the context
   // is a fresh object per render so React detects the change

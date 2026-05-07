@@ -117,12 +117,17 @@ export function RevealOrchestrator(): JSX.Element {
   // wall plane); the 3 room-exit portals are static-by-room but
   // ride along in the same array for uniform consumption. We trigger
   // on `'impact'` (one beat before `'revealed'`) so the portals are
-  // present when the formation visually settles. Cleared by
-  // `resetReveal`.
+  // present when the formation visually settles.
+  //
+  // Multiplayer: portals are tagged with the local actor id so a
+  // remote player's reveal doesn't stomp our set (and vice versa).
+  // `addPortalEndpoints` replaces only this actor's portals,
+  // preserving any other actors' clusters in the scene.
   useEffect(() => {
     if (revealState === 'impact' && clickHit) {
-      const endpoints = buildPortalEndpoints(clickHit, FORMATION_SCALE);
-      useWorldStore.getState().setPortalEndpoints(endpoints);
+      const localActorId = useWorldStore.getState().localPlayerId ?? 'local';
+      const endpoints = buildPortalEndpoints(clickHit, FORMATION_SCALE, localActorId);
+      useWorldStore.getState().addPortalEndpoints(localActorId, endpoints);
     }
   }, [revealState, clickHit]);
 

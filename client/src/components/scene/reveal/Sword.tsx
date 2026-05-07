@@ -571,41 +571,33 @@ export function Sword({ slot, staggerIndex = 0, context }: SwordProps): JSX.Elem
     // Fire this sword's flash exactly when its effective swing begins.
     if (revealState === 'swinging' && flashStartedAt.current < 0 && t >= 0) {
       flashStartedAt.current = state.clock.elapsedTime;
-      // Audio is local-only: remote-driven swords skip the
-      // spawnFlash + flying loop. The originator already
-      // produced the audio on their side; for now receivers
-      // simply lack the spawn/flying cues (a future pass can
-      // promote those to broadcast cues if the audio absence
-      // reads as too quiet). The visual flash sprite still
-      // fires from the `flashStartedAt` timestamp above.
-      if (!isRemote) {
-        const spawnAt = { x: spawnPos.x, y: spawnPos.y, z: spawnPos.z };
-        void sfx.play('spawnFlash', { volumeMultiplier: 0.5, position: spawnAt });
-        // Per-sword flying loop: starts at spawn, position is updated
-        // each frame below to track the sword's mesh. Distance falloff
-        // is handled by the panner so close-passing swords swell while
-        // far ones stay quiet — the "dynamicness" the user wanted from
-        // the cascade.
-        flyingHandleRef.current = sfx.playPositionalLoop('swordFlying', spawnAt, {
-          pitchJitter: 0.12,
-          volumeMultiplier: 0.7,
-        });
-      }
+      // Spawn-flash + flying-loop are local-only audio APIs (they
+      // don't broadcast). Each viewer's Sword fires them for the
+      // cascade it's rendering — originator for their own, receiver
+      // for the replicated remote one. No double-play across machines
+      // because there's no wire path involved.
+      const spawnAt = { x: spawnPos.x, y: spawnPos.y, z: spawnPos.z };
+      void sfx.play('spawnFlash', { volumeMultiplier: 0.5, position: spawnAt });
+      flyingHandleRef.current = sfx.playPositionalLoop('swordFlying', spawnAt, {
+        pitchJitter: 0.12,
+        volumeMultiplier: 0.7,
+      });
     }
     // Fire this sword's IMPACT flash + shake when it reaches the end of
     // its swing (slams into the wall ring after the post leg).
     if (revealState === 'swinging' && !impactFired.current && t >= SWING_DURATION) {
       impactFlashStartedAt.current = state.clock.elapsedTime;
       impactFired.current = true;
+      // Stop the flying loop on every viewer (originator + each
+      // receiver replicating this cascade). The flying loop is
+      // local audio that each viewer started independently in the
+      // spawn block above; each must stop its own.
+      flyingHandleRef.current?.stop(60);
+      flyingHandleRef.current = null;
       if (!isRemote) {
         // performance.now()/1000 (not state.clock.elapsedTime) — see
         // ShakeGroup for why we standardise on the wall clock.
         triggerWorldImpactShake(performance.now() / 1000, [hitPoint.x, hitPoint.y, hitPoint.z]);
-        // Stop this sword's flying loop with a short fade so the cut
-        // isn't an audible click — the slam's transient and the room's
-        // wet tail cover the silence.
-        flyingHandleRef.current?.stop(60);
-        flyingHandleRef.current = null;
         // Velocity-driven slam + spatial jitter. Each slam:
         //   - Volume scaled by impact velocity (harder hit → louder).
         //   - Pitch jitter widened to ±40% (was ±25%) for distinctness

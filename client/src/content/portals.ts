@@ -315,9 +315,32 @@ const ROOM_EXIT_LAYOUT: ReadonlyArray<{
  * layer to keep the portal size in lockstep with the visible sword
  * formation on narrow viewports.
  */
-export function buildPortalEndpoints(clickHit: ClickHit, scale = 1): ReadonlyArray<PortalEndpoint> {
+/**
+ * Build a coherent set of portal endpoints for a single reveal.
+ *
+ * `actorId` (optional) namespaces every id in the returned set
+ * with `<actorId>::` so multiple players' reveals coexist in
+ * the store without colliding on the static formation /
+ * room-exit ids. Within the set, `pairedWith` pointers are
+ * rewritten to match — so A's `formation-writing` pairs to A's
+ * `room-writing-exit`, and B's pairs to B's. Each player's
+ * room therefore shows multiple exit portals (one per actor
+ * who's revealed), each routing back to *that actor's* matching
+ * formation portal. Visually a slight oddity, semantically
+ * correct: there's no single canonical "where to send people
+ * back" target when multiple players have revealed.
+ *
+ * Omitting `actorId` keeps the legacy single-actor ids — used
+ * by older callers + tests that don't care about multi-player.
+ */
+export function buildPortalEndpoints(
+  clickHit: ClickHit,
+  scale = 1,
+  actorId?: string,
+): ReadonlyArray<PortalEndpoint> {
   const portalSize = DEFAULT_PORTAL_SIZE * scale;
   const quadrantOffset = FORMATION_QUADRANT_OFFSET * scale;
+  const ns = (id: PortalId): PortalId => (actorId ? `${actorId}::${id}` : id);
 
   // Wall basis at the click point: right + up axes anchored to the
   // wall plane, used to lay out the 2×2 quadrant portal offsets.
@@ -337,8 +360,10 @@ export function buildPortalEndpoints(clickHit: ClickHit, scale = 1): ReadonlyArr
       .addScaledVector(up, q.dySign * quadrantOffset);
     const pos = formationCenter.clone().add(offset);
     return {
-      id: q.id,
-      pairedWith: q.pairedWith,
+      id: ns(q.id),
+      // Trigger endpoints (Simple Experience) keep an empty
+      // `pairedWith` since they don't teleport.
+      pairedWith: q.trigger ? q.pairedWith : ns(q.pairedWith),
       ...(q.trigger ? { trigger: q.trigger } : {}),
       position: [pos.x, pos.y, pos.z],
       quaternion: formationQuat,
@@ -366,8 +391,8 @@ export function buildPortalEndpoints(clickHit: ClickHit, scale = 1): ReadonlyArr
     // the portal sits flush-but-not-z-fighting with the wall.
     const wallZ = b.max[2] - WALL_INSET;
     roomPortals.push({
-      id: layout.id,
-      pairedWith: layout.pairedWith,
+      id: ns(layout.id),
+      pairedWith: ns(layout.pairedWith),
       position: [cx, cy, wallZ],
       quaternion: QUAT_FACING_NEG_Z,
       size: { width: portalSize, height: portalSize },

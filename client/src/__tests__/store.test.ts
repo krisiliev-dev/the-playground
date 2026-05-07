@@ -226,6 +226,14 @@ describe('useWorldStore', () => {
   });
 
   describe('portalEndpoints', () => {
+    beforeEach(() => {
+      // Clear the array before each portal test — tests in this
+      // block assert specific array contents, and they share the
+      // singleton store so leftovers from earlier cases would
+      // bleed.
+      useWorldStore.getState().setPortalEndpoints([]);
+    });
+
     it('defaults to an empty array', () => {
       useWorldStore.getState().resetReveal();
       expect(useWorldStore.getState().portalEndpoints).toEqual([]);
@@ -248,12 +256,27 @@ describe('useWorldStore', () => {
       expect(useWorldStore.getState().portalEndpoints).toBe(stub);
     });
 
-    it('resetReveal clears portalEndpoints', () => {
+    it('resetReveal clears the local actor\'s portals while preserving remote ones', () => {
+      // The local-actor fallback id (when no multiplayer is
+      // connected) is `'local'`. Multiplayer-aware reveals tag
+      // each portal id with `<actorId>::` so multiple players'
+      // sets coexist; resetReveal should only remove the local
+      // actor's set.
       const stub = [
         {
-          id: 'x',
-          pairedWith: 'y',
+          id: 'local::formation-writing',
+          pairedWith: 'local::room-writing-exit',
           position: [0, 0, 0] as [number, number, number],
+          quaternion: [0, 0, 0, 1] as readonly [number, number, number, number],
+          size: { width: 10, height: 10 },
+          sidedness: 'single' as const,
+          rim: { color: '#fff' },
+          route: '/',
+        },
+        {
+          id: 'remote-actor::formation-writing',
+          pairedWith: 'remote-actor::room-writing-exit',
+          position: [5, 0, 0] as [number, number, number],
           quaternion: [0, 0, 0, 1] as readonly [number, number, number, number],
           size: { width: 10, height: 10 },
           sidedness: 'single' as const,
@@ -263,7 +286,53 @@ describe('useWorldStore', () => {
       ];
       useWorldStore.getState().setPortalEndpoints(stub);
       useWorldStore.getState().resetReveal();
-      expect(useWorldStore.getState().portalEndpoints).toEqual([]);
+      const remaining = useWorldStore.getState().portalEndpoints;
+      expect(remaining).toHaveLength(1);
+      expect(remaining[0]?.id).toBe('remote-actor::formation-writing');
+    });
+
+    it('addPortalEndpoints replaces only the named actor\'s portals', () => {
+      const a = {
+        id: 'A::formation-writing',
+        pairedWith: 'A::room-writing-exit',
+        position: [0, 0, 0] as [number, number, number],
+        quaternion: [0, 0, 0, 1] as readonly [number, number, number, number],
+        size: { width: 10, height: 10 },
+        sidedness: 'single' as const,
+        rim: { color: '#fff' },
+        route: '/',
+      };
+      const b = { ...a, id: 'B::formation-writing', pairedWith: 'B::room-writing-exit' };
+      useWorldStore.getState().addPortalEndpoints('A', [a]);
+      useWorldStore.getState().addPortalEndpoints('B', [b]);
+      expect(useWorldStore.getState().portalEndpoints).toHaveLength(2);
+      // Re-adding A replaces only A's set; B is untouched.
+      const aMoved = { ...a, position: [9, 9, 9] as [number, number, number] };
+      useWorldStore.getState().addPortalEndpoints('A', [aMoved]);
+      const ids = useWorldStore.getState().portalEndpoints.map((p) => p.id);
+      expect(ids).toContain('A::formation-writing');
+      expect(ids).toContain('B::formation-writing');
+      expect(useWorldStore.getState().portalEndpoints).toHaveLength(2);
+    });
+
+    it('removePortalEndpointsByActor drops a single actor\'s set', () => {
+      const a = {
+        id: 'A::formation-writing',
+        pairedWith: 'A::room-writing-exit',
+        position: [0, 0, 0] as [number, number, number],
+        quaternion: [0, 0, 0, 1] as readonly [number, number, number, number],
+        size: { width: 10, height: 10 },
+        sidedness: 'single' as const,
+        rim: { color: '#fff' },
+        route: '/',
+      };
+      const b = { ...a, id: 'B::formation-writing', pairedWith: 'B::room-writing-exit' };
+      useWorldStore.getState().addPortalEndpoints('A', [a]);
+      useWorldStore.getState().addPortalEndpoints('B', [b]);
+      useWorldStore.getState().removePortalEndpointsByActor('A');
+      const remaining = useWorldStore.getState().portalEndpoints;
+      expect(remaining).toHaveLength(1);
+      expect(remaining[0]?.id).toBe('B::formation-writing');
     });
   });
 
