@@ -73,6 +73,12 @@ interface AppActions {
    *  began" using their own clock relative to the wire-arrival
    *  time. Stored as `performance.now() / 1000`. */
   setRevealStateEnteredAt: (epochSeconds: number) => void;
+  /** Index into `FORMATION_SLOTS` for the local player's reveal.
+   *  Assigned at click time based on actor-id ordering among
+   *  connected peers; broadcast via presence so remote viewers
+   *  agree on the slot. Drives both the formation cluster
+   *  position and the room-exit-portal offset. */
+  setRevealSlotIndex: (index: number | null) => void;
   /** Toggle the Phase 5 cursor-avatar visibility on/off. */
   toggleCursorAvatar: () => void;
   /** Set the Phase 5 cursor-avatar visibility directly. */
@@ -194,6 +200,11 @@ interface RevealSlice {
    *  reveal in its phase" rather than seeing it restart. 0 when
    *  no reveal is in progress (or has completed). */
   revealStateEnteredAt: number;
+  /** Slot index assigned to the local player's reveal. Null
+   *  before any reveal has been triggered. Set by
+   *  `RevealOrchestrator` at click time and cleared on
+   *  `resetReveal`. */
+  revealSlotIndex: number | null;
   /** Whether the user has dismissed the post-impact controls hint.
    *  CursorAvatar gates its 3rd-person camera transition on this. */
   controlsDismissed: boolean;
@@ -373,6 +384,7 @@ export const useWorldStore = create<
   clickHit: null,
   clickCamPose: null,
   revealStateEnteredAt: 0,
+  revealSlotIndex: null,
   controlsDismissed: false,
   menuOpen: false,
   documentMode: readPersistedDocumentMode(),
@@ -443,6 +455,7 @@ export const useWorldStore = create<
         clickHit: null,
         clickCamPose: null,
         revealStateEnteredAt: 0,
+        revealSlotIndex: null,
         controlsDismissed: false,
         portalEndpoints: state.portalEndpoints.filter((p) => !p.id.startsWith(prefix)),
       };
@@ -485,6 +498,8 @@ export const useWorldStore = create<
   setClickCamPose: (pose) => set({ clickCamPose: pose }),
 
   setRevealStateEnteredAt: (epochSeconds) => set({ revealStateEnteredAt: epochSeconds }),
+
+  setRevealSlotIndex: (index) => set({ revealSlotIndex: index }),
 
   toggleCursorAvatar: () => set((state) => ({ cursorAvatarActive: !state.cursorAvatarActive })),
 

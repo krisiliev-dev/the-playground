@@ -22,6 +22,7 @@ import { useWorldStore } from '@/store';
 import { Sword, type SwordContext } from '@/components/scene/reveal/Sword';
 import { VIBE_SLOTS, FORMATION_SCALE } from '@/components/scene/reveal/vibeFormation';
 import { buildPortalEndpoints } from '@/content/portals';
+import { getSpawnSlot } from '@/content/spawnSlots';
 import type { Entity, EntityId } from './types';
 
 /** Read presence-broadcast reveal fields off a remote entity's
@@ -34,6 +35,10 @@ interface RevealPresence {
   click_hit_normal: [number, number, number];
   click_cam_pos: [number, number, number];
   click_cam_quat: [number, number, number, number];
+  /** Slot index used for this reveal (drives portal positions
+   *  + room-exit offsets). Defaults to 0 when an older client
+   *  omits the field. */
+  reveal_slot_index: number;
 }
 
 /** Pull a typed reveal-presence bag out of an entity's props,
@@ -53,12 +58,15 @@ export function readRevealPresence(entity: Entity): RevealPresence | null {
   if (!isVec3(point) || !isVec3(normal) || !isVec3(camPos) || !isVec4(camQuat)) {
     return null;
   }
+  const slotRaw = p.reveal_slot_index;
+  const slot = typeof slotRaw === 'number' ? slotRaw : 0;
   return {
     reveal_state: state,
     click_hit_point: point,
     click_hit_normal: normal,
     click_cam_pos: camPos,
     click_cam_quat: camQuat,
+    reveal_slot_index: slot,
   };
 }
 
@@ -134,6 +142,7 @@ function RemotePlayerCascade({ actorId, presence }: RemotePlayerCascadeProps): J
     if (presence.reveal_state !== 'impact' && presence.reveal_state !== 'revealed') {
       return;
     }
+    const slot = getSpawnSlot(presence.reveal_slot_index);
     const endpoints = buildPortalEndpoints(
       {
         point: presence.click_hit_point,
@@ -141,6 +150,7 @@ function RemotePlayerCascade({ actorId, presence }: RemotePlayerCascadeProps): J
       },
       FORMATION_SCALE,
       actorId,
+      slot.roomExitOffset,
     );
     useWorldStore.getState().addPortalEndpoints(actorId, endpoints);
   }, [
@@ -148,6 +158,7 @@ function RemotePlayerCascade({ actorId, presence }: RemotePlayerCascadeProps): J
     presence.reveal_state,
     presence.click_hit_point,
     presence.click_hit_normal,
+    presence.reveal_slot_index,
   ]);
 
   // Clean up this actor's portals when the cascade unmounts —

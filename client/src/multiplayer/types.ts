@@ -153,6 +153,14 @@ export interface PlayerPresence {
   /** Originator's camera world quaternion at click time
    *  (x, y, z, w). Same rationale as `click_cam_pos`. */
   click_cam_quat?: [number, number, number, number] | null;
+  /** Index into the predefined spawn-slot grid used by this
+   *  reveal. Drives the formation cluster's wall position and
+   *  the room-exit-portal offsets. Broadcast explicitly rather
+   *  than inferred from `click_hit_point` so receivers don't
+   *  have to nearest-neighbour-match against the local slot
+   *  table — settles slot-table races (e.g., a client running
+   *  an older slot count) authoritatively. */
+  reveal_slot_index?: number | null;
 }
 
 export type ClientMessage =

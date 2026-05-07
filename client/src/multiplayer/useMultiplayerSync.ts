@@ -286,6 +286,7 @@ export function readLocalPresence(): PlayerPresence {
         click_hit_normal: state.clickHit?.normal ?? null,
         click_cam_pos: state.clickCamPose?.position ?? null,
         click_cam_quat: state.clickCamPose?.quaternion ?? null,
+        reveal_slot_index: state.revealSlotIndex,
       }
     : {};
   return {
@@ -313,7 +314,8 @@ export function presenceEqual(a: PlayerPresence, b: PlayerPresence): boolean {
     a.click_hit_point === b.click_hit_point &&
     a.click_hit_normal === b.click_hit_normal &&
     a.click_cam_pos === b.click_cam_pos &&
-    a.click_cam_quat === b.click_cam_quat
+    a.click_cam_quat === b.click_cam_quat &&
+    a.reveal_slot_index === b.reveal_slot_index
   );
 }
 

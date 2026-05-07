@@ -6,11 +6,9 @@
  * camera through the click position into the cube to find the wall hit
  * point. Stores that point so the sword/cracks/VIBE all land there.
  */
-import { useEffect, useMemo } from 'react';
+import { useEffect } from 'react';
 import { useThree } from '@react-three/fiber';
-import { Raycaster, Vector2, Vector3 } from 'three';
 import { useWorldStore } from '@/store';
-import { intersectInsideCube } from '@/utils/cubeRaycast';
 import { Portal } from './Portal';
 import { Sword } from './Sword';
 import { BulletTimeDirector } from './BulletTimeDirector';
@@ -18,6 +16,7 @@ import { FORMATION_SCALE, VIBE_SLOTS } from './vibeFormation';
 import { sfx } from '../../audio/SfxManager';
 import { ARMED_DURATION_MS, SWINGING_DURATION_MS, IMPACT_DURATION_MS } from './constants';
 import { buildPortalEndpoints } from '@/content/portals';
+import { getSlotIndexForActor, getSpawnSlot } from '@/content/spawnSlots';
 
 export function RevealOrchestrator(): JSX.Element {
   const revealState = useWorldStore((s) => s.revealState);
@@ -25,16 +24,11 @@ export function RevealOrchestrator(): JSX.Element {
   const setClickHit = useWorldStore((s) => s.setClickHit);
   const setClickCamPose = useWorldStore((s) => s.setClickCamPose);
   const setRevealStateEnteredAt = useWorldStore((s) => s.setRevealStateEnteredAt);
-  const dimensions = useWorldStore((s) => s.environment.dimensions);
+  const setRevealSlotIndex = useWorldStore((s) => s.setRevealSlotIndex);
   const clickHit = useWorldStore((s) => s.clickHit);
+  const revealSlotIndex = useWorldStore((s) => s.revealSlotIndex);
 
   const { camera } = useThree();
-
-  // Cube half-extents derived from the live store config — never stale.
-  const cubeHalf = useMemo(
-    () => new Vector3(dimensions[0] / 2, dimensions[1] / 2, dimensions[2] / 2),
-    [dimensions],
-  );
 
   // First click anywhere → raycast to cube wall, store hit, advance reveal.
   useEffect(() => {
@@ -42,7 +36,7 @@ export function RevealOrchestrator(): JSX.Element {
       return;
     }
 
-    const onClick = (e: MouseEvent): void => {
+    const onClick = (): void => {
       // Synchronous Safari audio unlock — MUST be the first thing in
       // the click handler. Creates the AudioContext + plays the silent
       // unlock buffer + resume() on this exact call stack, all before
@@ -54,26 +48,37 @@ export function RevealOrchestrator(): JSX.Element {
         return;
       }
 
-      const ndc = new Vector2(
-        (e.clientX / window.innerWidth) * 2 - 1,
-        -(e.clientY / window.innerHeight) * 2 + 1,
-      );
-      const raycaster = new Raycaster();
-      raycaster.setFromCamera(ndc, camera);
-      const hit = intersectInsideCube(raycaster.ray.origin, raycaster.ray.direction, cubeHalf);
-      if (!hit) {
-        return;
+      // Multiplayer-aware spawn placement: instead of raycasting
+      // wherever the player clicked, assign them a predetermined
+      // slot on the cube wall based on their actor id ordering
+      // among connected peers. This guarantees no two players'
+      // clusters overlap (within the slot capacity), and gives
+      // each player a consistent home across reconnects.
+      const state = useWorldStore.getState();
+      const localActorId = state.localPlayerId ?? 'local';
+      const peerIds: string[] = [];
+      for (const [id, ent] of state.entities) {
+        if (ent.kind === 'player') {
+          peerIds.push(id);
+        }
       }
+      // Single-player fallback: if no multiplayer is connected, the
+      // peer list is empty (or contains only the synthetic 'local'
+      // sentinel). `getSlotIndexForActor` returns 0 in that case,
+      // which is the right answer — solo players land on slot 0.
+      if (peerIds.length === 0 && localActorId === 'local') {
+        peerIds.push('local');
+      }
+      const slotIndex = getSlotIndexForActor(localActorId, peerIds);
+      const slot = getSpawnSlot(slotIndex);
 
       // eslint-disable-next-line no-console
-      console.log('[Reveal] click registered at', hit.point);
+      console.log('[Reveal] slot', slotIndex, '→', slot.clickHit.point);
       // Audio for the click itself is handled by the global mouse
       // feedback in App.tsx (mouseDown + mouseUp cues). The reveal
       // click handler just advances state.
-      setClickHit({
-        point: [hit.point.x, hit.point.y, hit.point.z],
-        normal: [hit.normal.x, hit.normal.y, hit.normal.z],
-      });
+      setClickHit(slot.clickHit);
+      setRevealSlotIndex(slotIndex);
       // Capture the click-time camera pose so remote viewers can
       // replicate the cascade with the originator's POV. Local
       // Sword.tsx still does its own first-frame capture from
@@ -97,7 +102,14 @@ export function RevealOrchestrator(): JSX.Element {
 
     window.addEventListener('click', onClick, { once: true });
     return () => window.removeEventListener('click', onClick);
-  }, [revealState, camera, setClickHit, setClickCamPose, setRevealStateEnteredAt, cubeHalf]);
+  }, [
+    revealState,
+    camera,
+    setClickHit,
+    setClickCamPose,
+    setRevealStateEnteredAt,
+    setRevealSlotIndex,
+  ]);
 
   useEffect(() => {
     // eslint-disable-next-line no-console
@@ -126,10 +138,16 @@ export function RevealOrchestrator(): JSX.Element {
   useEffect(() => {
     if (revealState === 'impact' && clickHit) {
       const localActorId = useWorldStore.getState().localPlayerId ?? 'local';
-      const endpoints = buildPortalEndpoints(clickHit, FORMATION_SCALE, localActorId);
+      const slot = getSpawnSlot(revealSlotIndex ?? 0);
+      const endpoints = buildPortalEndpoints(
+        clickHit,
+        FORMATION_SCALE,
+        localActorId,
+        slot.roomExitOffset,
+      );
       useWorldStore.getState().addPortalEndpoints(localActorId, endpoints);
     }
-  }, [revealState, clickHit]);
+  }, [revealState, clickHit, revealSlotIndex]);
 
   // Auto-advance the rest of the beats with timers.
   useEffect(() => {

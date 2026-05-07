@@ -337,6 +337,12 @@ export function buildPortalEndpoints(
   clickHit: ClickHit,
   scale = 1,
   actorId?: string,
+  /** Optional `[dx, dy]` offset added to each room-exit portal's
+   *  position within the room's wall plane. Lets each player's
+   *  room exits land in a unique sub-position on the room wall
+   *  so two players' back-portals don't overlap. Defaults to
+   *  `[0, 0]` (single-player behaviour). */
+  roomExitOffset: readonly [number, number] = [0, 0],
 ): ReadonlyArray<PortalEndpoint> {
   const portalSize = DEFAULT_PORTAL_SIZE * scale;
   const quadrantOffset = FORMATION_QUADRANT_OFFSET * scale;
@@ -393,7 +399,7 @@ export function buildPortalEndpoints(
     roomPortals.push({
       id: ns(layout.id),
       pairedWith: ns(layout.pairedWith),
-      position: [cx, cy, wallZ],
+      position: [cx + roomExitOffset[0], cy + roomExitOffset[1], wallZ],
       quaternion: QUAT_FACING_NEG_Z,
       size: { width: portalSize, height: portalSize },
       sidedness: 'single',

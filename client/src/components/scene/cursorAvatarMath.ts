@@ -222,21 +222,69 @@ export interface PortalHole {
 }
 
 /**
+ * Test whether `pos` falls inside a single `PortalHole`'s
+ * tangent-plane radius. Pure helper — exported for reuse by
+ * the multi-hole clamp wrapper. See `clampToBoxInterior` for
+ * the consuming logic.
+ */
+export function isInsidePortalHole(pos: Vector3, hole: PortalHole): boolean {
+  const dx = pos.x - hole.center.x;
+  const dy = pos.y - hole.center.y;
+  const dz = pos.z - hole.center.z;
+  const dotN = dx * hole.normal.x + dy * hole.normal.y + dz * hole.normal.z;
+  const tx = dx - dotN * hole.normal.x;
+  const ty = dy - dotN * hole.normal.y;
+  const tz = dz - dotN * hole.normal.z;
+  if (
+    hole.quadrantOffset !== undefined &&
+    hole.quadrantOffset > 0 &&
+    hole.right &&
+    hole.up
+  ) {
+    // Four-quadrant symmetric Chebyshev: a position is inside SOME
+    // hole iff |abs(localX) - offset| < radius AND |abs(localY) -
+    // offset| < radius — same trick the GridMaterial shader uses.
+    const localX = tx * hole.right.x + ty * hole.right.y + tz * hole.right.z;
+    const localY = tx * hole.up.x + ty * hole.up.y + tz * hole.up.z;
+    return (
+      Math.abs(Math.abs(localX) - hole.quadrantOffset) < hole.radius &&
+      Math.abs(Math.abs(localY) - hole.quadrantOffset) < hole.radius
+    );
+  }
+  // Single-square Chebyshev: max of absolute tangent components.
+  // For axis-aligned walls the normal-axis component is zero and
+  // falls out of the max for free.
+  const tangentMax = Math.max(Math.abs(tx), Math.abs(ty), Math.abs(tz));
+  return tangentMax < hole.radius;
+}
+
+/**
  * Clamp `pos` into a box of half-extents `half` centred at `center`
  * (origin if omitted), with `margin` units of inset on every face.
- * `portalHole`, if supplied, carves a circular gap on the wall whose
- * outward normal matches `portalHole.normal`, so the avatar can pass
- * through it.
+ * `portalHoles`, if supplied, carves an opening at each hole's
+ * tangent-plane region, so the avatar can pass through any hole
+ * whose normal matches an active wall axis.
+ *
+ * Multiple holes: each hole independently OR's its skip flags
+ * against the running set. So if A's portal cluster lives on
+ * the back wall and B's lives on the left wall, the avatar
+ * passes through *either* without being clamped — the active
+ * wall's clamp is disabled while the avatar is inside any of
+ * its holes.
  *
  * `center` lets the same helper clamp into the main cube (centred at
  * world origin) AND into the hall outside the wall (centred at the
  * hall's world position) without callers translating `pos` themselves.
+ *
+ * Single-hole callers can pass a length-1 array; the legacy
+ * single-hole signature was replaced because every consumer now
+ * needs to support multiple actors' holes.
  */
 export function clampToBoxInterior(
   pos: Vector3,
   half: Vector3,
   margin: number,
-  portalHole?: PortalHole,
+  portalHoles?: ReadonlyArray<PortalHole>,
   center?: Vector3,
 ): void {
   const cx = center ? center.x : 0;
@@ -249,56 +297,29 @@ export function clampToBoxInterior(
   const minZ = cz - half.z + margin;
   const maxZ = cz + half.z - margin;
 
-  // Compute whether `pos` falls inside the portal's circular hole
-  // (projection onto the wall plane is within `radius` of `center`).
-  // If no hole, all six clamp-end checks below stay enabled.
-  let insideHole = false;
+  // OR-merge each hole's skip flags. The avatar is passable
+  // through any wall side that's matched by an active hole.
   let skipNegX = false;
   let skipPosX = false;
   let skipNegY = false;
   let skipPosY = false;
   let skipNegZ = false;
   let skipPosZ = false;
-  if (portalHole) {
-    const dx = pos.x - portalHole.center.x;
-    const dy = pos.y - portalHole.center.y;
-    const dz = pos.z - portalHole.center.z;
-    const dotN = dx * portalHole.normal.x + dy * portalHole.normal.y + dz * portalHole.normal.z;
-    const tx = dx - dotN * portalHole.normal.x;
-    const ty = dy - dotN * portalHole.normal.y;
-    const tz = dz - dotN * portalHole.normal.z;
-    if (
-      portalHole.quadrantOffset !== undefined &&
-      portalHole.quadrantOffset > 0 &&
-      portalHole.right &&
-      portalHole.up
-    ) {
-      // Four-quadrant symmetric Chebyshev: a position is inside SOME
-      // hole iff |abs(localX) - offset| < radius AND |abs(localY) -
-      // offset| < radius — same trick the GridMaterial shader uses.
-      const localX = tx * portalHole.right.x + ty * portalHole.right.y + tz * portalHole.right.z;
-      const localY = tx * portalHole.up.x + ty * portalHole.up.y + tz * portalHole.up.z;
-      insideHole =
-        Math.abs(Math.abs(localX) - portalHole.quadrantOffset) < portalHole.radius &&
-        Math.abs(Math.abs(localY) - portalHole.quadrantOffset) < portalHole.radius;
-    } else {
-      // Single-square Chebyshev: max of absolute tangent components.
-      // For axis-aligned walls the normal-axis component is zero and
-      // falls out of the max for free.
-      const tangentMax = Math.max(Math.abs(tx), Math.abs(ty), Math.abs(tz));
-      insideHole = tangentMax < portalHole.radius;
-    }
-    if (insideHole) {
+  if (portalHoles && portalHoles.length > 0) {
+    for (const hole of portalHoles) {
+      if (!isInsidePortalHole(pos, hole)) {
+        continue;
+      }
       // The inward normal points away from the wall; its sign on
       // the wall's axis tells us which end of the cube the wall is
       // on, and therefore which clamp side to skip. (Threshold of
       // 0.5 is robust given the components are ±1 on one axis.)
-      skipNegX = portalHole.normal.x > 0.5;
-      skipPosX = portalHole.normal.x < -0.5;
-      skipNegY = portalHole.normal.y > 0.5;
-      skipPosY = portalHole.normal.y < -0.5;
-      skipNegZ = portalHole.normal.z > 0.5;
-      skipPosZ = portalHole.normal.z < -0.5;
+      if (hole.normal.x > 0.5) skipNegX = true;
+      if (hole.normal.x < -0.5) skipPosX = true;
+      if (hole.normal.y > 0.5) skipNegY = true;
+      if (hole.normal.y < -0.5) skipPosY = true;
+      if (hole.normal.z > 0.5) skipNegZ = true;
+      if (hole.normal.z < -0.5) skipPosZ = true;
     }
   }
 

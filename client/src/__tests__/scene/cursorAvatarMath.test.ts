@@ -277,7 +277,7 @@ describe('clampToBoxInterior', () => {
       // Avatar past the +X wall (x > 32 = limX) but tangentially
       // centred → in the hole → +X clamp doesn't fire.
       const pos = new Vector3(100, 0, 0);
-      clampToBoxInterior(pos, HALF, 8, PLUS_X_HOLE);
+      clampToBoxInterior(pos, HALF, 8, [PLUS_X_HOLE]);
       expect(pos.x).toBe(100);
     });
 
@@ -285,7 +285,7 @@ describe('clampToBoxInterior', () => {
       // Avatar past the +X wall but tangentially way out (y = 50 >
       // disc radius 10) → not in hole → normal clamp.
       const pos = new Vector3(100, 50, 0);
-      clampToBoxInterior(pos, HALF, 8, PLUS_X_HOLE);
+      clampToBoxInterior(pos, HALF, 8, [PLUS_X_HOLE]);
       expect(pos.x).toBe(32);
       // Y also clamps independently because (50 > 32 = limY).
       expect(pos.y).toBe(32);
@@ -296,13 +296,54 @@ describe('clampToBoxInterior', () => {
       // but on the wrong side of the cube can't tunnel through to
       // the +X wall via a non-existent -X exception.
       const pos = new Vector3(-100, 0, 0);
-      clampToBoxInterior(pos, HALF, 8, PLUS_X_HOLE);
+      clampToBoxInterior(pos, HALF, 8, [PLUS_X_HOLE]);
       expect(pos.x).toBe(-32);
     });
 
     it('passes through when no portalHole is provided (back-compat)', () => {
       const pos = new Vector3(100, 0, 0);
       clampToBoxInterior(pos, HALF, 8);
+      expect(pos.x).toBe(32);
+    });
+  });
+
+  describe('multi-hole support', () => {
+    const HALF = new Vector3(40, 40, 40);
+    const NEG_Z_HOLE = {
+      center: new Vector3(0, 0, -40),
+      normal: new Vector3(0, 0, 1),
+      radius: 8,
+    };
+    const PLUS_X_HOLE = {
+      center: new Vector3(40, 0, 0),
+      normal: new Vector3(-1, 0, 0),
+      radius: 8,
+    };
+
+    it('skips clamp through ANY hole when avatar is inside that hole', () => {
+      // Avatar past the back wall but tangentially inside the back-wall hole.
+      const a = new Vector3(0, 0, -100);
+      clampToBoxInterior(a, HALF, 8, [NEG_Z_HOLE, PLUS_X_HOLE]);
+      expect(a.z).toBe(-100);
+
+      // Avatar past the right wall but tangentially inside the right-wall hole.
+      const b = new Vector3(100, 0, 0);
+      clampToBoxInterior(b, HALF, 8, [NEG_Z_HOLE, PLUS_X_HOLE]);
+      expect(b.x).toBe(100);
+    });
+
+    it('clamps normally when avatar is outside ALL holes', () => {
+      // Avatar past +X wall, tangentially outside both holes (well off-centre).
+      const pos = new Vector3(100, 0, 50);
+      clampToBoxInterior(pos, HALF, 8, [NEG_Z_HOLE, PLUS_X_HOLE]);
+      expect(pos.x).toBe(32);
+      // Z also clamps because avatar is past +Z=32 wall (no hole on that side).
+      expect(pos.z).toBe(32);
+    });
+
+    it('empty hole array behaves like no portalHoles arg (full clamp)', () => {
+      const pos = new Vector3(100, 0, 0);
+      clampToBoxInterior(pos, HALF, 8, []);
       expect(pos.x).toBe(32);
     });
   });

@@ -70,6 +70,7 @@ import {
   wallBasis,
 } from '@/content/portals';
 import type { ClickHit } from '@/store';
+import type { Entity } from '@/multiplayer/types';
 import {
   bobbedEndpoint,
   findCrossedPortal,
@@ -242,84 +243,128 @@ const ROOM_EXIT_ID_BY_PATH: Record<string, string> = {
 };
 
 /**
- * Compute the `PortalHole` to pass into `clampToBoxInterior` based
- * on which route the avatar is currently in:
+ * Compute the array of `PortalHole`s to pass into
+ * `clampToBoxInterior` based on which route the avatar is in:
  *
- *   - On the main cube ('/'), the hole is the FOUR-quadrant cluster
- *     at the click point on the formation wall, so the avatar can
- *     walk into any of the section portals (or the SE trigger).
- *   - In a section room ('/about', '/projects', '/writing'), the
- *     hole is a single square on the room's exit-portal wall, so
- *     the avatar can walk back through to the formation.
- *   - In any other route (no associated portal), returns
- *     `undefined` — the wall clamps unchanged.
+ *   - On the main cube ('/'), one FOUR-quadrant hole per
+ *     player who's currently revealing — built from each
+ *     player's broadcast click hit. The avatar can walk
+ *     through any actor's cluster.
+ *   - In a section room, one single-square hole per actor's
+ *     room-exit portal in the current room (matched by id
+ *     suffix `::<room-exit-id>`). Avatars can return through
+ *     any actor's exit.
  *
- * Mutates the passed scratch vectors so the caller can reuse them
- * frame-to-frame; returning `undefined` leaves them in their last
- * state (clamp ignores them then anyway).
+ * Per-call allocation is OK here: hole count is bounded by
+ * concurrent revealers, typically <10. Each hole is a small
+ * object with 4 fresh Vector3s — well under any frame budget.
  */
-function portalHoleForRoute(
+function portalHolesForRoute(
   routePath: string,
   endpoints: ReadonlyArray<PortalEndpoint>,
-  clickHit: ClickHit | null,
+  entities: ReadonlyMap<string, Entity>,
+  localActorId: string,
+  localClickHit: ClickHit | null,
   bobY: number,
-  centerOut: Vector3,
-  normalOut: Vector3,
-  rightOut: Vector3,
-  upOut: Vector3,
-): PortalHole | undefined {
+): PortalHole[] {
+  const holes: PortalHole[] = [];
+
   if (routePath === FORMATION_ROUTE) {
-    if (!clickHit) {
-      return undefined;
+    // Local player's formation hole (only when we have a click
+    // hit — i.e., the local player has revealed at least once).
+    if (localClickHit) {
+      holes.push(buildFormationHole(localClickHit, bobY));
     }
-    // The clamp helper tests `|abs(localX) - quadrantOffset| < radius`
-    // for both axes, so radius = half-portal and quadrantOffset =
-    // formation-quadrant-offset. Right/up basis comes from the
-    // shared `wallBasis` helper to stay consistent with the portal
-    // factory's layout math.
-    wallBasis(clickHit.normal, rightOut, upOut);
-    normalOut.set(...clickHit.normal).normalize();
-    centerOut.set(...clickHit.point);
-    centerOut.y += bobY;
-    return {
-      center: centerOut,
-      normal: normalOut,
-      radius: DEFAULT_PORTAL_SIZE / 2,
-      right: rightOut,
-      up: upOut,
-      quadrantOffset: FORMATION_QUADRANT_OFFSET,
-    };
+    // Each remote player who's actively revealing also gets a
+    // hole — the local avatar should be able to walk through
+    // anyone's cluster.
+    for (const [id, ent] of entities) {
+      if (ent.kind !== 'player' || id === localActorId) {
+        continue;
+      }
+      const remoteHit = readRemoteClickHit(ent);
+      if (remoteHit) {
+        holes.push(buildFormationHole(remoteHit, bobY));
+      }
+    }
+    return holes;
   }
-  const exitId = ROOM_EXIT_ID_BY_PATH[routePath];
-  if (!exitId) {
-    return undefined;
+
+  const exitSuffix = ROOM_EXIT_ID_BY_PATH[routePath];
+  if (!exitSuffix) {
+    return holes;
   }
-  const exit = endpoints.find((ep) => ep.id === exitId);
-  if (!exit) {
-    return undefined;
+  // Find every endpoint whose id matches the suffix — covers
+  // both legacy un-namespaced ids (`'room-writing-exit'`) and
+  // the per-actor namespaced ids (`'<actorId>::room-writing-exit'`).
+  // Each becomes a single-square hole the avatar can walk through.
+  for (const ep of endpoints) {
+    if (ep.id === exitSuffix || ep.id.endsWith(`::${exitSuffix}`)) {
+      holes.push(buildExitHole(ep, bobY));
+    }
   }
-  // Single-square hole. Active normal = local +Z rotated by the
-  // endpoint quaternion — for room exits that's world -Z (the
-  // inward face of the room's +Z wall). The clamp test reduces to
-  // `Chebyshev(tangent) < radius` since `quadrantOffset` is
-  // omitted.
-  centerOut.set(...exit.position);
-  centerOut.y += bobY;
-  TMP_LOCAL_Z.set(0, 0, 1);
-  normalOut.copy(TMP_LOCAL_Z).applyQuaternion({
+  return holes;
+}
+
+function buildFormationHole(clickHit: ClickHit, bobY: number): PortalHole {
+  const right = new Vector3();
+  const up = new Vector3();
+  wallBasis(clickHit.normal, right, up);
+  const normal = new Vector3(...clickHit.normal).normalize();
+  const center = new Vector3(...clickHit.point);
+  center.y += bobY;
+  return {
+    center,
+    normal,
+    radius: DEFAULT_PORTAL_SIZE / 2,
+    right,
+    up,
+    quadrantOffset: FORMATION_QUADRANT_OFFSET,
+  };
+}
+
+function buildExitHole(exit: PortalEndpoint, bobY: number): PortalHole {
+  const center = new Vector3(...exit.position);
+  center.y += bobY;
+  const normal = new Vector3(0, 0, 1).applyQuaternion({
     x: exit.quaternion[0],
     y: exit.quaternion[1],
     z: exit.quaternion[2],
     w: exit.quaternion[3],
   } as Quaternion);
   return {
-    center: centerOut,
-    normal: normalOut,
+    center,
+    normal,
     radius: exit.size.width / 2,
   };
 }
 
-const TMP_LOCAL_Z = new Vector3();
+/** Read a remote player's broadcast click hit from their entity
+ *  props, or null if they're not currently revealing. Tolerant
+ *  of missing fields. */
+function readRemoteClickHit(ent: Entity): ClickHit | null {
+  const p = ent.props as Record<string, unknown>;
+  const state = p.reveal_state;
+  if (typeof state !== 'string' || state === 'idle') {
+    return null;
+  }
+  const point = p.click_hit_point;
+  const normal = p.click_hit_normal;
+  if (!isVec3Tuple(point) || !isVec3Tuple(normal)) {
+    return null;
+  }
+  return { point, normal };
+}
+
+function isVec3Tuple(v: unknown): v is [number, number, number] {
+  return (
+    Array.isArray(v) &&
+    v.length === 3 &&
+    typeof v[0] === 'number' &&
+    typeof v[1] === 'number' &&
+    typeof v[2] === 'number'
+  );
+}
 
 /**
  * Shared state between ActiveCursor and its mode subcomponents.
@@ -1127,13 +1172,6 @@ function AvatarCursor({ refs }: ModeProps): null {
   /** Scratch for the per-frame clamp call. Reused so the per-route
    *  clamp lookup doesn't allocate. */
   const clampCenter = useRef(new Vector3());
-  /** Scratch buffers for the clamp's portalHole — populated each
-   *  frame by `portalHoleForRoute`. We keep them as refs so the
-   *  helper can mutate in place without per-frame allocation. */
-  const tmpHoleCenter = useRef(new Vector3());
-  const tmpHoleNormal = useRef(new Vector3());
-  const tmpHoleRight = useRef(new Vector3());
-  const tmpHoleUp = useRef(new Vector3());
   const clampHalf = useRef(new Vector3());
   /** Avatar position at the START of each frame (before walking is
    *  applied). Used by the portal-crossing detector to test prev →
@@ -1427,21 +1465,21 @@ function AvatarCursor({ refs }: ModeProps): null {
         // back wall) or the room's exit portal (room's +Z wall).
         // Without this the wall stops the avatar before they reach
         // the portal plane, and walk-through teleport never fires.
-        const portalHole = portalHoleForRoute(
+        const state = useWorldStore.getState();
+        const localActorId = state.localPlayerId ?? 'local';
+        const portalHoles = portalHolesForRoute(
           clampRoute.route.path,
-          useWorldStore.getState().portalEndpoints,
-          useWorldStore.getState().clickHit,
+          state.portalEndpoints,
+          state.entities,
+          localActorId,
+          state.clickHit,
           bobY,
-          tmpHoleCenter.current,
-          tmpHoleNormal.current,
-          tmpHoleRight.current,
-          tmpHoleUp.current,
         );
         clampToBoxInterior(
           avatarWorld,
           clampHalf.current,
           clampMargin,
-          portalHole,
+          portalHoles,
           clampCenter.current,
         );
       }
