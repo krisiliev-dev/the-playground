@@ -67,6 +67,7 @@ import {
 import { MAX_PORTAL_RECURSION, getPaired, type PortalEndpoint } from '@/content/portals';
 import { MAIN_CUBE_BOB } from '@/content/routes';
 import { useWorldStore } from '@/store';
+import { minPlayerDistance } from '@/multiplayer/playerProximity';
 import { useInteractable } from '../Interactable';
 import { floatOffset } from '../floatBob';
 import {
@@ -1259,7 +1260,19 @@ function PortalRim({ width, height, color, portalPosition }: PortalRimProps): JS
   const phaseClockRef = useRef(0);
 
   useFrame((state, delta) => {
-    const dist = camera.position.distanceTo(portalCenter);
+    // Aggregate proximity across local + remote players: the rim
+    // reacts when *any* connected player is in range, not just the
+    // local viewer (per ADR-006 §"near"). Reads from the store via
+    // getState() so this runs without subscribing the component to
+    // every entity tick — the store update has already happened
+    // by the time the next frame fires.
+    const { entities, localPlayerId } = useWorldStore.getState();
+    const dist = minPlayerDistance(
+      [portalCenter.x, portalCenter.y, portalCenter.z],
+      [camera.position.x, camera.position.y, camera.position.z],
+      entities,
+      localPlayerId,
+    );
     const proximity = Math.max(
       0,
       Math.min(1, (RIM_PROXIMITY_FAR - dist) / (RIM_PROXIMITY_FAR - RIM_PROXIMITY_NEAR)),

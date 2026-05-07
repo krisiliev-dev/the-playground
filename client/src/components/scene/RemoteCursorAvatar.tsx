@@ -102,35 +102,55 @@ export function RemoteCursorAvatar({ entity }: RemoteCursorAvatarProps): JSX.Ele
     };
   }, [cloned]);
 
+  // Two groups, both following the same interpolated position:
+  //   - cursorGroupRef: gets position AND quaternion (and the
+  //     0.03 scale chain), so the cursor mesh rotates with
+  //     mouselook as expected.
+  //   - presenceGroupRef: gets position only — no quaternion,
+  //     no scale chain. The presence indicator (menu panel) is
+  //     parented here so it stays at a stable world orientation
+  //     while still travelling with the cursor as the player
+  //     walks. Without this split, the indicator inherits the
+  //     cursor's mouselook rotation and visibly jitters as the
+  //     remote player turns their head.
+  const presenceGroupRef = useRef<Group>(null);
+
   useFrame(() => {
     const group = groupRef.current;
-    if (!group) {
-      return;
-    }
+    const presence = presenceGroupRef.current;
     const sampled = sampleSnapshot(entity.id, performance.now() - INTERP_DELAY_MS);
     if (sampled) {
-      group.position.set(sampled.position[0], sampled.position[1], sampled.position[2]);
-      group.quaternion.set(
+      group?.position.set(sampled.position[0], sampled.position[1], sampled.position[2]);
+      group?.quaternion.set(
         sampled.quaternion[0],
         sampled.quaternion[1],
         sampled.quaternion[2],
         sampled.quaternion[3],
       );
-    } else {
+      presence?.position.set(sampled.position[0], sampled.position[1], sampled.position[2]);
+      // Deliberately no quaternion on presence — that's the whole
+      // point of the split.
+    } else if (group) {
       const [px, py, pz] = entity.transform.position;
       group.position.set(px, py, pz);
+      presence?.position.set(px, py, pz);
     }
   });
 
   return (
-    <group ref={groupRef} scale={REMOTE_AVATAR_SCALE}>
-      <primitive object={cloned} />
-      {/* Third-person presence indicators (menu plane, etc.).
-          Inherits the cursor group's scale, so its geometry is
-          authored in the pre-scale frame and ends up at REMOTE_
-          AVATAR_SCALE × the values it specifies. */}
-      <RemotePresenceIndicator entity={entity} />
-    </group>
+    <>
+      <group ref={groupRef} scale={REMOTE_AVATAR_SCALE}>
+        <primitive object={cloned} />
+      </group>
+      {/* Position-only group for third-person presence indicators
+          (menu panel, etc.). Stays world-aligned while the cursor
+          rotates with mouselook. No scale chain — child layouts
+          author in world units rather than the cursor's pre-scale
+          frame. */}
+      <group ref={presenceGroupRef}>
+        <RemotePresenceIndicator entity={entity} />
+      </group>
+    </>
   );
 }
 

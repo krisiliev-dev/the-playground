@@ -49,34 +49,30 @@ function readMenu(entity: Entity): string | null {
 }
 
 // ─── Menu panel ───────────────────────────────────────────────
-// All offsets are in the *pre-scale* frame — the parent cursor
-// group multiplies by REMOTE_AVATAR_SCALE (0.03), so a forward
-// offset of 70 here ends up ~2.1 world units in front of the
-// cursor.
+// Offsets are in WORLD units — the parent presence group is
+// scale=1 (separate from the cursor's 0.03 scale chain), so we
+// can author dimensions directly without dividing by 0.03.
 
-/** Position the panel in the cursor's local +Z direction —
- *  which (because cursor.quaternion mirrors the camera that
- *  follows it) is the direction "behind the cursor's facing"
- *  but visually "in front of the cursor" from any observer
- *  whose own camera is on that same side. The plane's default
- *  front face also points in +Z, so it naturally faces the
- *  observer with no rotation needed.
- *
- *  Slight Y lift so the panel doesn't collide with the cursor
- *  geometry; tune up for "menu floats above" vs. tune to 0 for
- *  "menu sits in line with cursor's facing." */
-const PANEL_FORWARD_OFFSET = 70;
-const PANEL_VERTICAL_OFFSET = 8;
+/** Forward offset = world +Z direction. With the typical scene
+ *  setup (cameras at z≈-360 looking toward origin) this puts the
+ *  panel between observer and remote cursor for any observer on
+ *  that same side — visually "in front of" the cursor from their
+ *  POV. Static in world coords because the indicator group is
+ *  position-only, so the panel never orbits or jitters with the
+ *  remote cursor's rotation. */
+const PANEL_FORWARD_OFFSET = 6;
+const PANEL_VERTICAL_OFFSET = 0.4;
 
-/** Larger distance-factor on drei's `<Html transform>` makes the
- *  CSS pixels span fewer world units — i.e. the panel appears
- *  bigger relative to the rest of the scene. Tuned so the panel
- *  reads from a few units away without dwarfing the cursor model
- *  itself. Slice 3a default (80) felt undersized in playtest. */
-const HTML_DISTANCE_FACTOR = 50;
+/** drei's <Html transform> scales by `distanceFactor / cameraDist`
+ *  (capped at 1). Larger distanceFactor → larger rendered Html.
+ *  At typical scene distances (~5-50 world units between observer
+ *  and panel), distanceFactor ≈ 8 keeps the panel readable without
+ *  dominating the view. Tune up if the panel feels small, down if
+ *  it feels overwhelming. */
+const HTML_DISTANCE_FACTOR = 8;
 
-const BACK_PLATE_WIDTH = 130;
-const BACK_PLATE_HEIGHT = 180;
+const BACK_PLATE_WIDTH = 6;
+const BACK_PLATE_HEIGHT = 8;
 const BACK_PLATE_BG = '#12121a';
 const BACK_PLATE_BORDER = '#00ffcc';
 const BACK_PLATE_OPACITY = 0.95;
@@ -98,11 +94,11 @@ function MenuPanel(): JSX.Element {
           the plate is invisible, which is correct: the back of
           the back plate is the *front* of the panel from the
           owner's POV. */}
-      <mesh position={[0, 0, -1]} frustumCulled={false}>
-        <planeGeometry args={[BACK_PLATE_WIDTH + 4, BACK_PLATE_HEIGHT + 4]} />
+      <mesh position={[0, 0, -0.05]} frustumCulled={false}>
+        <planeGeometry args={[BACK_PLATE_WIDTH + 0.2, BACK_PLATE_HEIGHT + 0.2]} />
         <meshBasicMaterial color={BACK_PLATE_BORDER} transparent opacity={0.55} />
       </mesh>
-      <mesh position={[0, 0, -0.95]} frustumCulled={false}>
+      <mesh position={[0, 0, -0.04]} frustumCulled={false}>
         <planeGeometry args={[BACK_PLATE_WIDTH, BACK_PLATE_HEIGHT]} />
         <meshBasicMaterial color={BACK_PLATE_BG} transparent opacity={BACK_PLATE_OPACITY} />
       </mesh>
@@ -111,7 +107,12 @@ function MenuPanel(): JSX.Element {
         transform
         sprite={false}
         distanceFactor={HTML_DISTANCE_FACTOR}
-        occlude={false}
+        // occlude="blending" so the Html depth-tests against 3D
+        // meshes (cursors, walls). Without this, drei's Html
+        // always renders on top of all 3D content — fine for HUDs
+        // and labels, wrong for an in-world panel that should be
+        // hidden when a closer object passes in front.
+        occlude="blending"
         pointerEvents="none"
         zIndexRange={[0, 0]}
       >
