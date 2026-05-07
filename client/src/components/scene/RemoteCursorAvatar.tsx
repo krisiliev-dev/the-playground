@@ -39,6 +39,7 @@ import {
 import type { Entity } from '@/multiplayer/types';
 import { INTERP_DELAY_MS, sampleSnapshot } from '@/multiplayer/snapshotInterpolation';
 import { CASCADE_OVERLAY_LAYER } from './sceneLayers';
+import { RENDER_ORDER_CURSOR_BODY, RENDER_ORDER_CURSOR_OUTLINE } from './renderOrder';
 
 const MODEL_URL = '/models/3d_icon_cursor.glb';
 
@@ -133,8 +134,20 @@ useGLTF.preload(MODEL_URL);
 
 /** Clone the GLB scene, replace mesh materials with our own
  *  body+outline pair, register cascade-overlay layer membership.
- *  Mutates the cloned tree. */
-function buildCursorTree(source: Object3D, bodyColor: string): Object3D {
+ *  Mutates the cloned tree.
+ *
+ *  Critical detail: the *local* `CursorAvatar` mutates the shared
+ *  `useGLTF` cache on mount — it attaches its own outline shell
+ *  and a 5×-scaled `inSceneBody` (cascade-overlay copy) as
+ *  children of the source meshes. When we `clone(true)` the
+ *  cached scene those children come along, so we end up with a
+ *  giant white silhouette next to each remote cursor. We strip
+ *  them by walking only the GLB's original first-level meshes
+ *  (parent is NOT a Mesh) and removing any child Meshes from
+ *  them before re-skinning. The local cursor isn't affected
+ *  because it operates on the cached scene directly, not on
+ *  this clone. */
+export function buildCursorTree(source: Object3D, bodyColor: string): Object3D {
   const root = source.clone(true);
 
   const bodyMaterial = new MeshStandardMaterial({
@@ -144,21 +157,49 @@ function buildCursorTree(source: Object3D, bodyColor: string): Object3D {
     metalness: 0.4,
     roughness: 0.35,
     transparent: true,
-    // depthWrite off so the cursor doesn't pollute depth values
-    // that downstream cascade passes consult; matches local cursor.
-    depthWrite: false,
+    // depthWrite ON: remote cursors are world avatars, not UI
+    // affordances — the depth buffer needs to know they exist
+    // so Phase A of the portal cascade doesn't stencil-mark over
+    // them. Without this, portals correctly occluded by the
+    // cursor in world depth still draw their through-view *over*
+    // the cursor in screen space, because Phase A consults wall
+    // depth (the cursor never wrote its own).
+    //
+    // The local cursor uses depthWrite=false because it lives on
+    // CURSOR_LAYER + CASCADE_OVERLAY_LAYER — both excluded from
+    // Phase D pass 1 — so its missing depth never matters. Remote
+    // cursors live on layer 0 (visible in main view via Phase 1)
+    // and need the depth presence.
+    depthWrite: true,
   });
 
+  // Collect ONLY first-level GLB meshes — i.e. meshes whose
+  // parent is not itself a Mesh. Anything deeper is something
+  // CursorAvatar attached to the cached scene; we don't want it.
   const meshes: Mesh[] = [];
   root.traverse((obj) => {
     const mesh = obj as Mesh;
-    if (mesh.isMesh) {
-      meshes.push(mesh);
+    if (!mesh.isMesh) {
+      return;
     }
+    const parent = mesh.parent;
+    if (parent && (parent as Mesh).isMesh) {
+      return;
+    }
+    meshes.push(mesh);
   });
 
   for (const mesh of meshes) {
+    // Strip CursorAvatar's attached child meshes from the clone.
+    // Iterate over a copy of `children` because `remove()` mutates
+    // the array.
+    const childMeshes = [...mesh.children].filter((c) => (c as Mesh).isMesh);
+    for (const child of childMeshes) {
+      mesh.remove(child);
+    }
+
     mesh.material = bodyMaterial;
+    mesh.renderOrder = RENDER_ORDER_CURSOR_BODY;
     // Both main view (layer 0, default) and cascade through-views
     // (CASCADE_OVERLAY_LAYER) include this mesh.
     mesh.layers.enable(CASCADE_OVERLAY_LAYER);
@@ -178,13 +219,23 @@ function buildCursorTree(source: Object3D, bodyColor: string): Object3D {
       color: new Color(OUTLINE_COLOR_HEX),
       side: BackSide,
       transparent: true,
-      depthWrite: false,
+      // depthWrite ON for the same reason as the body: the
+      // outline's halo pixels need to claim their depth so Phase A's
+      // stencil mark doesn't fire over them and Phase D's through-
+      // view doesn't paint over the silhouette. Halo depth is the
+      // back-of-shell depth (slightly further than body, still well
+      // in front of any wall), so the stencil mark correctly stays
+      // out wherever the cursor occupies screen space. Body covers
+      // the outline's interior anyway via render-order, so this
+      // doesn't introduce visible artifacts.
+      depthWrite: true,
     });
     const outline = new Mesh(outlineGeom, outlineMat);
     outline.position
       .copy(center)
       .add(new Vector3(size.x * OUTLINE_SHIFT_X_FRACTION, size.y * OUTLINE_SHIFT_Y_FRACTION, 0));
     outline.scale.setScalar(OUTLINE_SCALE);
+    outline.renderOrder = RENDER_ORDER_CURSOR_OUTLINE;
     outline.layers.enable(CASCADE_OVERLAY_LAYER);
     outline.frustumCulled = false;
     outline.userData.isOutlineShell = true;
