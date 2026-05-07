@@ -34,6 +34,7 @@ export function RevealOrchestrator(): JSX.Element {
   const dimensions = useWorldStore((s) => s.environment.dimensions);
   const clickHit = useWorldStore((s) => s.clickHit);
   const revealSlotIndex = useWorldStore((s) => s.revealSlotIndex);
+  const localPlayerId = useWorldStore((s) => s.localPlayerId);
 
   const { camera } = useThree();
 
@@ -42,6 +43,35 @@ export function RevealOrchestrator(): JSX.Element {
     () => new Vector3(dimensions[0] / 2, dimensions[1] / 2, dimensions[2] / 2),
     [dimensions],
   );
+
+  // Pre-compute the local player's slot the moment we have a
+  // multiplayer id. Drives the OrbitControls target (so the
+  // camera looks at the player's section from the moment they
+  // connect, instead of waiting for them to click). Re-runs on
+  // reload since `localPlayerId` is fresh per-connection.
+  //
+  // Why a useEffect on `localPlayerId` only (not `entities`):
+  // peers join/leave rarely, and the slot only needs to be
+  // approximately stable per-session. Subscribing to the
+  // entities Map identity would fire every 30Hz tick — way too
+  // hot a path for slot computation.
+  useEffect(() => {
+    if (!localPlayerId) {
+      // Single-player or pre-connect: no slot, no camera retarget.
+      // The reveal click handler will fall through to "raw raycast
+      // hit, no clamp" in this case.
+      return;
+    }
+    const state = useWorldStore.getState();
+    const peerIds: string[] = [];
+    for (const [id, ent] of state.entities) {
+      if (ent.kind === 'player') {
+        peerIds.push(id);
+      }
+    }
+    const slotIndex = getSlotIndexForActor(localPlayerId, peerIds);
+    setRevealSlotIndex(slotIndex);
+  }, [localPlayerId, setRevealSlotIndex]);
 
   // First click anywhere → raycast to cube wall, store hit, advance reveal.
   useEffect(() => {
@@ -61,29 +91,10 @@ export function RevealOrchestrator(): JSX.Element {
         return;
       }
 
-      // Multiplayer-aware section placement: each player is
-      // assigned a fixed *section* of the cube wall, but is free
-      // to click anywhere within that section to choose where
-      // their cluster lands. The click drives placement; the
-      // section just bounds it.
-      const state = useWorldStore.getState();
-      const localActorId = state.localPlayerId ?? 'local';
-      const peerIds: string[] = [];
-      for (const [id, ent] of state.entities) {
-        if (ent.kind === 'player') {
-          peerIds.push(id);
-        }
-      }
-      if (peerIds.length === 0 && localActorId === 'local') {
-        peerIds.push('local');
-      }
-      const slotIndex = getSlotIndexForActor(localActorId, peerIds);
-      const slot = getSpawnSlot(slotIndex);
-
-      // Raycast from the camera through the click position to find
-      // the wall intersection. If nothing is hit (e.g. degenerate
-      // ray), fall back to the slot's center so the reveal still
-      // fires — better than refusing to advance.
+      // Raycast as before — finds the wall point the user
+      // clicked. Single-player keeps "click anywhere on the wall"
+      // as the original behaviour; multiplayer clamps the hit
+      // into the player's assigned section.
       const ndc = new Vector2(
         (e.clientX / window.innerWidth) * 2 - 1,
         -(e.clientY / window.innerHeight) * 2 + 1,
@@ -95,25 +106,39 @@ export function RevealOrchestrator(): JSX.Element {
         raycaster.ray.direction,
         cubeHalf,
       );
-      const baseHit = rawHit
-        ? {
-            point: [rawHit.point.x, rawHit.point.y, rawHit.point.z] as [
-              number,
-              number,
-              number,
-            ],
-            normal: [rawHit.normal.x, rawHit.normal.y, rawHit.normal.z] as [
-              number,
-              number,
-              number,
-            ],
-          }
-        : slot.clickHit;
-      const clampedHit = clampHitToSlotSection(baseHit, slot);
+      if (!rawHit) {
+        return;
+      }
+      const baseHit = {
+        point: [rawHit.point.x, rawHit.point.y, rawHit.point.z] as [
+          number,
+          number,
+          number,
+        ],
+        normal: [rawHit.normal.x, rawHit.normal.y, rawHit.normal.z] as [
+          number,
+          number,
+          number,
+        ],
+      };
+
+      // Multiplayer path: the slot index was assigned at connect
+      // time (above), so just look it up and clamp the hit to
+      // that section. Single-player path: no clamp — the raw
+      // hit becomes the click hit, preserving the legacy "click
+      // anywhere" UX.
+      const state = useWorldStore.getState();
+      let finalHit = baseHit;
+      let slotIndex: number | null = null;
+      if (state.localPlayerId !== null) {
+        slotIndex = state.revealSlotIndex ?? 0;
+        const slot = getSpawnSlot(slotIndex);
+        finalHit = clampHitToSlotSection(baseHit, slot);
+      }
 
       // eslint-disable-next-line no-console
-      console.log('[Reveal] slot', slotIndex, 'click →', clampedHit.point);
-      setClickHit(clampedHit);
+      console.log('[Reveal] slot', slotIndex, 'click →', finalHit.point);
+      setClickHit(finalHit);
       setRevealSlotIndex(slotIndex);
       // Capture the click-time camera pose so remote viewers can
       // replicate the cascade with the originator's POV. Local
