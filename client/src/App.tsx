@@ -26,7 +26,7 @@ import { AboutRoom } from '@/scenes/rooms/AboutRoom';
 type BootState = 'loading' | 'ready' | 'failed';
 
 const AdminPanel = lazy(() =>
-  import('@/components/admin/AdminPanel').then((m) => ({ default: m.AdminPanel })),
+  import('@/admin/AdminPanel').then((m) => ({ default: m.AdminPanel })),
 );
 
 // Module-level Canvas configuration. R3F applies the `camera` /
