@@ -50,6 +50,15 @@ export interface ClickCamPose {
 
 // ─── Store Actions ───────────────────────────────────────────────────
 
+interface AdminClientSlice {
+  /** Per ADR-009: when true, the operator's avatar bypasses
+   *  wall clamping and can fly through cube / room walls.
+   *  Local-only — never broadcast. Persisted in localStorage so
+   *  it survives reloads. */
+  adminNoClip: boolean;
+  setAdminNoClip: (next: boolean) => void;
+}
+
 interface AppActions {
   setPlayerPosition: (position: [number, number, number]) => void;
   setPlayerRotation: (rotation: [number, number, number]) => void;
@@ -311,6 +320,29 @@ function readPersistedDocumentMode(): boolean {
     return false;
   }
 }
+
+const ADMIN_NO_CLIP_STORAGE_KEY = 'playground.admin_no_clip';
+function readPersistedNoClip(): boolean {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+  try {
+    return window.localStorage.getItem(ADMIN_NO_CLIP_STORAGE_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+function persistNoClip(next: boolean): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  try {
+    window.localStorage.setItem(ADMIN_NO_CLIP_STORAGE_KEY, String(next));
+  } catch {
+    // localStorage write failures are non-fatal — the in-memory
+    // flag is authoritative for this tab.
+  }
+}
 function persistDocumentMode(mode: boolean): void {
   if (typeof window === 'undefined') {
     return;
@@ -373,7 +405,7 @@ interface InteractionSlice {
 }
 
 export const useWorldStore = create<
-  AppState & AppActions & RevealSlice & MultiplayerSlice & InteractionSlice
+  AppState & AppActions & RevealSlice & MultiplayerSlice & InteractionSlice & AdminClientSlice
 >((set) => ({
   // State
   player: createInitialPlayer(),
@@ -388,6 +420,7 @@ export const useWorldStore = create<
   controlsDismissed: false,
   menuOpen: false,
   documentMode: readPersistedDocumentMode(),
+  adminNoClip: readPersistedNoClip(),
   pendingPointerLock: false,
   pendingNavigation: null,
   currentRoom: null,
@@ -492,6 +525,11 @@ export const useWorldStore = create<
   setLastExitedRoom: (roomId) => set({ lastExitedRoom: roomId }),
 
   setMuted: (muted) => set({ muted }),
+
+  setAdminNoClip: (next) => {
+    persistNoClip(next);
+    set({ adminNoClip: next });
+  },
 
   setClickHit: (hit) => set({ clickHit: hit }),
 

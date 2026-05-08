@@ -203,6 +203,14 @@ async fn main() {
             "/api/admin/play_recipe",
             post(handlers::post_admin_play_recipe),
         )
+        // Admin-only player management (per ADR-009).
+        .route("/api/admin/players", get(handlers::get_admin_players))
+        .route("/api/admin/kick", post(handlers::post_admin_kick))
+        .route("/api/admin/freeze", post(handlers::post_admin_freeze))
+        .route(
+            "/api/admin/teleport_player",
+            post(handlers::post_admin_teleport_player),
+        )
         // Public static serving of uploaded assets. Content-
         // addressed URLs mean these are safe to cache aggressively;
         // ServeDir handles MIME types + byte-range requests.

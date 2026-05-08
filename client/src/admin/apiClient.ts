@@ -24,6 +24,17 @@ export interface AdminAsset {
   extension: string;
 }
 
+/** Player view returned by `GET /api/admin/players`. Mirrors
+ *  `AdminPlayerView` on the server. Per ADR-009. */
+export interface AdminPlayer {
+  id: string;
+  name: string;
+  cursor_color: string;
+  route: string;
+  frozen: boolean;
+  position: [number, number, number];
+}
+
 /** Recipe step variants on the wire — mirrors the Rust enum.
  *  Per ADR-008. */
 export type AdminRecipeStep =
@@ -138,6 +149,11 @@ export interface AdminClient {
   deleteRecipe(id: string): Promise<void>;
   playRecipe(id: string, position: [number, number, number]): Promise<void>;
   fireEvent(event: AdminFireableEvent): Promise<void>;
+  /** Player management (ADR-009). */
+  listPlayers(): Promise<AdminPlayer[]>;
+  kickPlayer(id: string): Promise<void>;
+  freezePlayer(id: string, frozen: boolean): Promise<void>;
+  teleportPlayer(id: string, position: [number, number, number]): Promise<void>;
 }
 
 /**
@@ -217,6 +233,31 @@ export function createAdminClient(
       await request('/api/admin/event', {
         method: 'POST',
         body: JSON.stringify({ event }),
+        headers: { 'Content-Type': 'application/json' },
+      });
+    },
+    async listPlayers() {
+      const r = await request('/api/admin/players');
+      return (await r.json()) as AdminPlayer[];
+    },
+    async kickPlayer(id) {
+      await request('/api/admin/kick', {
+        method: 'POST',
+        body: JSON.stringify({ id }),
+        headers: { 'Content-Type': 'application/json' },
+      });
+    },
+    async freezePlayer(id, frozen) {
+      await request('/api/admin/freeze', {
+        method: 'POST',
+        body: JSON.stringify({ id, frozen }),
+        headers: { 'Content-Type': 'application/json' },
+      });
+    },
+    async teleportPlayer(id, position) {
+      await request('/api/admin/teleport_player', {
+        method: 'POST',
+        body: JSON.stringify({ id, position }),
         headers: { 'Content-Type': 'application/json' },
       });
     },

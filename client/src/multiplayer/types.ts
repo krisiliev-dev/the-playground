@@ -65,6 +65,11 @@ export type SceneEventKind =
       duration_ms: number;
     }
   | {
+      kind: 'force_teleport';
+      target_actor_id: string;
+      position: [number, number, number];
+    }
+  | {
       kind: 'asset_available';
       id: string;
       url: string;

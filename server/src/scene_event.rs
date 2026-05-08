@@ -159,6 +159,13 @@ pub fn validate_event(
                 duration_ms: duration_ms.min(1500),
             })
         }
+        SceneEventKind::ForceTeleport { .. } => {
+            // Server-originated only (admin teleport endpoint);
+            // a player forging this would let them yank others'
+            // cursors. Drop unconditionally on the player path —
+            // admin endpoints bypass `validate_event` entirely.
+            ValidationOutcome::Drop
+        }
         SceneEventKind::AssetAvailable { .. } => {
             // AssetAvailable is server-originated only — never
             // sent by a player. If a player tries to forge one

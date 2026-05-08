@@ -17,6 +17,7 @@ import { sfx } from '@/components/audio/SfxManager';
 import { SFX, type SfxId } from '@/components/audio/sfxManifest';
 import { attenuateByDistance, triggerImpactShake } from '@/components/scene/cameraShake';
 import { cursorWorldPosition } from '@/components/scene/cursorWorldPosition';
+import { useWorldStore } from '@/store';
 import { useSceneEvent } from './sceneEvents';
 
 export function MultiplayerEffectsReceiver(): null {
@@ -57,6 +58,21 @@ export function MultiplayerEffectsReceiver(): null {
       falloff * event.intensity,
       event.duration_ms / 1000,
     );
+  });
+
+  // Admin-triggered teleport (per ADR-009). The server fans
+  // a `force_teleport` event to everyone with `target_actor_id`
+  // set to the player being moved; non-targeted receivers
+  // ignore it. We hand the position to the existing
+  // `leapTarget` slice that CursorAvatar already consumes —
+  // same path used for portal walk-through teleports, so no
+  // new pipeline.
+  useSceneEvent('force_teleport', (event) => {
+    const localId = useWorldStore.getState().localPlayerId;
+    if (!localId || event.target_actor_id !== localId) {
+      return;
+    }
+    useWorldStore.getState().setLeapTarget(event.position);
   });
 
   return null;

@@ -163,6 +163,16 @@ pub enum SceneEventKind {
         extension: String,
         size: u64,
     },
+    /// Forcibly teleport a specific player's cursor to a world
+    /// position. Server-originated only (admin endpoint); the
+    /// target client matches `target_actor_id` against its own
+    /// `localPlayerId` and snaps its avatar / cursor / camera
+    /// when they match. Other receivers ignore the event since
+    /// PlayerInput will catch them up the next tick.
+    ForceTeleport {
+        target_actor_id: String,
+        position: [f32; 3],
+    },
     /// Visual particle burst — confetti, sparks, fire spray.
     /// Per ADR-008 §particles: receivers seed a local particle
     /// simulation from these parameters and animate per-frame

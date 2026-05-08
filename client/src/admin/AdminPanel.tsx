@@ -15,14 +15,16 @@
  * receiver every other player uses.
  */
 import { useEffect, useMemo, useState } from 'react';
+import { useWorldStore } from '@/store';
 import { createAdminClient, type AdminClient } from './apiClient';
 import { useAdminToken } from './useAdminToken';
 import { AssetUploader } from './AssetUploader';
 import { RecipeEditor } from './RecipeEditor';
 import { QuickEventTrigger } from './QuickEventTrigger';
+import { PlayersPanel } from './PlayersPanel';
 import { VideoJobs } from './VideoJobs';
 
-type Tab = 'recipes' | 'assets' | 'trigger' | 'videos';
+type Tab = 'recipes' | 'assets' | 'trigger' | 'players' | 'videos';
 
 export function AdminPanel(): JSX.Element {
   const { token, setToken, clearToken } = useAdminToken();
@@ -54,11 +56,15 @@ export function AdminPanel(): JSX.Element {
           <TabButton current={tab} value="trigger" onClick={setTab}>
             Trigger
           </TabButton>
+          <TabButton current={tab} value="players" onClick={setTab}>
+            Players
+          </TabButton>
           <TabButton current={tab} value="videos" onClick={setTab}>
             Videos
           </TabButton>
         </nav>
         <div style={styles.headerRight}>
+          <NoClipToggle />
           <a href="/" style={styles.linkBack}>
             ← Back to scene
           </a>
@@ -71,9 +77,29 @@ export function AdminPanel(): JSX.Element {
         {tab === 'recipes' && <RecipeEditor client={client} onAuthError={clearToken} />}
         {tab === 'assets' && <AssetUploader client={client} onAuthError={clearToken} />}
         {tab === 'trigger' && <QuickEventTrigger client={client} onAuthError={clearToken} />}
+        {tab === 'players' && <PlayersPanel client={client} onAuthError={clearToken} />}
         {tab === 'videos' && <VideoJobs token={token} />}
       </main>
     </div>
+  );
+}
+
+/** No-clip toggle. Persists across reloads via localStorage
+ *  (handled inside the store action). Visible in the header so
+ *  the operator can flip it on without leaving the current tab. */
+function NoClipToggle(): JSX.Element {
+  const noClip = useWorldStore((s) => s.adminNoClip);
+  const setNoClip = useWorldStore((s) => s.setAdminNoClip);
+  return (
+    <label style={styles.noClipLabel}>
+      <input
+        type="checkbox"
+        checked={noClip}
+        onChange={(e) => setNoClip(e.target.checked)}
+        style={styles.noClipCheckbox}
+      />
+      <span>No-clip</span>
+    </label>
   );
 }
 
@@ -217,6 +243,19 @@ const styles: Record<string, React.CSSProperties> = {
     color: '#8aa',
     textDecoration: 'none',
     fontSize: 13,
+  },
+  noClipLabel: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+    color: '#8aa',
+    fontSize: 12,
+    cursor: 'pointer',
+    userSelect: 'none',
+  },
+  noClipCheckbox: {
+    accentColor: '#00ffcc',
+    cursor: 'pointer',
   },
   main: {
     flex: 1,

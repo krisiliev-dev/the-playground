@@ -1466,22 +1466,28 @@ function AvatarCursor({ refs }: ModeProps): null {
         // Without this the wall stops the avatar before they reach
         // the portal plane, and walk-through teleport never fires.
         const state = useWorldStore.getState();
-        const localActorId = state.localPlayerId ?? 'local';
-        const portalHoles = portalHolesForRoute(
-          clampRoute.route.path,
-          state.portalEndpoints,
-          state.entities,
-          localActorId,
-          state.clickHit,
-          bobY,
-        );
-        clampToBoxInterior(
-          avatarWorld,
-          clampHalf.current,
-          clampMargin,
-          portalHoles,
-          clampCenter.current,
-        );
+        // Admin no-clip: skip the clamp entirely so the operator
+        // can fly through walls. Per ADR-009; persisted in
+        // localStorage, never broadcast — purely a local QoL
+        // toggle for inspecting / debugging the world.
+        if (!state.adminNoClip) {
+          const localActorId = state.localPlayerId ?? 'local';
+          const portalHoles = portalHolesForRoute(
+            clampRoute.route.path,
+            state.portalEndpoints,
+            state.entities,
+            localActorId,
+            state.clickHit,
+            bobY,
+          );
+          clampToBoxInterior(
+            avatarWorld,
+            clampHalf.current,
+            clampMargin,
+            portalHoles,
+            clampCenter.current,
+          );
+        }
       }
     }
 

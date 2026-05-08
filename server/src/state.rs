@@ -13,9 +13,10 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use tokio::sync::{broadcast, RwLock};
+use tokio::sync::{broadcast, oneshot, RwLock};
 
 use crate::assets::AssetRegistry;
+use crate::entity::EntityId;
 use crate::protocol::ServerMessage;
 use crate::recipes::RecipeStore;
 use crate::registry::EntityRegistry;
@@ -71,6 +72,13 @@ pub struct AppState {
     /// Path to the on-disk recipe store file. Configurable via
     /// `RECIPES_FILE` env var.
     pub recipes_path: PathBuf,
+    /// Per-actor oneshot channels for kicking. The WS handler
+    /// inserts a sender on connect; the kick endpoint takes it
+    /// out and signals it to abort the connection's tasks.
+    /// Wrapped in a Mutex (not RwLock) since every access
+    /// either inserts or removes — no concurrent reads to
+    /// optimise for.
+    pub kick_signals: Arc<tokio::sync::Mutex<HashMap<EntityId, oneshot::Sender<()>>>>,
 }
 
 impl AppState {
@@ -92,6 +100,7 @@ impl AppState {
             asset_index_path,
             recipe_store: Arc::new(RwLock::new(RecipeStore::new())),
             recipes_path,
+            kick_signals: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         }
     }
 

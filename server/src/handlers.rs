@@ -308,6 +308,160 @@ pub async fn post_admin_play_recipe(
     StatusCode::ACCEPTED.into_response()
 }
 
+// ─── Player management (per ADR-009) ──────────────────────────
+
+#[derive(serde::Serialize)]
+struct AdminPlayerView {
+    id: EntityId,
+    name: String,
+    cursor_color: String,
+    route: String,
+    frozen: bool,
+    /// `(x, y, z)` of the player's last-known cursor position.
+    /// Useful so the admin can see *where* a player is before
+    /// kicking / teleporting them.
+    position: [f32; 3],
+}
+
+fn entity_to_player_view(entity: &Entity) -> AdminPlayerView {
+    let props = entity.props.as_object();
+    let read_str = |key: &str, default: &str| -> String {
+        props
+            .and_then(|p| p.get(key))
+            .and_then(|v| v.as_str())
+            .unwrap_or(default)
+            .to_string()
+    };
+    let frozen = props
+        .and_then(|p| p.get("frozen"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    AdminPlayerView {
+        id: entity.id,
+        name: read_str("name", "Guest"),
+        cursor_color: read_str("cursor_color", "#00ffcc"),
+        route: read_str("route", "/"),
+        frozen,
+        position: entity.transform.position,
+    }
+}
+
+/// GET /api/admin/players — return every connected player's
+/// public state (id, name, route, cursor color, frozen flag,
+/// position). Powers the admin Players panel.
+pub async fn get_admin_players(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    let presented = extract_bearer(&headers).unwrap_or("");
+    if !auth::is_admin_token(presented, &state.admin_token) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let registry = state.registry.read().await;
+    let players: Vec<AdminPlayerView> = registry
+        .snapshot()
+        .iter()
+        .filter(|e| e.kind == EntityKind::Player)
+        .map(entity_to_player_view)
+        .collect();
+    Json(players).into_response()
+}
+
+#[derive(Deserialize)]
+pub struct KickRequest {
+    pub id: EntityId,
+}
+
+/// POST /api/admin/kick — terminate a specific player's WS
+/// connection. Returns 404 if the player isn't connected, 200
+/// on successful signal. The kick is asynchronous; the WS
+/// handler aborts on its next iteration of the select loop.
+pub async fn post_admin_kick(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<KickRequest>,
+) -> impl IntoResponse {
+    let presented = extract_bearer(&headers).unwrap_or("");
+    if !auth::is_admin_token(presented, &state.admin_token) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let sender = state.kick_signals.lock().await.remove(&req.id);
+    let Some(sender) = sender else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    // Sending fails if the receiver was dropped (the connection
+    // already closed). That's fine; the player is gone either
+    // way. Treat both as success from the admin's perspective.
+    let _ = sender.send(());
+    StatusCode::OK.into_response()
+}
+
+#[derive(Deserialize)]
+pub struct FreezeRequest {
+    pub id: EntityId,
+    pub frozen: bool,
+}
+
+/// POST /api/admin/freeze — set the `frozen` flag on a player's
+/// entity props. Frozen players' inbound PlayerInput position
+/// updates are dropped server-side; their cursor visibly stops
+/// for everyone (including themselves, since the client
+/// extrapolates from the server's broadcast position).
+pub async fn post_admin_freeze(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<FreezeRequest>,
+) -> impl IntoResponse {
+    let presented = extract_bearer(&headers).unwrap_or("");
+    if !auth::is_admin_token(presented, &state.admin_token) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let mutated = {
+        let mut registry = state.registry.write().await;
+        registry.mutate(&req.id, |entity| {
+            if let Some(props) = entity.props.as_object_mut() {
+                props.insert("frozen".to_string(), serde_json::Value::Bool(req.frozen));
+            }
+        })
+    };
+    if !mutated {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    StatusCode::OK.into_response()
+}
+
+#[derive(Deserialize)]
+pub struct TeleportPlayerRequest {
+    pub id: EntityId,
+    pub position: [f32; 3],
+}
+
+/// POST /api/admin/teleport_player — broadcast a `ForceTeleport`
+/// SceneEvent so the target player's client snaps its cursor
+/// to the supplied world position. Other receivers ignore the
+/// event since PlayerInput will catch them up; only the target
+/// matters. Returns 200 on broadcast (we don't verify the
+/// player is connected — they may have just dropped, in which
+/// case the event is harmlessly broadcast and discarded).
+pub async fn post_admin_teleport_player(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<TeleportPlayerRequest>,
+) -> impl IntoResponse {
+    let presented = extract_bearer(&headers).unwrap_or("");
+    if !auth::is_admin_token(presented, &state.admin_token) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let _ = state.broadcast_tx.send(ServerMessage::SceneEvent {
+        actor_id: None,
+        event: SceneEventKind::ForceTeleport {
+            target_actor_id: req.id.to_string(),
+            position: req.position,
+        },
+    });
+    StatusCode::OK.into_response()
+}
+
 /// Pull the bearer token from an `Authorization: Bearer <token>`
 /// header. Returns None if header missing, malformed, or doesn't
 /// start with the `Bearer ` prefix.
@@ -354,6 +508,13 @@ async fn handle_ws(socket: WebSocket, state: AppState, ip: String, is_admin: boo
     );
     let player_id = player.id;
     state.registry.write().await.insert(player);
+
+    // Register a kick channel keyed by this connection's
+    // player_id. The /api/admin/kick endpoint signals on this
+    // channel to abort both tasks below; the cleanup branch
+    // below removes the channel on disconnect.
+    let (kick_tx, kick_rx) = tokio::sync::oneshot::channel::<()>();
+    state.kick_signals.lock().await.insert(player_id, kick_tx);
 
     let (mut ws_sender, mut ws_receiver) = socket.split();
 
@@ -432,11 +593,23 @@ async fn handle_ws(socket: WebSocket, state: AppState, ip: String, is_admin: boo
         }
     });
 
+    let mut kick_rx = kick_rx;
     tokio::select! {
         _ = &mut outbound_task => inbound_task.abort(),
         _ = &mut inbound_task => outbound_task.abort(),
+        _ = &mut kick_rx => {
+            info!(player = %player_id, "kicked by admin");
+            outbound_task.abort();
+            inbound_task.abort();
+        }
     }
 
+    // Drop our kick channel on the way out so the registry
+    // doesn't leak entries for disconnected players. The
+    // admin endpoint's `remove` call on a kicked player would
+    // also clean this up, but the natural-disconnect path
+    // needs its own removal.
+    state.kick_signals.lock().await.remove(&player_id);
     cleanup(&state, &ip, player_id).await;
 }
 
@@ -457,7 +630,21 @@ async fn handle_client_message(
         } => {
             let mut registry = state.registry.write().await;
             registry.mutate(&player_id, |entity| {
-                entity.transform = transform;
+                // Frozen players' position updates are dropped
+                // server-side. Their props (including the
+                // `frozen` flag itself) and route still update,
+                // so other clients can render a "frozen" badge
+                // and the player's own UI continues to work —
+                // they just can't move.
+                let frozen = entity
+                    .props
+                    .as_object()
+                    .and_then(|p| p.get("frozen"))
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                if !frozen {
+                    entity.transform = transform;
+                }
                 if let Some(props) = entity.props.as_object_mut() {
                     props.insert("route".to_string(), serde_json::Value::String(route));
                     // Merge presence keys into the entity's props
