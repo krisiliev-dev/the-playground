@@ -19,6 +19,12 @@ server/state.json.probe
 # content, not source. Default path is `assets/` next to the
 # server binary; production deploys point ASSETS_DIR elsewhere.
 server/assets/
+# Runtime asset metadata + recipe stores (per ADR-007 + ADR-008).
+# Regenerated on each upsert; not source.
+server/assets.json
+server/assets.json.tmp
+server/recipes.json
+server/recipes.json.tmp
 
 # ── IDE / Editor ────────────────────────────────────────────────────
 .vscode/
