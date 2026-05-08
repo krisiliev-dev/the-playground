@@ -163,6 +163,33 @@ pub enum SceneEventKind {
         extension: String,
         size: u64,
     },
+    /// Floating 3D text popup at a world position. Renders as a
+    /// billboarded label that fades over `lifetime_ms`. Useful
+    /// for admin chat ("you've been frozen"), labels on portals,
+    /// or in-world annotations dropped by recipes.
+    TextPopup {
+        position: [f32; 3],
+        text: String,
+        /// Hex colour of the text. Falls back to neon cyan if
+        /// the receiver can't parse it.
+        color: String,
+        /// World-space height of the text (drives the
+        /// underlying canvas size + rendering scale).
+        size: f32,
+        lifetime_ms: u32,
+    },
+    /// Full-screen colour pulse for receivers near the trigger.
+    /// Receivers within `radius` of `position` fade in a tinted
+    /// overlay (`color`, `peak_alpha`) and fade out over
+    /// `duration_ms`. Useful for "the world flashes red" admin
+    /// effects or recipe-driven mood swings.
+    ColorFlash {
+        position: [f32; 3],
+        radius: f32,
+        color: String,
+        peak_alpha: f32,
+        duration_ms: u32,
+    },
     /// Forcibly teleport a specific player's cursor to a world
     /// position. Server-originated only (admin endpoint); the
     /// target client matches `target_actor_id` against its own

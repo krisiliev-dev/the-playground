@@ -70,6 +70,22 @@ export type SceneEventKind =
       position: [number, number, number];
     }
   | {
+      kind: 'text_popup';
+      position: [number, number, number];
+      text: string;
+      color: string;
+      size: number;
+      lifetime_ms: number;
+    }
+  | {
+      kind: 'color_flash';
+      position: [number, number, number];
+      radius: number;
+      color: string;
+      peak_alpha: number;
+      duration_ms: number;
+    }
+  | {
       kind: 'asset_available';
       id: string;
       url: string;

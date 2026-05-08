@@ -46,6 +46,13 @@ vi.mock('@/multiplayer/ParticleBursts', () => ({
   ParticleBursts: () => null,
 }));
 
+// In-canvas text popup receiver — same reasoning, stub it
+// out so the World test doesn't pull in troika-three-text or
+// drei's <Billboard>.
+vi.mock('@/multiplayer/TextPopups', () => ({
+  TextPopups: () => null,
+}));
+
 // OrbitControls from drei uses R3F hooks under the hood — stub it out.
 vi.mock('@react-three/drei', () => ({
   OrbitControls: () => null,

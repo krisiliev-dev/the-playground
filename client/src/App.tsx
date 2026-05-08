@@ -18,6 +18,7 @@ import { useWorldStore } from '@/store';
 import { useMultiplayerSync } from '@/multiplayer/useMultiplayerSync';
 import { MultiplayerDebugHud } from '@/multiplayer/MultiplayerDebugHud';
 import { MultiplayerEffectsReceiver } from '@/multiplayer/MultiplayerEffectsReceiver';
+import { ColorFlashOverlay } from '@/multiplayer/ColorFlashOverlay';
 import { acquirePointerLock } from '@/utils';
 import { CubeScene } from '@/scenes/CubeScene';
 import { SceneHost } from '@/scenes/SceneHost';
@@ -473,6 +474,7 @@ export function App(): JSX.Element {
               <>
                 <MultiplayerDebugHud />
                 <MultiplayerEffectsReceiver />
+                <ColorFlashOverlay />
               </>
             )}
           </>

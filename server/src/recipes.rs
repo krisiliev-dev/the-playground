@@ -78,6 +78,26 @@ pub enum RecipeStep {
         #[serde(default)]
         spin: f32,
     },
+    /// Floating 3D text popup. Same fields as
+    /// `SceneEventKind::TextPopup` plus offset_ms +
+    /// position_offset.
+    TextPopup {
+        offset_ms: u64,
+        position_offset: [f32; 3],
+        text: String,
+        color: String,
+        size: f32,
+        lifetime_ms: u32,
+    },
+    /// Full-screen colour pulse for nearby receivers.
+    ColorFlash {
+        offset_ms: u64,
+        position_offset: [f32; 3],
+        radius: f32,
+        color: String,
+        peak_alpha: f32,
+        duration_ms: u32,
+    },
 }
 
 impl RecipeStep {
@@ -86,6 +106,8 @@ impl RecipeStep {
             Self::Audio { offset_ms, .. } => *offset_ms,
             Self::CameraShake { offset_ms, .. } => *offset_ms,
             Self::ParticleBurst { offset_ms, .. } => *offset_ms,
+            Self::TextPopup { offset_ms, .. } => *offset_ms,
+            Self::ColorFlash { offset_ms, .. } => *offset_ms,
         }
     }
 }
@@ -320,6 +342,38 @@ pub fn validate_recipe(recipe: &Recipe) -> Result<(), ValidationError> {
                     return Err(ValidationError::InvalidDuration);
                 }
             }
+            RecipeStep::TextPopup {
+                text,
+                size,
+                lifetime_ms,
+                ..
+            } => {
+                if text.is_empty() || text.len() > 240 {
+                    return Err(ValidationError::InvalidParticleSize); // reuse generic
+                }
+                if !size.is_finite() || *size <= 0.0 || *size > 50.0 {
+                    return Err(ValidationError::InvalidParticleSize);
+                }
+                if *lifetime_ms == 0 || *lifetime_ms > 10_000 {
+                    return Err(ValidationError::InvalidParticleLifetime);
+                }
+            }
+            RecipeStep::ColorFlash {
+                radius,
+                peak_alpha,
+                duration_ms,
+                ..
+            } => {
+                if !radius.is_finite() || *radius < 0.0 || *radius > 5000.0 {
+                    return Err(ValidationError::InvalidRadius);
+                }
+                if !peak_alpha.is_finite() || *peak_alpha < 0.0 || *peak_alpha > 1.0 {
+                    return Err(ValidationError::InvalidIntensity);
+                }
+                if *duration_ms > 3000 {
+                    return Err(ValidationError::InvalidDuration);
+                }
+            }
             RecipeStep::ParticleBurst {
                 count,
                 colors,
@@ -419,6 +473,34 @@ pub fn step_to_event(step: &RecipeStep, trigger_pos: [f32; 3]) -> SceneEventKind
             position: resolve(position_offset),
             radius: *radius,
             intensity: *intensity,
+            duration_ms: *duration_ms,
+        },
+        RecipeStep::TextPopup {
+            position_offset,
+            text,
+            color,
+            size,
+            lifetime_ms,
+            ..
+        } => SceneEventKind::TextPopup {
+            position: resolve(position_offset),
+            text: text.clone(),
+            color: color.clone(),
+            size: *size,
+            lifetime_ms: *lifetime_ms,
+        },
+        RecipeStep::ColorFlash {
+            position_offset,
+            radius,
+            color,
+            peak_alpha,
+            duration_ms,
+            ..
+        } => SceneEventKind::ColorFlash {
+            position: resolve(position_offset),
+            radius: *radius,
+            color: color.clone(),
+            peak_alpha: *peak_alpha,
             duration_ms: *duration_ms,
         },
         RecipeStep::ParticleBurst {

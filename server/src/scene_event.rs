@@ -159,6 +159,52 @@ pub fn validate_event(
                 duration_ms: duration_ms.min(1500),
             })
         }
+        SceneEventKind::TextPopup {
+            position,
+            text,
+            color,
+            size,
+            lifetime_ms,
+        } => {
+            if !tracker.allow(id, "text_popup", 10, Duration::from_secs(1), now) {
+                return ValidationOutcome::Drop;
+            }
+            // Empty text is a misuse; cap length so a player
+            // can't paste a 1MB string and crash the receiver.
+            if text.is_empty() {
+                return ValidationOutcome::Drop;
+            }
+            let truncated_text = if text.len() > 240 {
+                text.chars().take(240).collect()
+            } else {
+                text
+            };
+            ValidationOutcome::Pass(SceneEventKind::TextPopup {
+                position,
+                text: truncated_text,
+                color,
+                size: size.clamp(0.1, 50.0),
+                lifetime_ms: lifetime_ms.min(10_000),
+            })
+        }
+        SceneEventKind::ColorFlash {
+            position,
+            radius,
+            color,
+            peak_alpha,
+            duration_ms,
+        } => {
+            if !tracker.allow(id, "color_flash", 5, Duration::from_secs(1), now) {
+                return ValidationOutcome::Drop;
+            }
+            ValidationOutcome::Pass(SceneEventKind::ColorFlash {
+                position,
+                radius: radius.clamp(0.0, 5000.0),
+                color,
+                peak_alpha: peak_alpha.clamp(0.0, 1.0),
+                duration_ms: duration_ms.min(3000),
+            })
+        }
         SceneEventKind::ForceTeleport { .. } => {
             // Server-originated only (admin teleport endpoint);
             // a player forging this would let them yank others'

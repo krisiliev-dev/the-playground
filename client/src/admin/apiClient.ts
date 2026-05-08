@@ -66,6 +66,24 @@ export type AdminRecipeStep =
       size: number;
       model_url?: string | null;
       spin: number;
+    }
+  | {
+      kind: 'text_popup';
+      offset_ms: number;
+      position_offset: [number, number, number];
+      text: string;
+      color: string;
+      size: number;
+      lifetime_ms: number;
+    }
+  | {
+      kind: 'color_flash';
+      offset_ms: number;
+      position_offset: [number, number, number];
+      radius: number;
+      color: string;
+      peak_alpha: number;
+      duration_ms: number;
     };
 
 export interface AdminRecipe {
@@ -99,6 +117,22 @@ export type AdminFireableEvent =
       size: number;
       model_url?: string | null;
       spin: number;
+    }
+  | {
+      kind: 'text_popup';
+      position: [number, number, number];
+      text: string;
+      color: string;
+      size: number;
+      lifetime_ms: number;
+    }
+  | {
+      kind: 'color_flash';
+      position: [number, number, number];
+      radius: number;
+      color: string;
+      peak_alpha: number;
+      duration_ms: number;
     };
 
 export class AdminAuthError extends Error {

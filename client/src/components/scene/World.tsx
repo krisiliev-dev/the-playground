@@ -24,6 +24,7 @@ import { Portals } from './portal/Portals';
 import { RemotePlayers } from './RemotePlayers';
 import { RemotePlayerReveals } from '@/multiplayer/RemotePlayerReveals';
 import { ParticleBursts } from '@/multiplayer/ParticleBursts';
+import { TextPopups } from '@/multiplayer/TextPopups';
 
 export function World(): JSX.Element {
   const environment = useWorldStore((s) => s.environment);
@@ -107,6 +108,7 @@ export function World(): JSX.Element {
       <RemotePlayers />
       <RemotePlayerReveals />
       <ParticleBursts />
+      <TextPopups />
       <RevealOrchestrator />
       <InteractionController />
       <SkyBackground dimensions={environment.dimensions} />
