@@ -16,12 +16,154 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { cursorWorldPosition } from '@/components/scene/cursorWorldPosition';
-import { AdminAuthError, type AdminClient, type AdminRecipe } from './apiClient';
+import {
+  AdminAuthError,
+  type AdminClient,
+  type AdminRecipe,
+  type AdminRecipeStep,
+} from './apiClient';
 
 interface Props {
   client: AdminClient;
   onAuthError: () => void;
 }
+
+/** Default-filled step skeletons for the "Add step" dropdown.
+ *  Each entry produces a step object an author can immediately
+ *  tweak — values are sensible defaults, not zeros. */
+const STEP_TEMPLATES: Record<string, () => AdminRecipeStep> = {
+  audio: () => ({
+    kind: 'audio',
+    offset_ms: 0,
+    position_offset: [0, 0, 0],
+    sound_id: 'popper',
+    volume: 1.0,
+  }),
+  camera_shake: () => ({
+    kind: 'camera_shake',
+    offset_ms: 0,
+    position_offset: [0, 0, 0],
+    radius: 200,
+    intensity: 0.5,
+    duration_ms: 300,
+  }),
+  particle_burst: () => ({
+    kind: 'particle_burst',
+    offset_ms: 0,
+    position_offset: [0, 0, 0],
+    count: 200,
+    colors: ['#ff00aa', '#00ffaa', '#ffff00', '#00aaff', '#ff8800'],
+    speed: 80,
+    lifetime_ms: 2500,
+    spread: 0.7,
+    gravity: 30,
+    size: 5,
+    spin: 0,
+  }),
+  text_popup: () => ({
+    kind: 'text_popup',
+    offset_ms: 0,
+    position_offset: [0, 0, 0],
+    text: 'Hello!',
+    color: '#00ffcc',
+    size: 8,
+    lifetime_ms: 2500,
+  }),
+  color_flash: () => ({
+    kind: 'color_flash',
+    offset_ms: 0,
+    position_offset: [0, 0, 0],
+    radius: 600,
+    color: '#ffffff',
+    peak_alpha: 0.6,
+    duration_ms: 400,
+  }),
+};
+
+/** Quick-start recipe presets the operator can load into the
+ *  editor. New recipes can be authored from scratch or built
+ *  on top of one of these. */
+const RECIPE_PRESETS: Record<string, () => AdminRecipe> = {
+  confetti_burst: () => ({
+    id: 'confetti_burst',
+    name: 'Confetti Burst',
+    steps: [
+      STEP_TEMPLATES.particle_burst!(),
+      STEP_TEMPLATES.audio!(),
+      STEP_TEMPLATES.camera_shake!(),
+    ],
+  }),
+  firework: () => {
+    const upBurst = STEP_TEMPLATES.particle_burst!() as Extract<
+      AdminRecipeStep,
+      { kind: 'particle_burst' }
+    >;
+    upBurst.colors = ['#ffaa00', '#ff5500', '#ffffff'];
+    upBurst.gravity = 40;
+    upBurst.spread = 0.4;
+    upBurst.speed = 120;
+    upBurst.lifetime_ms = 1800;
+    const popBurst = STEP_TEMPLATES.particle_burst!() as Extract<
+      AdminRecipeStep,
+      { kind: 'particle_burst' }
+    >;
+    popBurst.offset_ms = 700;
+    popBurst.position_offset = [0, 60, 0];
+    popBurst.count = 300;
+    popBurst.spread = 1;
+    popBurst.speed = 150;
+    popBurst.gravity = 80;
+    popBurst.lifetime_ms = 2200;
+    return {
+      id: 'firework',
+      name: 'Firework',
+      steps: [
+        upBurst,
+        popBurst,
+        {
+          kind: 'camera_shake',
+          offset_ms: 700,
+          position_offset: [0, 60, 0],
+          radius: 400,
+          intensity: 0.4,
+          duration_ms: 500,
+        },
+      ],
+    };
+  },
+  glitch_pulse: () => ({
+    id: 'glitch_pulse',
+    name: 'Glitch Pulse',
+    steps: [
+      {
+        kind: 'color_flash',
+        offset_ms: 0,
+        position_offset: [0, 0, 0],
+        radius: 1000,
+        color: '#ff00ff',
+        peak_alpha: 0.7,
+        duration_ms: 200,
+      },
+      {
+        kind: 'color_flash',
+        offset_ms: 250,
+        position_offset: [0, 0, 0],
+        radius: 1000,
+        color: '#00ffff',
+        peak_alpha: 0.5,
+        duration_ms: 200,
+      },
+      {
+        kind: 'camera_shake',
+        offset_ms: 0,
+        position_offset: [0, 0, 0],
+        radius: 600,
+        intensity: 0.7,
+        duration_ms: 400,
+      },
+    ],
+  }),
+};
 
 const TEMPLATE_RECIPE: AdminRecipe = {
   id: 'new_effect',
@@ -203,7 +345,9 @@ export function RecipeEditor({ client, onAuthError }: Props): JSX.Element {
                 onClick={() => onSelectRecipe(r)}
               >
                 <div style={styles.recipeName}>{r.name}</div>
-                <code style={styles.recipeId}>{r.id}</code>
+                <code style={styles.recipeId}>
+                  {r.id} · {r.steps.length} step{r.steps.length === 1 ? '' : 's'}
+                </code>
               </button>
               <div style={styles.recipeActions}>
                 <button
@@ -239,6 +383,60 @@ export function RecipeEditor({ client, onAuthError }: Props): JSX.Element {
           >
             {parsed.ok ? '✓ valid JSON' : '✗ invalid JSON'}
           </span>
+        </div>
+        <div style={styles.toolbar}>
+          <select
+            style={styles.select}
+            value=""
+            disabled={!parsed.ok}
+            onChange={(e) => {
+              if (!parsed.ok || !e.target.value) {
+                return;
+              }
+              const factory = STEP_TEMPLATES[e.target.value];
+              if (!factory) {
+                return;
+              }
+              const updated = {
+                ...parsed.value,
+                steps: [...parsed.value.steps, factory()],
+              };
+              setDraftJson(JSON.stringify(updated, null, 2));
+              e.target.value = '';
+            }}
+          >
+            <option value="">+ Add step…</option>
+            {Object.keys(STEP_TEMPLATES).map((kind) => (
+              <option key={kind} value={kind}>
+                {kind}
+              </option>
+            ))}
+          </select>
+          <select
+            style={styles.select}
+            value=""
+            onChange={(e) => {
+              if (!e.target.value) {
+                return;
+              }
+              const factory = RECIPE_PRESETS[e.target.value];
+              if (!factory) {
+                return;
+              }
+              setEditingId(null);
+              setDraftJson(JSON.stringify(factory(), null, 2));
+              setInfo(null);
+              setError(null);
+              e.target.value = '';
+            }}
+          >
+            <option value="">⌘ Load preset…</option>
+            {Object.keys(RECIPE_PRESETS).map((id) => (
+              <option key={id} value={id}>
+                {id}
+              </option>
+            ))}
+          </select>
         </div>
         <textarea
           value={draftJson}
@@ -391,6 +589,22 @@ const styles: Record<string, React.CSSProperties> = {
   },
   editorTitle: { fontSize: 14, color: '#e6f7ff' },
   parseStatus: { fontSize: 12, fontFamily: 'monospace' },
+  toolbar: {
+    display: 'flex',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  select: {
+    background: '#0c1418',
+    border: '1px solid #1a1a2e',
+    color: '#e6f7ff',
+    padding: '6px 10px',
+    borderRadius: 4,
+    fontSize: 12,
+    fontFamily: 'monospace',
+    outline: 'none',
+    cursor: 'pointer',
+  },
   textarea: {
     flex: 1,
     background: '#0c1418',
