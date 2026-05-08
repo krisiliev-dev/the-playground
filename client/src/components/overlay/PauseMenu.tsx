@@ -21,6 +21,7 @@ import { useLocation } from 'react-router-dom';
 import { useWorldStore } from '@/store';
 import { FLAT_ROUTES } from '@/content/routes';
 import { acquirePointerLock, useIsTouchPrimary } from '@/utils';
+import { AdminMenuSection } from '@/admin/AdminMenuSection';
 
 interface NavItem {
   readonly path: string;
@@ -189,8 +190,14 @@ export function PauseMenu(): JSX.Element | null {
           aria-modal="true"
           aria-label="Menu"
         >
-          <div style={styles.card} onClick={(e) => e.stopPropagation()}>
-            <h2 style={styles.heading}>Menu</h2>
+          <div style={styles.column} onClick={(e) => e.stopPropagation()}>
+            {/* Admin section sits above the regular menu when an
+                admin token is in localStorage (per ADR-009). The
+                component returns null when no token is present, so
+                non-admin users see the unchanged menu. */}
+            <AdminMenuSection />
+            <div style={styles.card}>
+              <h2 style={styles.heading}>Menu</h2>
 
             <nav style={styles.nav} aria-label="Sections">
               {NAV_ITEMS.map((item, i) => {
@@ -272,6 +279,7 @@ export function PauseMenu(): JSX.Element | null {
             <p style={styles.hint}>
               {isTouch ? 'tap outside' : 'press M or click outside'} to close
             </p>
+            </div>
           </div>
         </div>
       )}
@@ -311,6 +319,15 @@ const styles: Record<string, CSSProperties> = {
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 30,
+    overflowY: 'auto',
+  },
+  column: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: 16,
+    padding: 24,
+    maxWidth: '100vw',
   },
   card: {
     minWidth: 280,
