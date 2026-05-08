@@ -30,6 +30,9 @@ export interface AdminPlayer {
   id: string;
   name: string;
   cursor_color: string;
+  /** Uploaded glb URL the player's cursor renders with, or
+   *  `null` for the built-in cursor model. */
+  cursor_model_url: string | null;
   route: string;
   frozen: boolean;
   position: [number, number, number];
@@ -188,6 +191,13 @@ export interface AdminClient {
   kickPlayer(id: string): Promise<void>;
   freezePlayer(id: string, frozen: boolean): Promise<void>;
   teleportPlayer(id: string, position: [number, number, number]): Promise<void>;
+  /** Set a player's cursor color and/or model. Pass `null`
+   *  for either field to leave it unchanged; `""` to clear it. */
+  setCursor(
+    id: string,
+    color: string | null,
+    modelUrl: string | null,
+  ): Promise<void>;
 }
 
 /**
@@ -292,6 +302,20 @@ export function createAdminClient(
       await request('/api/admin/teleport_player', {
         method: 'POST',
         body: JSON.stringify({ id, position }),
+        headers: { 'Content-Type': 'application/json' },
+      });
+    },
+    async setCursor(id, color, modelUrl) {
+      const body: Record<string, unknown> = { id };
+      if (color !== null) {
+        body.color = color;
+      }
+      if (modelUrl !== null) {
+        body.model_url = modelUrl;
+      }
+      await request('/api/admin/set_cursor', {
+        method: 'POST',
+        body: JSON.stringify(body),
         headers: { 'Content-Type': 'application/json' },
       });
     },

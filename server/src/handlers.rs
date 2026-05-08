@@ -315,6 +315,9 @@ struct AdminPlayerView {
     id: EntityId,
     name: String,
     cursor_color: String,
+    /// Optional uploaded model URL the player's cursor is
+    /// rendered with. `None` ⇒ default GLB.
+    cursor_model_url: Option<String>,
     route: String,
     frozen: bool,
     /// `(x, y, z)` of the player's last-known cursor position.
@@ -336,10 +339,15 @@ fn entity_to_player_view(entity: &Entity) -> AdminPlayerView {
         .and_then(|p| p.get("frozen"))
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
+    let cursor_model_url = props
+        .and_then(|p| p.get("cursor_model_url"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
     AdminPlayerView {
         id: entity.id,
         name: read_str("name", "Guest"),
         cursor_color: read_str("cursor_color", "#00ffcc"),
+        cursor_model_url,
         route: read_str("route", "/"),
         frozen,
         position: entity.transform.position,
@@ -456,6 +464,67 @@ pub async fn post_admin_freeze(
             frozen: req.frozen,
         },
     });
+    StatusCode::OK.into_response()
+}
+
+#[derive(Deserialize)]
+pub struct SetCursorRequest {
+    pub id: EntityId,
+    /// Hex color (e.g. `#ff00aa`). `None` leaves the existing
+    /// value untouched; an empty string explicitly clears it
+    /// so the cursor falls back to its default tint.
+    #[serde(default)]
+    pub color: Option<String>,
+    /// glb URL (e.g. `/assets/ast_….glb`). Same semantics —
+    /// `None` = no change, empty string = clear back to the
+    /// built-in cursor model.
+    #[serde(default)]
+    pub model_url: Option<String>,
+}
+
+/// POST /api/admin/set_cursor — set a player's cursor color
+/// and/or model. Both fields are optional; only the supplied
+/// ones are mutated. Empty strings clear back to the default.
+pub async fn post_admin_set_cursor(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<SetCursorRequest>,
+) -> impl IntoResponse {
+    let presented = extract_bearer(&headers).unwrap_or("");
+    if !auth::is_admin_token(presented, &state.admin_token) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let mutated = {
+        let mut registry = state.registry.write().await;
+        registry.mutate(&req.id, |entity| {
+            let Some(props) = entity.props.as_object_mut() else {
+                return;
+            };
+            if let Some(color) = &req.color {
+                if color.is_empty() {
+                    props.remove("cursor_color");
+                } else {
+                    props.insert(
+                        "cursor_color".to_string(),
+                        serde_json::Value::String(color.clone()),
+                    );
+                }
+            }
+            if let Some(url) = &req.model_url {
+                if url.is_empty() {
+                    props.remove("cursor_model_url");
+                } else {
+                    props.insert(
+                        "cursor_model_url".to_string(),
+                        serde_json::Value::String(url.clone()),
+                    );
+                }
+            }
+        })
+    };
+    if !mutated {
+        return StatusCode::NOT_FOUND.into_response();
+    }
     StatusCode::OK.into_response()
 }
 

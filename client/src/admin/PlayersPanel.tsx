@@ -34,6 +34,10 @@ export function PlayersPanel({ client, onAuthError }: Props): JSX.Element {
   const [tpDraft, setTpDraft] = useState<Record<string, [string, string, string]>>(
     {},
   );
+  // Per-player cursor-customisation drafts. Same keying logic.
+  const [cursorDraft, setCursorDraft] = useState<
+    Record<string, { color: string; modelUrl: string }>
+  >({});
 
   const refresh = useCallback(async () => {
     setError(null);
@@ -106,6 +110,41 @@ export function PlayersPanel({ client, onAuthError }: Props): JSX.Element {
         cursorWorldPosition.z.toFixed(0),
       ],
     }));
+  };
+
+  const cursorFor = (
+    p: AdminPlayer,
+  ): { color: string; modelUrl: string } => {
+    return (
+      cursorDraft[p.id] ?? {
+        color: p.cursor_color,
+        modelUrl: p.cursor_model_url ?? '',
+      }
+    );
+  };
+
+  const setCursorField = (
+    id: string,
+    field: 'color' | 'modelUrl',
+    value: string,
+    p: AdminPlayer,
+  ): void => {
+    setCursorDraft((prev) => {
+      const cur = prev[id] ?? {
+        color: p.cursor_color,
+        modelUrl: p.cursor_model_url ?? '',
+      };
+      return { ...prev, [id]: { ...cur, [field]: value } };
+    });
+  };
+
+  const onSetCursor = (p: AdminPlayer): void => {
+    const draft = cursorFor(p);
+    void wrap(
+      p.id,
+      () => client.setCursor(p.id, draft.color, draft.modelUrl),
+      'Cursor updated for',
+    );
   };
 
   const onTeleport = (id: string): void => {
@@ -217,6 +256,34 @@ export function PlayersPanel({ client, onAuthError }: Props): JSX.Element {
                           Kick
                         </button>
                       </div>
+                      <div style={styles.cursorRow}>
+                        <input
+                          type="color"
+                          value={cursorFor(p).color}
+                          onChange={(e) =>
+                            setCursorField(p.id, 'color', e.target.value, p)
+                          }
+                          style={styles.colorPicker}
+                          title="Cursor color"
+                        />
+                        <input
+                          type="text"
+                          value={cursorFor(p).modelUrl}
+                          onChange={(e) =>
+                            setCursorField(p.id, 'modelUrl', e.target.value, p)
+                          }
+                          placeholder="cursor model URL (empty = default)"
+                          style={styles.modelInput}
+                        />
+                        <button
+                          type="button"
+                          style={styles.setCursorBtn}
+                          disabled={busyId === p.id}
+                          onClick={() => onSetCursor(p)}
+                        >
+                          Set
+                        </button>
+                      </div>
                     </div>
                   </td>
                 </tr>
@@ -304,6 +371,37 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: 'pointer',
     fontSize: 12,
     padding: 0,
+  },
+  cursorRow: { display: 'flex', gap: 6, alignItems: 'center' },
+  colorPicker: {
+    width: 32,
+    height: 24,
+    border: '1px solid #1a1a2e',
+    borderRadius: 4,
+    background: '#0a0a12',
+    cursor: 'pointer',
+    padding: 0,
+  },
+  modelInput: {
+    flex: 1,
+    minWidth: 120,
+    background: '#0a0a12',
+    border: '1px solid #1a1a2e',
+    color: '#e6f7ff',
+    padding: '4px 8px',
+    borderRadius: 4,
+    fontSize: 11,
+    fontFamily: 'monospace',
+    outline: 'none',
+  },
+  setCursorBtn: {
+    background: '#0c1418',
+    color: '#00ffcc',
+    border: '1px solid #00ffcc',
+    padding: '4px 12px',
+    borderRadius: 4,
+    cursor: 'pointer',
+    fontSize: 12,
   },
   tpBtn: {
     background: '#0c1418',

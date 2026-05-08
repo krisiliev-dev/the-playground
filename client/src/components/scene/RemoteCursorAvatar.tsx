@@ -68,10 +68,21 @@ interface RemoteCursorAvatarProps {
 }
 
 export function RemoteCursorAvatar({ entity }: RemoteCursorAvatarProps): JSX.Element {
-  const { scene: sourceScene } = useGLTF(MODEL_URL) as unknown as { scene: Object3D };
+  // Per-player cursor swap (per ADR-009). When the admin sets
+  // `cursor_model_url` on a player's props, that URL becomes the
+  // glb the cursor renders with. Falls back to the built-in
+  // model when unset, missing, or empty.
+  const props = entity.props as {
+    cursor_color?: string;
+    cursor_model_url?: string;
+  };
+  const modelUrl = props.cursor_model_url && props.cursor_model_url.length > 0
+    ? props.cursor_model_url
+    : MODEL_URL;
+  const { scene: sourceScene } = useGLTF(modelUrl) as unknown as { scene: Object3D };
   const groupRef = useRef<Group>(null);
 
-  const bodyColor = (entity.props as { cursor_color?: string }).cursor_color ?? FALLBACK_BODY_COLOR;
+  const bodyColor = props.cursor_color ?? FALLBACK_BODY_COLOR;
 
   // Per-entity instance: clone the scene tree (sharing geometry,
   // replacing materials), build outline shells, register the

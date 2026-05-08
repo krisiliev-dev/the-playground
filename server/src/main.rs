@@ -211,6 +211,10 @@ async fn main() {
             "/api/admin/teleport_player",
             post(handlers::post_admin_teleport_player),
         )
+        .route(
+            "/api/admin/set_cursor",
+            post(handlers::post_admin_set_cursor),
+        )
         // Public static serving of uploaded assets. Content-
         // addressed URLs mean these are safe to cache aggressively;
         // ServeDir handles MIME types + byte-range requests.
