@@ -64,6 +64,15 @@ function isAdminRoute(): boolean {
   if (typeof window === 'undefined') {
     return false;
   }
+  // `/admin` (or `/admin/...`) is the canonical entry point. The
+  // legacy `?admin=1` query param is preserved as an alias so any
+  // outstanding bookmarks keep working.
+  if (
+    window.location.pathname === '/admin' ||
+    window.location.pathname.startsWith('/admin/')
+  ) {
+    return true;
+  }
   const params = new URLSearchParams(window.location.search);
   return params.get('admin') === '1';
 }
