@@ -489,6 +489,52 @@ function ActiveCursor(): JSX.Element {
 
   const gltf = useGLTF(MODEL_URL);
 
+  // Local cursor's color tracks the local player's own
+  // `cursor_color` prop (per ADR-009 §cursor-swap). When the
+  // admin endpoint sets it, the next entity broadcast updates
+  // the prop here, this selector returns the new value, and the
+  // useEffect below mutates the body materials' `color` +
+  // `emissive` so the change is visible in first-person too.
+  // Without this, the local player saw their own cursor stuck
+  // on the default while remote viewers saw it recoloured.
+  //
+  // Why mutate instead of re-create the materials: the existing
+  // setup `useEffect` does heavy mesh wiring (outlines, layers,
+  // in-scene copies) that's expensive to redo on each colour
+  // change. Rewriting `material.color`/`emissive` in place is
+  // the GPU-cheap path.
+  const localCursorColor = useWorldStore((s) => {
+    if (!s.localPlayerId) {
+      return null;
+    }
+    const me = s.entities.get(s.localPlayerId);
+    if (!me) {
+      return null;
+    }
+    const props = me.props as { cursor_color?: string };
+    return props.cursor_color ?? null;
+  });
+
+  useEffect(() => {
+    const targetColor = localCursorColor ?? BODY_COLOR_HEX;
+    const targetEmissive = localCursorColor ?? EMISSIVE_HEX;
+    gltf.scene.traverse((obj) => {
+      const mesh = obj as Mesh;
+      if (!mesh.isMesh) {
+        return;
+      }
+      const mat = mesh.material;
+      // Body materials are MeshStandardMaterial (created by
+      // `createCursorBodyMaterial`); outline shells are
+      // MeshBasicMaterial which we leave alone (they're a
+      // permanent white silhouette per ADR-003).
+      if (mat instanceof MeshStandardMaterial) {
+        mat.color.set(targetColor);
+        mat.emissive.set(targetEmissive);
+      }
+    });
+  }, [gltf.scene, localCursorColor]);
+
   // Shared state — both subcomponents read from these refs. ActiveCursor
   // owns them so they survive the !isAvatar → isAvatar transition.
   const renderedScale = useRef(POINTER_SCALE);

@@ -56,7 +56,12 @@ const OUTLINE_SHIFT_X_FRACTION = 0.012;
 const OUTLINE_SHIFT_Y_FRACTION = 0.012;
 const OUTLINE_COLOR_HEX = '#ffffff';
 
-/** Body emissive — same cyan glow as local cursor. */
+/** Body emissive — defaults to the cyan glow when no
+ *  `cursor_color` prop is set. When the prop is set, the
+ *  emissive *is* the cursor color so the visible glow changes
+ *  alongside the dark base tint (otherwise a recoloured cursor
+ *  still reads as cyan because the emissive dominates the
+ *  perceived hue). */
 const EMISSIVE_HEX = '#00ffcc';
 const EMISSIVE_INTENSITY = 1.0;
 
@@ -82,14 +87,24 @@ export function RemoteCursorAvatar({ entity }: RemoteCursorAvatarProps): JSX.Ele
   const { scene: sourceScene } = useGLTF(modelUrl) as unknown as { scene: Object3D };
   const groupRef = useRef<Group>(null);
 
-  const bodyColor = props.cursor_color ?? FALLBACK_BODY_COLOR;
+  // The presence of an explicit `cursor_color` is the signal
+  // we should *also* tint the emissive — that's what makes a
+  // recoloured cursor actually look recoloured (vs the visible
+  // cyan glow always winning). Default cursors keep the cyan
+  // glow + dark teal base.
+  const explicitColor = props.cursor_color;
+  const bodyColor = explicitColor ?? FALLBACK_BODY_COLOR;
+  const emissiveColor = explicitColor ?? '#00ffcc';
 
   // Per-entity instance: clone the scene tree (sharing geometry,
   // replacing materials), build outline shells, register the
   // CASCADE_OVERLAY_LAYER. Recomputed only when bodyColor changes
   // — re-cloning on every entity update would churn GPU
   // allocations and tank perf.
-  const cloned = useMemo(() => buildCursorTree(sourceScene, bodyColor), [sourceScene, bodyColor]);
+  const cloned = useMemo(
+    () => buildCursorTree(sourceScene, bodyColor, emissiveColor),
+    [sourceScene, bodyColor, emissiveColor],
+  );
 
   // Dispose the materials we allocated when this instance unmounts
   // or rebuilds. Geometry is shared with the source GLB, so the
@@ -184,12 +199,16 @@ useGLTF.preload(MODEL_URL);
  *  them before re-skinning. The local cursor isn't affected
  *  because it operates on the cached scene directly, not on
  *  this clone. */
-export function buildCursorTree(source: Object3D, bodyColor: string): Object3D {
+export function buildCursorTree(
+  source: Object3D,
+  bodyColor: string,
+  emissiveColor: string = EMISSIVE_HEX,
+): Object3D {
   const root = source.clone(true);
 
   const bodyMaterial = new MeshStandardMaterial({
     color: new Color(bodyColor),
-    emissive: new Color(EMISSIVE_HEX),
+    emissive: new Color(emissiveColor),
     emissiveIntensity: EMISSIVE_INTENSITY,
     metalness: 0.4,
     roughness: 0.35,

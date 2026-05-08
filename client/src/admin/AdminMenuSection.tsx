@@ -126,7 +126,13 @@ const styles: Record<string, React.CSSProperties> = {
   root: {
     width: '90vw',
     maxWidth: 1100,
-    maxHeight: '70vh',
+    // Cap at 50vh so the regular menu card (~480px) below
+    // still fits inside a 1024px-tall viewport without
+    // forcing the user to scroll. On taller monitors there's
+    // headroom to spare; on shorter ones the admin body
+    // scrolls internally.
+    maxHeight: '50vh',
+    minHeight: 240,
     background: 'rgba(10, 10, 18, 0.96)',
     border: '1px solid rgba(0, 255, 204, 0.4)',
     borderRadius: 12,
