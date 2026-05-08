@@ -58,6 +58,26 @@ pub enum RecipeStep {
         intensity: f32,
         duration_ms: u32,
     },
+    /// Visual particle burst (confetti / sparks / etc). Same
+    /// shape as `SceneEventKind::ParticleBurst` plus the
+    /// recipe-only `offset_ms` + `position_offset` fields. Set
+    /// `model_url` to an uploaded glb URL to use instanced 3D
+    /// confetti pieces instead of coloured point sprites.
+    ParticleBurst {
+        offset_ms: u64,
+        position_offset: [f32; 3],
+        count: u32,
+        colors: Vec<String>,
+        speed: f32,
+        lifetime_ms: u32,
+        spread: f32,
+        gravity: f32,
+        size: f32,
+        #[serde(default)]
+        model_url: Option<String>,
+        #[serde(default)]
+        spin: f32,
+    },
 }
 
 impl RecipeStep {
@@ -65,6 +85,7 @@ impl RecipeStep {
         match self {
             Self::Audio { offset_ms, .. } => *offset_ms,
             Self::CameraShake { offset_ms, .. } => *offset_ms,
+            Self::ParticleBurst { offset_ms, .. } => *offset_ms,
         }
     }
 }
@@ -192,6 +213,12 @@ pub enum ValidationError {
     InvalidRadius,
     InvalidDuration,
     EmptySoundId,
+    EmptyParticleColors,
+    InvalidParticleCount,
+    InvalidParticleSpeed,
+    InvalidParticleLifetime,
+    InvalidParticleSpread,
+    InvalidParticleSize,
 }
 
 impl std::fmt::Display for ValidationError {
@@ -216,6 +243,14 @@ impl std::fmt::Display for ValidationError {
             Self::InvalidRadius => write!(f, "shake radius must be in [0, 5000]"),
             Self::InvalidDuration => write!(f, "shake duration_ms must be in [0, 5000]"),
             Self::EmptySoundId => write!(f, "audio sound_id is empty"),
+            Self::EmptyParticleColors => write!(f, "particle burst colors palette is empty"),
+            Self::InvalidParticleCount => write!(f, "particle count must be in [1, 500]"),
+            Self::InvalidParticleSpeed => write!(f, "particle speed must be in [0, 500]"),
+            Self::InvalidParticleLifetime => {
+                write!(f, "particle lifetime_ms must be in [1, 10000]")
+            }
+            Self::InvalidParticleSpread => write!(f, "particle spread must be in [0, 1]"),
+            Self::InvalidParticleSize => write!(f, "particle size must be in (0, 50]"),
         }
     }
 }
@@ -285,6 +320,34 @@ pub fn validate_recipe(recipe: &Recipe) -> Result<(), ValidationError> {
                     return Err(ValidationError::InvalidDuration);
                 }
             }
+            RecipeStep::ParticleBurst {
+                count,
+                colors,
+                speed,
+                lifetime_ms,
+                spread,
+                size,
+                ..
+            } => {
+                if colors.is_empty() {
+                    return Err(ValidationError::EmptyParticleColors);
+                }
+                if *count == 0 || *count > 500 {
+                    return Err(ValidationError::InvalidParticleCount);
+                }
+                if !speed.is_finite() || *speed < 0.0 || *speed > 500.0 {
+                    return Err(ValidationError::InvalidParticleSpeed);
+                }
+                if *lifetime_ms == 0 || *lifetime_ms > 10_000 {
+                    return Err(ValidationError::InvalidParticleLifetime);
+                }
+                if !spread.is_finite() || *spread < 0.0 || *spread > 1.0 {
+                    return Err(ValidationError::InvalidParticleSpread);
+                }
+                if !size.is_finite() || *size <= 0.0 || *size > 50.0 {
+                    return Err(ValidationError::InvalidParticleSize);
+                }
+            }
         }
     }
     Ok(())
@@ -328,6 +391,13 @@ pub async fn run_recipe(
 /// trigger position. Pure — exported for tests; the playback path
 /// uses it identically.
 pub fn step_to_event(step: &RecipeStep, trigger_pos: [f32; 3]) -> SceneEventKind {
+    let resolve = |offset: &[f32; 3]| -> [f32; 3] {
+        [
+            trigger_pos[0] + offset[0],
+            trigger_pos[1] + offset[1],
+            trigger_pos[2] + offset[2],
+        ]
+    };
     match step {
         RecipeStep::Audio {
             sound_id,
@@ -336,11 +406,7 @@ pub fn step_to_event(step: &RecipeStep, trigger_pos: [f32; 3]) -> SceneEventKind
             ..
         } => SceneEventKind::Audio {
             sound_id: sound_id.clone(),
-            position: Some([
-                trigger_pos[0] + position_offset[0],
-                trigger_pos[1] + position_offset[1],
-                trigger_pos[2] + position_offset[2],
-            ]),
+            position: Some(resolve(position_offset)),
             volume: *volume,
         },
         RecipeStep::CameraShake {
@@ -350,14 +416,34 @@ pub fn step_to_event(step: &RecipeStep, trigger_pos: [f32; 3]) -> SceneEventKind
             duration_ms,
             ..
         } => SceneEventKind::CameraShake {
-            position: [
-                trigger_pos[0] + position_offset[0],
-                trigger_pos[1] + position_offset[1],
-                trigger_pos[2] + position_offset[2],
-            ],
+            position: resolve(position_offset),
             radius: *radius,
             intensity: *intensity,
             duration_ms: *duration_ms,
+        },
+        RecipeStep::ParticleBurst {
+            position_offset,
+            count,
+            colors,
+            speed,
+            lifetime_ms,
+            spread,
+            gravity,
+            size,
+            model_url,
+            spin,
+            ..
+        } => SceneEventKind::ParticleBurst {
+            position: resolve(position_offset),
+            count: *count,
+            colors: colors.clone(),
+            speed: *speed,
+            lifetime_ms: *lifetime_ms,
+            spread: *spread,
+            gravity: *gravity,
+            size: *size,
+            model_url: model_url.clone(),
+            spin: *spin,
         },
     }
 }
@@ -520,6 +606,50 @@ mod tests {
                 assert_eq!(position, Some([110.0, 5.0, -3.0]));
             }
             _ => panic!("expected Audio variant"),
+        }
+    }
+
+    #[test]
+    fn step_to_event_particle_burst_carries_all_fields_and_resolves_position() {
+        let step = RecipeStep::ParticleBurst {
+            offset_ms: 100,
+            position_offset: [0.0, 5.0, 0.0],
+            count: 80,
+            colors: vec!["#ff00ff".to_string(), "#ffff00".to_string()],
+            speed: 60.0,
+            lifetime_ms: 1500,
+            spread: 0.7,
+            gravity: 30.0,
+            size: 0.4,
+            model_url: Some("/assets/ast_abc.glb".to_string()),
+            spin: 12.0,
+        };
+        let event = step_to_event(&step, [10.0, 0.0, -5.0]);
+        match event {
+            SceneEventKind::ParticleBurst {
+                position,
+                count,
+                colors,
+                speed,
+                lifetime_ms,
+                spread,
+                gravity,
+                size,
+                model_url,
+                spin,
+            } => {
+                assert_eq!(position, [10.0, 5.0, -5.0]);
+                assert_eq!(count, 80);
+                assert_eq!(colors, vec!["#ff00ff", "#ffff00"]);
+                assert_eq!(speed, 60.0);
+                assert_eq!(lifetime_ms, 1500);
+                assert_eq!(spread, 0.7);
+                assert_eq!(gravity, 30.0);
+                assert_eq!(size, 0.4);
+                assert_eq!(model_url.as_deref(), Some("/assets/ast_abc.glb"));
+                assert_eq!(spin, 12.0);
+            }
+            _ => panic!("expected ParticleBurst variant"),
         }
     }
 

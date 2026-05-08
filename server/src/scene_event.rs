@@ -169,6 +169,46 @@ pub fn validate_event(
             // pure rejection.
             ValidationOutcome::Drop
         }
+        SceneEventKind::ParticleBurst {
+            position,
+            count,
+            colors,
+            speed,
+            lifetime_ms,
+            spread,
+            gravity,
+            size,
+            model_url,
+            spin,
+        } => {
+            if !tracker.allow(id, "particle_burst", 10, Duration::from_secs(1), now) {
+                return ValidationOutcome::Drop;
+            }
+            // Empty palette is a misuse — drop rather than
+            // silently render invisible particles.
+            if colors.is_empty() {
+                return ValidationOutcome::Drop;
+            }
+            // Clamp every numeric parameter to bounded ranges so
+            // a misbehaving client (or an over-eager admin
+            // recipe) can't ask for a million particles or a
+            // 10-minute burst that dominates the scene. Model
+            // mode caps `count` lower than point mode because
+            // instanced meshes are heavier than point sprites.
+            let count_cap = if model_url.is_some() { 200 } else { 500 };
+            ValidationOutcome::Pass(SceneEventKind::ParticleBurst {
+                position,
+                count: count.min(count_cap),
+                colors,
+                speed: speed.clamp(0.0, 500.0),
+                lifetime_ms: lifetime_ms.min(10_000),
+                spread: spread.clamp(0.0, 1.0),
+                gravity: gravity.clamp(-200.0, 200.0),
+                size: size.clamp(0.01, 50.0),
+                model_url,
+                spin: spin.clamp(-50.0, 50.0),
+            })
+        }
     }
 }
 

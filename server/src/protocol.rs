@@ -163,4 +163,53 @@ pub enum SceneEventKind {
         extension: String,
         size: u64,
     },
+    /// Visual particle burst — confetti, sparks, fire spray.
+    /// Per ADR-008 §particles: receivers seed a local particle
+    /// simulation from these parameters and animate per-frame
+    /// independently. The wire carries only the seed, not the
+    /// per-particle positions, so bandwidth stays bounded
+    /// regardless of `count`.
+    ///
+    /// Two render modes, picked by whether `model_url` is set:
+    ///   - `model_url = None`: each particle is a point sprite
+    ///     coloured from the `colors` palette.
+    ///   - `model_url = Some(...)`: each particle is an instance
+    ///     of the uploaded glb model, tinted per the `colors`
+    ///     palette and tumbling at `spin` rad/sec.
+    ParticleBurst {
+        /// Spawn point of the burst. All particles emit from here.
+        position: [f32; 3],
+        /// Number of particles to spawn. Server clamps to a
+        /// reasonable cap to bound client work.
+        count: u32,
+        /// Hex colour palette (e.g. `["#ff00ff", "#ffff00"]`).
+        /// Each particle picks one at random. In point mode,
+        /// drives vertex colour. In model mode, drives a tint
+        /// multiplier on the model's base material.
+        colors: Vec<String>,
+        /// Initial particle speed in world units / sec. Each
+        /// particle gets a randomized magnitude in `[0.5x, 1x]`.
+        speed: f32,
+        /// Total lifetime in ms before particles fade out.
+        lifetime_ms: u32,
+        /// Spread fraction in `[0, 1]`. 0 = particles emit
+        /// straight up; 1 = full sphere distribution.
+        spread: f32,
+        /// Gravity acceleration along world -Y in
+        /// units / sec². 0 = no gravity (zero-G burst).
+        gravity: f32,
+        /// Per-particle world-space size.
+        size: f32,
+        /// Optional glb / glTF URL to instance per particle.
+        /// When `None`, the burst renders as coloured points;
+        /// when `Some`, each particle is an instance of this
+        /// model with a random orientation. Use the URL returned
+        /// by `POST /api/admin/assets` (e.g. `/assets/ast_….glb`).
+        #[serde(default)]
+        model_url: Option<String>,
+        /// Angular velocity for tumbling (radians / sec). Drives
+        /// per-particle rotation in model mode; ignored in point
+        /// mode since points have no orientation.
+        spin: f32,
+    },
 }

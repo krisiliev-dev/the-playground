@@ -40,6 +40,12 @@ vi.mock('@/multiplayer/RemotePlayerReveals', () => ({
   RemotePlayerReveals: () => null,
 }));
 
+// In-canvas particle burst receiver — stub so World test
+// doesn't pull in the GLTF loader chain.
+vi.mock('@/multiplayer/ParticleBursts', () => ({
+  ParticleBursts: () => null,
+}));
+
 // OrbitControls from drei uses R3F hooks under the hood — stub it out.
 vi.mock('@react-three/drei', () => ({
   OrbitControls: () => null,

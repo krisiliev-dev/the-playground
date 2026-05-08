@@ -23,6 +23,7 @@ import { RouteContent3D } from './RouteContent3D';
 import { Portals } from './portal/Portals';
 import { RemotePlayers } from './RemotePlayers';
 import { RemotePlayerReveals } from '@/multiplayer/RemotePlayerReveals';
+import { ParticleBursts } from '@/multiplayer/ParticleBursts';
 
 export function World(): JSX.Element {
   const environment = useWorldStore((s) => s.environment);
@@ -105,6 +106,7 @@ export function World(): JSX.Element {
       <Portals />
       <RemotePlayers />
       <RemotePlayerReveals />
+      <ParticleBursts />
       <RevealOrchestrator />
       <InteractionController />
       <SkyBackground dimensions={environment.dimensions} />

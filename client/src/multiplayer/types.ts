@@ -70,6 +70,21 @@ export type SceneEventKind =
       url: string;
       extension: string;
       size: number;
+    }
+  | {
+      kind: 'particle_burst';
+      position: [number, number, number];
+      count: number;
+      colors: string[];
+      speed: number;
+      lifetime_ms: number;
+      spread: number;
+      gravity: number;
+      size: number;
+      /** Optional uploaded glb URL — when set, particles are
+       *  instances of this model instead of point sprites. */
+      model_url?: string | null;
+      spin: number;
     };
 
 /** String-tagged subset for `useSceneEvent`'s typed subscription. */
