@@ -163,6 +163,30 @@ pub enum SceneEventKind {
         extension: String,
         size: u64,
     },
+    /// Admin-broadcast kick notification. Targets one player by
+    /// id; non-targeted receivers ignore it. The target's client
+    /// halts its WS reconnect loop and shows a kick overlay.
+    /// The actual WS close happens immediately after via the
+    /// `kick_signals` oneshot — this event arrives a beat
+    /// before so the client can distinguish "kicked" from a
+    /// transient drop.
+    KickNotification {
+        target_actor_id: String,
+        #[serde(default)]
+        reason: Option<String>,
+    },
+    /// Admin-broadcast freeze toggle. Targets one player by id;
+    /// non-targeted receivers ignore the event. The target's
+    /// client sets a local "frozen" flag that disables input
+    /// (mouse + WASD) until a `frozen: false` event for the
+    /// same actor arrives. Server-side `frozen` flag in entity
+    /// props is the authoritative source for "is X frozen now?"
+    /// — this event just notifies the target so its UI updates
+    /// without polling its own props bag.
+    FrozenStatus {
+        target_actor_id: String,
+        frozen: bool,
+    },
     /// Floating 3D text popup at a world position. Renders as a
     /// billboarded label that fades over `lifetime_ms`. Useful
     /// for admin chat ("you've been frozen"), labels on portals,

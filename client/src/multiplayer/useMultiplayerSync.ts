@@ -115,6 +115,16 @@ export function useMultiplayerSync(opts: MultiplayerOptions): void {
         if (cancelled) {
           return;
         }
+        // If the operator was kicked (server sent a
+        // KickNotification then severed the WS), stay
+        // disconnected. The kick overlay covers the canvas;
+        // the only ways out are page reload or admin
+        // intervention. Without this gate the reconnect loop
+        // would run, the player would silently rejoin, and the
+        // kick would feel like a 1-second hiccup.
+        if (useWorldStore.getState().localPlayerKicked) {
+          return;
+        }
         reconnectTimer.current = window.setTimeout(() => {
           backoffMs = Math.min(backoffMs * 2, RECONNECT_CEILING_MS);
           connect();

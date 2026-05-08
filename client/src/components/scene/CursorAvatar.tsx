@@ -672,7 +672,7 @@ function ActiveCursor(): JSX.Element {
       // the avatar even though mouselook is paused (pointer-lock
       // released by PauseMenu).
       const state = useWorldStore.getState();
-      if (state.menuOpen || state.documentMode) {
+      if (state.menuOpen || state.documentMode || state.localPlayerFrozen) {
         return;
       }
       const k = e.key.toLowerCase();
@@ -720,7 +720,10 @@ function ActiveCursor(): JSX.Element {
   // logically pressed because the keyup listener is still bound
   // but the user might switch focus to the menu and never
   // release. Result: avatar walks indefinitely while paused.
-  const movementChromeFlags = useWorldStore((s) => (s.menuOpen ? 1 : 0) | (s.documentMode ? 2 : 0));
+  const movementChromeFlags = useWorldStore(
+    (s) =>
+      (s.menuOpen ? 1 : 0) | (s.documentMode ? 2 : 0) | (s.localPlayerFrozen ? 4 : 0),
+  );
   useEffect(() => {
     if (movementChromeFlags !== 0) {
       keys.current.w = false;
@@ -763,6 +766,14 @@ function ActiveCursor(): JSX.Element {
       // onward), let mouselook resume.
       const rs = useWorldStore.getState().revealState;
       if (rs !== 'impact' && rs !== 'revealed') {
+        return;
+      }
+      // Frozen players' mouse-look is suppressed too — the
+      // server already drops their PlayerInput, but stopping
+      // local mouse rotation makes "frozen" actually feel
+      // immobilising rather than just "remote players see me
+      // stuck."
+      if (useWorldStore.getState().localPlayerFrozen) {
         return;
       }
       avatarYaw.current -= e.movementX * MOUSE_SENSITIVITY;

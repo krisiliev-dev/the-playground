@@ -70,6 +70,16 @@ export type SceneEventKind =
       position: [number, number, number];
     }
   | {
+      kind: 'frozen_status';
+      target_actor_id: string;
+      frozen: boolean;
+    }
+  | {
+      kind: 'kick_notification';
+      target_actor_id: string;
+      reason?: string | null;
+    }
+  | {
       kind: 'text_popup';
       position: [number, number, number];
       text: string;

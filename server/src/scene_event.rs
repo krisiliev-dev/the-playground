@@ -205,6 +205,16 @@ pub fn validate_event(
                 duration_ms: duration_ms.min(3000),
             })
         }
+        SceneEventKind::KickNotification { .. } => {
+            // Server-originated only (admin kick endpoint).
+            ValidationOutcome::Drop
+        }
+        SceneEventKind::FrozenStatus { .. } => {
+            // Server-originated only (admin freeze endpoint).
+            // A player forging this would let them spoof other
+            // players' UI into thinking they're frozen.
+            ValidationOutcome::Drop
+        }
         SceneEventKind::ForceTeleport { .. } => {
             // Server-originated only (admin teleport endpoint);
             // a player forging this would let them yank others'

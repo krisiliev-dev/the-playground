@@ -60,6 +60,37 @@ export function MultiplayerEffectsReceiver(): null {
     );
   });
 
+  // Admin-triggered kick (per ADR-009). When the kick is for
+  // us, set the kicked flag so:
+  //   - the WS reconnect loop bails (in useMultiplayerSync)
+  //   - the KickedOverlay component renders fullscreen
+  //   - leapTarget yanks the avatar through the back wall as
+  //     a "kicked out into the abyss" punctuation
+  useSceneEvent('kick_notification', (event) => {
+    const localId = useWorldStore.getState().localPlayerId;
+    if (!localId || event.target_actor_id !== localId) {
+      return;
+    }
+    const reason = event.reason ?? null;
+    useWorldStore.getState().setLocalPlayerKicked(true, reason);
+    // Yank the avatar through the back wall: target a Z far
+    // outside the cube. The existing leap pipeline handles
+    // the smooth interpolation. ~1500 over a couple seconds
+    // reads as "thrown into the void."
+    useWorldStore.getState().setLeapTarget([0, 0, -1500]);
+  });
+
+  // Admin-triggered freeze (per ADR-009). Match target_actor_id
+  // against our local player id; non-targeted receivers ignore.
+  // The store flag drives input gating in CursorAvatar.
+  useSceneEvent('frozen_status', (event) => {
+    const localId = useWorldStore.getState().localPlayerId;
+    if (!localId || event.target_actor_id !== localId) {
+      return;
+    }
+    useWorldStore.getState().setLocalPlayerFrozen(event.frozen);
+  });
+
   // Admin-triggered teleport (per ADR-009). The server fans
   // a `force_teleport` event to everyone with `target_actor_id`
   // set to the player being moved; non-targeted receivers

@@ -370,12 +370,21 @@ pub async fn get_admin_players(
 #[derive(Deserialize)]
 pub struct KickRequest {
     pub id: EntityId,
+    #[serde(default)]
+    pub reason: Option<String>,
 }
 
 /// POST /api/admin/kick — terminate a specific player's WS
-/// connection. Returns 404 if the player isn't connected, 200
-/// on successful signal. The kick is asynchronous; the WS
-/// handler aborts on its next iteration of the select loop.
+/// connection. Sends a KickNotification SceneEvent first (so the
+/// target's client knows to suppress reconnect + render the
+/// kick overlay), then signals the oneshot that aborts the WS
+/// handler.
+///
+/// Notification + close ordering: we sleep ~250ms between the
+/// notify and the abort so the broadcast buffer drains and the
+/// target's outbound task has a chance to flush the kick event
+/// over the wire. Without that gap, the abort can race ahead of
+/// the broadcast and the client never receives the message.
 pub async fn post_admin_kick(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -389,10 +398,19 @@ pub async fn post_admin_kick(
     let Some(sender) = sender else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    // Sending fails if the receiver was dropped (the connection
-    // already closed). That's fine; the player is gone either
-    // way. Treat both as success from the admin's perspective.
-    let _ = sender.send(());
+    let _ = state.broadcast_tx.send(ServerMessage::SceneEvent {
+        actor_id: None,
+        event: SceneEventKind::KickNotification {
+            target_actor_id: req.id.to_string(),
+            reason: req.reason.clone(),
+        },
+    });
+    // Defer the abort by ~250ms so the kick notification has a
+    // chance to land before the WS dies.
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        let _ = sender.send(());
+    });
     StatusCode::OK.into_response()
 }
 
@@ -427,6 +445,17 @@ pub async fn post_admin_freeze(
     if !mutated {
         return StatusCode::NOT_FOUND.into_response();
     }
+    // Notify the target's client (and incidentally everyone
+    // else, who'll filter it out) so its local input gate
+    // flips immediately without waiting for the entity-props
+    // broadcast to round-trip.
+    let _ = state.broadcast_tx.send(ServerMessage::SceneEvent {
+        actor_id: None,
+        event: SceneEventKind::FrozenStatus {
+            target_actor_id: req.id.to_string(),
+            frozen: req.frozen,
+        },
+    });
     StatusCode::OK.into_response()
 }
 

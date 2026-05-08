@@ -369,6 +369,21 @@ function persistDocumentMode(mode: boolean): void {
 interface MultiplayerSlice {
   entities: ReadonlyMap<EntityId, Entity>;
   localPlayerId: EntityId | null;
+  /** True while an admin has frozen this client. Set by the
+   *  `frozen_status` SceneEvent receiver when `target_actor_id`
+   *  matches `localPlayerId`; consumed by CursorAvatar to gate
+   *  mouse + WASD input. Server-side, the same player's
+   *  PlayerInput position updates are *also* dropped, so a
+   *  hacked client can't bypass this by patching the flag. */
+  localPlayerFrozen: boolean;
+  /** True after the server sends a `Kicked` ServerMessage to
+   *  this client. Halts the multiplayer reconnect loop and
+   *  drives the kick overlay UI. */
+  localPlayerKicked: boolean;
+  /** Optional reason string from the kick. Surfaced in the
+   *  overlay so the operator can leave a note ("griefing",
+   *  "moderation testing", etc.). */
+  kickReason: string | null;
   /** Insert or replace many entities at once. Used for the
    *  initial `FullState` and per-tick `EntityUpdates`. */
   upsertEntities: (entities: ReadonlyArray<Entity>) => void;
@@ -377,6 +392,8 @@ interface MultiplayerSlice {
   /** Called on socket close so a stale remote-avatar map doesn't
    *  linger across reconnects. */
   clearAllEntities: () => void;
+  setLocalPlayerFrozen: (frozen: boolean) => void;
+  setLocalPlayerKicked: (kicked: boolean, reason?: string | null) => void;
 }
 
 interface InteractionSlice {
@@ -436,6 +453,9 @@ export const useWorldStore = create<
   cursorAvatarActive: true,
   entities: new Map(),
   localPlayerId: null,
+  localPlayerFrozen: false,
+  localPlayerKicked: false,
+  kickReason: null,
   hoveredInteractableId: null,
   hoveredInteractablePoint: null,
   pressedInteractableId: null,
@@ -585,6 +605,11 @@ export const useWorldStore = create<
     }),
 
   setLocalPlayerId: (id) => set({ localPlayerId: id }),
+
+  setLocalPlayerFrozen: (frozen) => set({ localPlayerFrozen: frozen }),
+
+  setLocalPlayerKicked: (kicked, reason = null) =>
+    set({ localPlayerKicked: kicked, kickReason: reason }),
 
   clearAllEntities: () => set({ entities: new Map(), localPlayerId: null }),
 }));

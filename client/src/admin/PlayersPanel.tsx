@@ -28,6 +28,12 @@ export function PlayersPanel({ client, onAuthError }: Props): JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  // Per-player teleport-position drafts. Keyed by actor id so a
+  // half-typed coordinate on player A doesn't disappear when
+  // the operator interacts with player B's row.
+  const [tpDraft, setTpDraft] = useState<Record<string, [string, string, string]>>(
+    {},
+  );
 
   const refresh = useCallback(async () => {
     setError(null);
@@ -79,13 +85,37 @@ export function PlayersPanel({ client, onAuthError }: Props): JSX.Element {
     void wrap(p.id, () => client.freezePlayer(p.id, next), next ? 'Froze' : 'Unfroze');
   };
 
-  const onTeleportToCursor = (id: string): void => {
-    const pos: [number, number, number] = [
-      cursorWorldPosition.x,
-      cursorWorldPosition.y,
-      cursorWorldPosition.z,
+  const draftFor = (id: string): [string, string, string] =>
+    tpDraft[id] ?? ['0', '0', '0'];
+
+  const setDraftAxis = (id: string, axis: 0 | 1 | 2, value: string): void => {
+    setTpDraft((prev) => {
+      const cur = prev[id] ?? ['0', '0', '0'];
+      const next: [string, string, string] = [...cur] as [string, string, string];
+      next[axis] = value;
+      return { ...prev, [id]: next };
+    });
+  };
+
+  const fillFromCursor = (id: string): void => {
+    setTpDraft((prev) => ({
+      ...prev,
+      [id]: [
+        cursorWorldPosition.x.toFixed(0),
+        cursorWorldPosition.y.toFixed(0),
+        cursorWorldPosition.z.toFixed(0),
+      ],
+    }));
+  };
+
+  const onTeleport = (id: string): void => {
+    const draft = draftFor(id);
+    const parsed: [number, number, number] = [
+      parseFloat(draft[0]) || 0,
+      parseFloat(draft[1]) || 0,
+      parseFloat(draft[2]) || 0,
     ];
-    void wrap(id, () => client.teleportPlayer(id, pos), 'Teleported');
+    void wrap(id, () => client.teleportPlayer(id, parsed), 'Teleported');
   };
 
   return (
@@ -115,57 +145,83 @@ export function PlayersPanel({ client, onAuthError }: Props): JSX.Element {
             </tr>
           </thead>
           <tbody>
-            {players.map((p) => (
-              <tr key={p.id} style={styles.tr}>
-                <td style={styles.td}>
-                  <code style={styles.code}>{p.id.slice(0, 8)}…</code>
-                </td>
-                <td style={styles.td}>
-                  <span style={{ ...styles.colorChip, background: p.cursor_color }} />
-                  {p.name}
-                </td>
-                <td style={styles.td}>
-                  <code style={styles.code}>{p.route}</code>
-                </td>
-                <td style={styles.td}>
-                  <code style={styles.code}>
-                    {p.position.map((n) => n.toFixed(0)).join(', ')}
-                  </code>
-                </td>
-                <td style={styles.td}>
-                  {p.frozen ? <span style={styles.frozenBadge}>FROZEN</span> : ''}
-                </td>
-                <td style={styles.td}>
-                  <div style={styles.actions}>
-                    <button
-                      type="button"
-                      style={styles.tpBtn}
-                      disabled={busyId === p.id}
-                      onClick={() => onTeleportToCursor(p.id)}
-                      title="Teleport to your scene cursor's last-known position"
-                    >
-                      ⤳ Teleport
-                    </button>
-                    <button
-                      type="button"
-                      style={p.frozen ? styles.unfreezeBtn : styles.freezeBtn}
-                      disabled={busyId === p.id}
-                      onClick={() => onFreezeToggle(p)}
-                    >
-                      {p.frozen ? 'Unfreeze' : 'Freeze'}
-                    </button>
-                    <button
-                      type="button"
-                      style={styles.kickBtn}
-                      disabled={busyId === p.id}
-                      onClick={() => onKick(p.id)}
-                    >
-                      Kick
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
+            {players.map((p) => {
+              const draft = draftFor(p.id);
+              return (
+                <tr key={p.id} style={styles.tr}>
+                  <td style={styles.td}>
+                    <code style={styles.code}>{p.id.slice(0, 8)}…</code>
+                  </td>
+                  <td style={styles.td}>
+                    <span style={{ ...styles.colorChip, background: p.cursor_color }} />
+                    {p.name}
+                  </td>
+                  <td style={styles.td}>
+                    <code style={styles.code}>{p.route}</code>
+                  </td>
+                  <td style={styles.td}>
+                    <code style={styles.code}>
+                      {p.position.map((n) => n.toFixed(0)).join(', ')}
+                    </code>
+                  </td>
+                  <td style={styles.td}>
+                    {p.frozen ? <span style={styles.frozenBadge}>FROZEN</span> : ''}
+                  </td>
+                  <td style={styles.td}>
+                    <div style={styles.actionsCol}>
+                      <div style={styles.tpRow}>
+                        {(['x', 'y', 'z'] as const).map((axis, i) => (
+                          <input
+                            key={axis}
+                            type="number"
+                            value={draft[i]}
+                            onChange={(e) =>
+                              setDraftAxis(p.id, i as 0 | 1 | 2, e.target.value)
+                            }
+                            placeholder={axis}
+                            style={styles.tpInput}
+                          />
+                        ))}
+                        <button
+                          type="button"
+                          style={styles.cursorFill}
+                          onClick={() => fillFromCursor(p.id)}
+                          title="Fill from your scene cursor's last-known position"
+                        >
+                          ↑
+                        </button>
+                        <button
+                          type="button"
+                          style={styles.tpBtn}
+                          disabled={busyId === p.id}
+                          onClick={() => onTeleport(p.id)}
+                        >
+                          ⤳ Teleport
+                        </button>
+                      </div>
+                      <div style={styles.row}>
+                        <button
+                          type="button"
+                          style={p.frozen ? styles.unfreezeBtn : styles.freezeBtn}
+                          disabled={busyId === p.id}
+                          onClick={() => onFreezeToggle(p)}
+                        >
+                          {p.frozen ? 'Unfreeze' : 'Freeze'}
+                        </button>
+                        <button
+                          type="button"
+                          style={styles.kickBtn}
+                          disabled={busyId === p.id}
+                          onClick={() => onKick(p.id)}
+                        >
+                          Kick
+                        </button>
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       )}
@@ -224,6 +280,31 @@ const styles: Record<string, React.CSSProperties> = {
     letterSpacing: 1,
   },
   actions: { display: 'flex', gap: 6 },
+  actionsCol: { display: 'flex', flexDirection: 'column', gap: 6 },
+  row: { display: 'flex', gap: 6 },
+  tpRow: { display: 'flex', gap: 4, alignItems: 'center' },
+  tpInput: {
+    width: 56,
+    background: '#0a0a12',
+    border: '1px solid #1a1a2e',
+    color: '#e6f7ff',
+    padding: '4px 6px',
+    borderRadius: 4,
+    fontSize: 11,
+    fontFamily: 'monospace',
+    outline: 'none',
+  },
+  cursorFill: {
+    background: '#0c1418',
+    border: '1px solid #00ffcc',
+    color: '#00ffcc',
+    width: 24,
+    height: 24,
+    borderRadius: 4,
+    cursor: 'pointer',
+    fontSize: 12,
+    padding: 0,
+  },
   tpBtn: {
     background: '#0c1418',
     color: '#00ffcc',
