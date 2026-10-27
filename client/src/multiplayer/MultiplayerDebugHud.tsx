@@ -1,11 +1,9 @@
 /**
  * Tiny on-screen overlay that surfaces the multiplayer slice's
  * state for debugging — connection-side observability without
- * having to dig in browser devtools. Mounted in App when
- * VITE_MULTIPLAYER_URL is set.
- *
- * Remove once two-tab presence is confirmed working; this is a
- * dev affordance, not a product feature.
+ * having to dig in browser devtools. Mounted in App only in dev
+ * builds (`import.meta.env.DEV`) with VITE_MULTIPLAYER_URL set, so
+ * production visitors never see other players' ids or positions.
  */
 import { useEffect, useState } from 'react';
 import { useWorldStore } from '@/store';
