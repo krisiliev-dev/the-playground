@@ -36,6 +36,7 @@ use tracing::{debug, info, warn};
 
 use crate::assets::{self, DEFAULT_MAX_UPLOAD_BYTES};
 use crate::auth;
+use crate::client_ip;
 use crate::entity::{Entity, EntityId, EntityKind, Transform};
 use crate::protocol::{ClientMessage, EntityOp, SceneEventKind, ServerMessage};
 use crate::recipes::{self, Recipe};
@@ -575,8 +576,9 @@ pub async fn ws_upgrade(
     State(state): State<AppState>,
     Query(params): Query<HashMap<String, String>>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
 ) -> impl IntoResponse {
-    let ip = addr.ip().to_string();
+    let ip = client_ip::resolve(addr.ip(), &headers, &state.trusted_proxies).to_string();
 
     if !state.can_connect(&ip).await {
         warn!(ip = %ip, "connection rejected — rate limit exceeded");

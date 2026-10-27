@@ -121,6 +121,9 @@ jobs:
             # container and were wiped on every deploy.
             # Bind to loopback only — Docker publishes ports past ufw,
             # and Caddy is the only thing that should reach the server.
+            # Caddy's traffic arrives from the Docker bridge gateway
+            # (172.17.0.1), so that's the only peer whose
+            # X-Forwarded-For we trust for the per-IP connection cap.
             docker run -d \
               --name playground-server \
               -p 127.0.0.1:8080:8080 \
@@ -130,6 +133,7 @@ jobs:
               -e STATE_FILE=/home/appuser/data/state.json \
               -e RECIPES_FILE=/home/appuser/data/recipes.json \
               -e ASSETS_DIR=/home/appuser/data/assets \
+              -e TRUSTED_PROXIES=172.17.0.1 \
               -e ADMIN_TOKEN="$ADMIN_TOKEN" \
               -e VIDEOS_PUBLIC_PREFIX="$VIDEOS_PUBLIC_PREFIX" \
               "$IMAGE_TAG"
