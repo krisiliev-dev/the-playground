@@ -199,86 +199,86 @@ export function PauseMenu(): JSX.Element | null {
             <div style={styles.card}>
               <h2 style={styles.heading}>Menu</h2>
 
-            <nav style={styles.nav} aria-label="Sections">
-              {NAV_ITEMS.map((item, i) => {
-                const active = location.pathname === item.path;
-                return (
-                  <button
-                    key={item.path}
-                    ref={i === 0 ? firstFocusRef : undefined}
-                    type="button"
-                    style={active ? styles.navLinkActive : styles.navLink}
-                    onClick={() => handleNav(item.path)}
+              <nav style={styles.nav} aria-label="Sections">
+                {NAV_ITEMS.map((item, i) => {
+                  const active = location.pathname === item.path;
+                  return (
+                    <button
+                      key={item.path}
+                      ref={i === 0 ? firstFocusRef : undefined}
+                      type="button"
+                      style={active ? styles.navLinkActive : styles.navLink}
+                      onClick={() => handleNav(item.path)}
+                    >
+                      {item.label}
+                    </button>
+                  );
+                })}
+              </nav>
+
+              <button
+                type="button"
+                style={styles.item}
+                onClick={() => setContactOpen((o) => !o)}
+                aria-expanded={contactOpen}
+              >
+                Contact {contactOpen ? '▾' : '▸'}
+              </button>
+              {contactOpen && (
+                <div style={styles.contact}>
+                  <a href="mailto:hello@example.com" style={styles.contactLink}>
+                    hello@example.com
+                  </a>
+                  <a
+                    href="https://github.com/krisiliev-dev"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={styles.contactLink}
                   >
-                    {item.label}
-                  </button>
-                );
-              })}
-            </nav>
+                    GitHub →
+                  </a>
+                  <a
+                    href="https://www.linkedin.com/in/your-handle"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={styles.contactLink}
+                  >
+                    LinkedIn →
+                  </a>
+                </div>
+              )}
 
-            <button
-              type="button"
-              style={styles.item}
-              onClick={() => setContactOpen((o) => !o)}
-              aria-expanded={contactOpen}
-            >
-              Contact {contactOpen ? '▾' : '▸'}
-            </button>
-            {contactOpen && (
-              <div style={styles.contact}>
-                <a href="mailto:hello@example.com" style={styles.contactLink}>
-                  hello@example.com
-                </a>
-                <a
-                  href="https://github.com/krisiliev-dev"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={styles.contactLink}
-                >
-                  GitHub →
-                </a>
-                <a
-                  href="https://www.linkedin.com/in/your-handle"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={styles.contactLink}
-                >
-                  LinkedIn →
-                </a>
-              </div>
-            )}
+              <button
+                type="button"
+                style={styles.item}
+                onClick={() => {
+                  useWorldStore.getState().setDocumentMode(true);
+                  close();
+                }}
+                title="Switch to a flat document layout — no 3D, no animations, just text and links"
+              >
+                Simple Experience →
+              </button>
 
-            <button
-              type="button"
-              style={styles.item}
-              onClick={() => {
-                useWorldStore.getState().setDocumentMode(true);
-                close();
-              }}
-              title="Switch to a flat document layout — no 3D, no animations, just text and links"
-            >
-              Simple Experience →
-            </button>
+              <button type="button" style={styles.item} onClick={toggleMute}>
+                Audio: {muted ? 'muted' : 'on'}
+              </button>
 
-            <button type="button" style={styles.item} onClick={toggleMute}>
-              Audio: {muted ? 'muted' : 'on'}
-            </button>
+              <details style={styles.controls}>
+                <summary style={styles.controlsSummary}>Controls</summary>
+                <ul style={styles.keymap}>
+                  {keymap.map((km) => (
+                    <li key={km.key} style={styles.keymapItem}>
+                      <span style={styles.keymapKey}>{km.key}</span>
+                      <span style={styles.keymapDesc}>{km.desc}</span>
+                    </li>
+                  ))}
+                </ul>
+              </details>
 
-            <details style={styles.controls}>
-              <summary style={styles.controlsSummary}>Controls</summary>
-              <ul style={styles.keymap}>
-                {keymap.map((km) => (
-                  <li key={km.key} style={styles.keymapItem}>
-                    <span style={styles.keymapKey}>{km.key}</span>
-                    <span style={styles.keymapDesc}>{km.desc}</span>
-                  </li>
-                ))}
-              </ul>
-            </details>
-
-            <p style={styles.hint}>
-              {isTouch ? 'tap outside' : 'press M or click outside'} to close
-            </p>
+              <p style={styles.hint}>
+                {isTouch ? 'tap outside' : 'press M or click outside'} to close
+              </p>
             </div>
           </div>
         </div>

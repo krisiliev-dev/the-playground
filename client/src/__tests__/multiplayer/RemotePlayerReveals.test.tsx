@@ -11,10 +11,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render } from '@testing-library/react';
 import { useWorldStore } from '@/store';
-import {
-  RemotePlayerReveals,
-  readRevealPresence,
-} from '@/multiplayer/RemotePlayerReveals';
+import { RemotePlayerReveals, readRevealPresence } from '@/multiplayer/RemotePlayerReveals';
 import type { Entity } from '@/multiplayer/types';
 import { IDENTITY_TRANSFORM } from '@/multiplayer/types';
 
@@ -138,4 +135,3 @@ describe('RemotePlayerReveals', () => {
     expect(queryAllByTestId('remote-sword').length).toBe(24);
   });
 });
-

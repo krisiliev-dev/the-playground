@@ -197,8 +197,7 @@ export function clampHitToSlotSection(hit: ClickHit, slot: SpawnSlot): ClickHit 
   const dx = hit.point[0] - cx;
   const dy = hit.point[1] - cy;
   const dz = hit.point[2] - cz;
-  const tx =
-    dx * slot.wallRight[0] + dy * slot.wallRight[1] + dz * slot.wallRight[2];
+  const tx = dx * slot.wallRight[0] + dy * slot.wallRight[1] + dz * slot.wallRight[2];
   const ty = dx * slot.wallUp[0] + dy * slot.wallUp[1] + dz * slot.wallUp[2];
   const halfX = slot.sectionHalfExtent[0];
   const halfY = slot.sectionHalfExtent[1];
@@ -212,11 +211,7 @@ export function clampHitToSlotSection(hit: ClickHit, slot: SpawnSlot): ClickHit 
     ],
     // Always the slot's wall normal — even if the raw hit was
     // on a different wall, the clamp collapses it onto this one.
-    normal: [
-      slot.clickHit.normal[0],
-      slot.clickHit.normal[1],
-      slot.clickHit.normal[2],
-    ],
+    normal: [slot.clickHit.normal[0], slot.clickHit.normal[1], slot.clickHit.normal[2]],
   };
 }
 
@@ -230,10 +225,7 @@ export function clampHitToSlotSection(hit: ClickHit, slot: SpawnSlot): ClickHit 
  * key contract: every viewer must compute the same slot for
  * a given actor without coordination.
  */
-export function getSlotIndexForActor(
-  actorId: string,
-  peerActorIds: readonly string[],
-): number {
+export function getSlotIndexForActor(actorId: string, peerActorIds: readonly string[]): number {
   const sorted = [...peerActorIds].sort();
   const idx = sorted.indexOf(actorId);
   if (idx < 0) {

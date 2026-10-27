@@ -256,7 +256,7 @@ describe('useWorldStore', () => {
       expect(useWorldStore.getState().portalEndpoints).toBe(stub);
     });
 
-    it('resetReveal clears the local actor\'s portals while preserving remote ones', () => {
+    it("resetReveal clears the local actor's portals while preserving remote ones", () => {
       // The local-actor fallback id (when no multiplayer is
       // connected) is `'local'`. Multiplayer-aware reveals tag
       // each portal id with `<actorId>::` so multiple players'
@@ -291,7 +291,7 @@ describe('useWorldStore', () => {
       expect(remaining[0]?.id).toBe('remote-actor::formation-writing');
     });
 
-    it('addPortalEndpoints replaces only the named actor\'s portals', () => {
+    it("addPortalEndpoints replaces only the named actor's portals", () => {
       const a = {
         id: 'A::formation-writing',
         pairedWith: 'A::room-writing-exit',
@@ -315,7 +315,7 @@ describe('useWorldStore', () => {
       expect(useWorldStore.getState().portalEndpoints).toHaveLength(2);
     });
 
-    it('removePortalEndpointsByActor drops a single actor\'s set', () => {
+    it("removePortalEndpointsByActor drops a single actor's set", () => {
       const a = {
         id: 'A::formation-writing',
         pairedWith: 'A::room-writing-exit',

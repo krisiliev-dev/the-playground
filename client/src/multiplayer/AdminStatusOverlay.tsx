@@ -39,8 +39,7 @@ function FrozenView(): JSX.Element {
         <div style={styles.frozenIcon}>❄</div>
         <div style={styles.frozenTitle}>You&apos;ve been frozen</div>
         <div style={styles.frozenSubtitle}>
-          An admin has stopped your input. You&apos;ll be able to move again when they
-          unfreeze you.
+          An admin has stopped your input. You&apos;ll be able to move again when they unfreeze you.
         </div>
       </div>
     </div>
@@ -54,14 +53,9 @@ function KickedView({ reason }: { reason: string | null }): JSX.Element {
         <div style={styles.kickedTitle}>You&apos;ve been kicked</div>
         {reason && <div style={styles.kickedReason}>{reason}</div>}
         <div style={styles.kickedSubtitle}>
-          The connection has been closed by an admin. Reload the page to attempt to
-          rejoin.
+          The connection has been closed by an admin. Reload the page to attempt to rejoin.
         </div>
-        <button
-          type="button"
-          style={styles.reloadBtn}
-          onClick={() => window.location.reload()}
-        >
+        <button type="button" style={styles.reloadBtn} onClick={() => window.location.reload()}>
           Reload
         </button>
       </div>

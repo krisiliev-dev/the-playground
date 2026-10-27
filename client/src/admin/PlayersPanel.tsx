@@ -31,9 +31,7 @@ export function PlayersPanel({ client, onAuthError }: Props): JSX.Element {
   // Per-player teleport-position drafts. Keyed by actor id so a
   // half-typed coordinate on player A doesn't disappear when
   // the operator interacts with player B's row.
-  const [tpDraft, setTpDraft] = useState<Record<string, [string, string, string]>>(
-    {},
-  );
+  const [tpDraft, setTpDraft] = useState<Record<string, [string, string, string]>>({});
   // Per-player cursor-customisation drafts. Same keying logic.
   const [cursorDraft, setCursorDraft] = useState<
     Record<string, { color: string; modelUrl: string }>
@@ -89,8 +87,7 @@ export function PlayersPanel({ client, onAuthError }: Props): JSX.Element {
     void wrap(p.id, () => client.freezePlayer(p.id, next), next ? 'Froze' : 'Unfroze');
   };
 
-  const draftFor = (id: string): [string, string, string] =>
-    tpDraft[id] ?? ['0', '0', '0'];
+  const draftFor = (id: string): [string, string, string] => tpDraft[id] ?? ['0', '0', '0'];
 
   const setDraftAxis = (id: string, axis: 0 | 1 | 2, value: string): void => {
     setTpDraft((prev) => {
@@ -112,9 +109,7 @@ export function PlayersPanel({ client, onAuthError }: Props): JSX.Element {
     }));
   };
 
-  const cursorFor = (
-    p: AdminPlayer,
-  ): { color: string; modelUrl: string } => {
+  const cursorFor = (p: AdminPlayer): { color: string; modelUrl: string } => {
     return (
       cursorDraft[p.id] ?? {
         color: p.cursor_color,
@@ -168,9 +163,7 @@ export function PlayersPanel({ client, onAuthError }: Props): JSX.Element {
       {error && <div style={styles.error}>{error}</div>}
       {info && <div style={styles.info}>{info}</div>}
       {players === null && <div style={styles.muted}>Loading…</div>}
-      {players && players.length === 0 && (
-        <div style={styles.muted}>No players connected.</div>
-      )}
+      {players && players.length === 0 && <div style={styles.muted}>No players connected.</div>}
       {players && players.length > 0 && (
         <table style={styles.table}>
           <thead>
@@ -214,9 +207,7 @@ export function PlayersPanel({ client, onAuthError }: Props): JSX.Element {
                             key={axis}
                             type="number"
                             value={draft[i]}
-                            onChange={(e) =>
-                              setDraftAxis(p.id, i as 0 | 1 | 2, e.target.value)
-                            }
+                            onChange={(e) => setDraftAxis(p.id, i as 0 | 1 | 2, e.target.value)}
                             placeholder={axis}
                             style={styles.tpInput}
                           />
@@ -260,18 +251,14 @@ export function PlayersPanel({ client, onAuthError }: Props): JSX.Element {
                         <input
                           type="color"
                           value={cursorFor(p).color}
-                          onChange={(e) =>
-                            setCursorField(p.id, 'color', e.target.value, p)
-                          }
+                          onChange={(e) => setCursorField(p.id, 'color', e.target.value, p)}
                           style={styles.colorPicker}
                           title="Cursor color"
                         />
                         <input
                           type="text"
                           value={cursorFor(p).modelUrl}
-                          onChange={(e) =>
-                            setCursorField(p.id, 'modelUrl', e.target.value, p)
-                          }
+                          onChange={(e) => setCursorField(p.id, 'modelUrl', e.target.value, p)}
                           placeholder="cursor model URL (empty = default)"
                           style={styles.modelInput}
                         />

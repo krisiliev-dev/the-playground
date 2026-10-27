@@ -90,11 +90,7 @@ export function World(): JSX.Element {
     // Look toward the wall — i.e. anti-normal direction. Using
     // a point inside the wall (slot.point) as the lookAt target
     // keeps the camera direction stable.
-    camera.lookAt(
-      slot.clickHit.point[0],
-      slot.clickHit.point[1],
-      slot.clickHit.point[2],
-    );
+    camera.lookAt(slot.clickHit.point[0], slot.clickHit.point[1], slot.clickHit.point[2]);
     camera.updateMatrixWorld();
   }, [localPlayerId, revealSlotIndex, revealState, camera]);
 

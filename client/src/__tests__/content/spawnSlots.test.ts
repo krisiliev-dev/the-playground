@@ -136,8 +136,7 @@ describe('clampHitToSlotSection', () => {
     const dx = clamped.point[0] - slot.clickHit.point[0];
     const dy = clamped.point[1] - slot.clickHit.point[1];
     const dz = clamped.point[2] - slot.clickHit.point[2];
-    const tx =
-      dx * slot.wallRight[0] + dy * slot.wallRight[1] + dz * slot.wallRight[2];
+    const tx = dx * slot.wallRight[0] + dy * slot.wallRight[1] + dz * slot.wallRight[2];
     expect(tx).toBeCloseTo(halfX, 5);
   });
 

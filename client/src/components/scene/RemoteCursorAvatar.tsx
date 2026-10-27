@@ -81,9 +81,10 @@ export function RemoteCursorAvatar({ entity }: RemoteCursorAvatarProps): JSX.Ele
     cursor_color?: string;
     cursor_model_url?: string;
   };
-  const modelUrl = props.cursor_model_url && props.cursor_model_url.length > 0
-    ? props.cursor_model_url
-    : MODEL_URL;
+  const modelUrl =
+    props.cursor_model_url && props.cursor_model_url.length > 0
+      ? props.cursor_model_url
+      : MODEL_URL;
   const { scene: sourceScene } = useGLTF(modelUrl) as unknown as { scene: Object3D };
   const groupRef = useRef<Group>(null);
 

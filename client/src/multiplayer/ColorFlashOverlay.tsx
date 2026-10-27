@@ -89,13 +89,7 @@ function removeFlash(
   setActive((prev) => prev.filter((f) => f.id !== id));
 }
 
-function FlashLayer({
-  flash,
-  onDone,
-}: {
-  flash: ActiveFlash;
-  onDone: () => void;
-}): JSX.Element {
+function FlashLayer({ flash, onDone }: { flash: ActiveFlash; onDone: () => void }): JSX.Element {
   const [alpha, setAlpha] = useState(0);
 
   useEffect(() => {

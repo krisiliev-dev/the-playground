@@ -235,12 +235,7 @@ export function isInsidePortalHole(pos: Vector3, hole: PortalHole): boolean {
   const tx = dx - dotN * hole.normal.x;
   const ty = dy - dotN * hole.normal.y;
   const tz = dz - dotN * hole.normal.z;
-  if (
-    hole.quadrantOffset !== undefined &&
-    hole.quadrantOffset > 0 &&
-    hole.right &&
-    hole.up
-  ) {
+  if (hole.quadrantOffset !== undefined && hole.quadrantOffset > 0 && hole.right && hole.up) {
     // Four-quadrant symmetric Chebyshev: a position is inside SOME
     // hole iff |abs(localX) - offset| < radius AND |abs(localY) -
     // offset| < radius — same trick the GridMaterial shader uses.
@@ -314,12 +309,24 @@ export function clampToBoxInterior(
       // the wall's axis tells us which end of the cube the wall is
       // on, and therefore which clamp side to skip. (Threshold of
       // 0.5 is robust given the components are ±1 on one axis.)
-      if (hole.normal.x > 0.5) {skipNegX = true;}
-      if (hole.normal.x < -0.5) {skipPosX = true;}
-      if (hole.normal.y > 0.5) {skipNegY = true;}
-      if (hole.normal.y < -0.5) {skipPosY = true;}
-      if (hole.normal.z > 0.5) {skipNegZ = true;}
-      if (hole.normal.z < -0.5) {skipPosZ = true;}
+      if (hole.normal.x > 0.5) {
+        skipNegX = true;
+      }
+      if (hole.normal.x < -0.5) {
+        skipPosX = true;
+      }
+      if (hole.normal.y > 0.5) {
+        skipNegY = true;
+      }
+      if (hole.normal.y < -0.5) {
+        skipPosY = true;
+      }
+      if (hole.normal.z > 0.5) {
+        skipNegZ = true;
+      }
+      if (hole.normal.z < -0.5) {
+        skipPosZ = true;
+      }
     }
   }
 

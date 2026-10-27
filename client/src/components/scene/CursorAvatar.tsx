@@ -767,8 +767,7 @@ function ActiveCursor(): JSX.Element {
   // but the user might switch focus to the menu and never
   // release. Result: avatar walks indefinitely while paused.
   const movementChromeFlags = useWorldStore(
-    (s) =>
-      (s.menuOpen ? 1 : 0) | (s.documentMode ? 2 : 0) | (s.localPlayerFrozen ? 4 : 0),
+    (s) => (s.menuOpen ? 1 : 0) | (s.documentMode ? 2 : 0) | (s.localPlayerFrozen ? 4 : 0),
   );
   useEffect(() => {
     if (movementChromeFlags !== 0) {

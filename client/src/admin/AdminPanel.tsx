@@ -58,8 +58,8 @@ export function AdminPanel(): JSX.Element {
       >
         <h1 style={styles.title}>Admin sign-in</h1>
         <p style={styles.subtitle}>
-          Enter the <code>ADMIN_TOKEN</code> the server was started with. After
-          signing in, admin controls live inside the in-scene menu (press <kbd>M</kbd>).
+          Enter the <code>ADMIN_TOKEN</code> the server was started with. After signing in, admin
+          controls live inside the in-scene menu (press <kbd>M</kbd>).
         </p>
         <input
           ref={setAutofocusRef}

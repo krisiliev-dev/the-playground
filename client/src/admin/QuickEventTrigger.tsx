@@ -9,11 +9,7 @@
  */
 import { useState } from 'react';
 import { cursorWorldPosition } from '@/components/scene/cursorWorldPosition';
-import {
-  AdminAuthError,
-  type AdminClient,
-  type AdminFireableEvent,
-} from './apiClient';
+import { AdminAuthError, type AdminClient, type AdminFireableEvent } from './apiClient';
 
 interface Props {
   client: AdminClient;
@@ -121,18 +117,14 @@ export function QuickEventTrigger({ client, onAuthError }: Props): JSX.Element {
               type="number"
               step="0.1"
               value={audio.volume}
-              onChange={(e) =>
-                setAudio((p) => ({ ...p, volume: parseFloat(e.target.value) || 0 }))
-              }
+              onChange={(e) => setAudio((p) => ({ ...p, volume: parseFloat(e.target.value) || 0 }))}
               style={styles.input}
             />
           </Field>
           <PositionField
             position={audio.position}
             onChange={(p) => setAudio((s) => ({ ...s, position: p }))}
-            onUseCursor={() =>
-              applyCursorTo((p) => setAudio((s) => ({ ...s, position: p })))
-            }
+            onUseCursor={() => applyCursorTo((p) => setAudio((s) => ({ ...s, position: p })))}
           />
         </section>
       )}
@@ -143,9 +135,7 @@ export function QuickEventTrigger({ client, onAuthError }: Props): JSX.Element {
             <input
               type="number"
               value={shake.radius}
-              onChange={(e) =>
-                setShake((p) => ({ ...p, radius: parseFloat(e.target.value) || 0 }))
-              }
+              onChange={(e) => setShake((p) => ({ ...p, radius: parseFloat(e.target.value) || 0 }))}
               style={styles.input}
             />
           </Field>
@@ -173,9 +163,7 @@ export function QuickEventTrigger({ client, onAuthError }: Props): JSX.Element {
           <PositionField
             position={shake.position}
             onChange={(p) => setShake((s) => ({ ...s, position: p }))}
-            onUseCursor={() =>
-              applyCursorTo((p) => setShake((s) => ({ ...s, position: p })))
-            }
+            onUseCursor={() => applyCursorTo((p) => setShake((s) => ({ ...s, position: p })))}
           />
         </section>
       )}
@@ -199,9 +187,7 @@ export function QuickEventTrigger({ client, onAuthError }: Props): JSX.Element {
             <input
               type="text"
               value={particles.colors}
-              onChange={(e) =>
-                setParticles((p) => ({ ...p, colors: e.target.value }))
-              }
+              onChange={(e) => setParticles((p) => ({ ...p, colors: e.target.value }))}
               style={styles.input}
             />
           </Field>
@@ -290,9 +276,7 @@ export function QuickEventTrigger({ client, onAuthError }: Props): JSX.Element {
             <input
               type="text"
               value={particles.model_url}
-              onChange={(e) =>
-                setParticles((p) => ({ ...p, model_url: e.target.value }))
-              }
+              onChange={(e) => setParticles((p) => ({ ...p, model_url: e.target.value }))}
               style={styles.input}
               placeholder="(empty for color points)"
             />
@@ -300,9 +284,7 @@ export function QuickEventTrigger({ client, onAuthError }: Props): JSX.Element {
           <PositionField
             position={particles.position}
             onChange={(p) => setParticles((s) => ({ ...s, position: p }))}
-            onUseCursor={() =>
-              applyCursorTo((p) => setParticles((s) => ({ ...s, position: p })))
-            }
+            onUseCursor={() => applyCursorTo((p) => setParticles((s) => ({ ...s, position: p })))}
           />
         </section>
       )}
@@ -318,13 +300,7 @@ export function QuickEventTrigger({ client, onAuthError }: Props): JSX.Element {
   );
 }
 
-function Field({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}): JSX.Element {
+function Field({ label, children }: { label: string; children: React.ReactNode }): JSX.Element {
   return (
     <label style={styles.field}>
       <span style={styles.fieldLabel}>{label}</span>

@@ -18,11 +18,7 @@ import { FORMATION_SCALE, VIBE_SLOTS } from './vibeFormation';
 import { sfx } from '../../audio/SfxManager';
 import { ARMED_DURATION_MS, SWINGING_DURATION_MS, IMPACT_DURATION_MS } from './constants';
 import { buildPortalEndpoints } from '@/content/portals';
-import {
-  clampHitToSlotSection,
-  getSlotIndexForActor,
-  getSpawnSlot,
-} from '@/content/spawnSlots';
+import { clampHitToSlotSection, getSlotIndexForActor, getSpawnSlot } from '@/content/spawnSlots';
 
 export function RevealOrchestrator(): JSX.Element {
   const revealState = useWorldStore((s) => s.revealState);
@@ -101,25 +97,13 @@ export function RevealOrchestrator(): JSX.Element {
       );
       const raycaster = new Raycaster();
       raycaster.setFromCamera(ndc, camera);
-      const rawHit = intersectInsideCube(
-        raycaster.ray.origin,
-        raycaster.ray.direction,
-        cubeHalf,
-      );
+      const rawHit = intersectInsideCube(raycaster.ray.origin, raycaster.ray.direction, cubeHalf);
       if (!rawHit) {
         return;
       }
       const baseHit = {
-        point: [rawHit.point.x, rawHit.point.y, rawHit.point.z] as [
-          number,
-          number,
-          number,
-        ],
-        normal: [rawHit.normal.x, rawHit.normal.y, rawHit.normal.z] as [
-          number,
-          number,
-          number,
-        ],
+        point: [rawHit.point.x, rawHit.point.y, rawHit.point.z] as [number, number, number],
+        normal: [rawHit.normal.x, rawHit.normal.y, rawHit.normal.z] as [number, number, number],
       };
 
       // Multiplayer path: the slot index was assigned at connect
