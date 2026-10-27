@@ -3,8 +3,10 @@
 # Deployment targets:
 # - Client: Vercel (automatic, no config needed here)
 # - Server: build the Docker image on the GitHub-hosted runner, push it
-#   to GitHub Container Registry (ghcr.io), then SSH to EC2 and run
-#   `docker pull` + (re)start the container.
+#   to GitHub Container Registry (ghcr.io), then SSH to the Contabo VPS
+#   (formerly EC2) and run `docker pull` + (re)start the container.
+#   Caddy on the host terminates TLS for api.krisiliev.dev and proxies
+#   to 127.0.0.1:8080.
 #
 # Why GHCR instead of SCPing tarballs:
 #   - `docker pull` fetches layers in parallel and dedups against
@@ -44,12 +46,11 @@ env:
 jobs:
   deploy-server:
     name: "Build & Deploy Server"
-    # Native arm64 runner so the Docker image builds for the same
-    # architecture the EC2 box runs on (t4g = Graviton/arm64).
-    # Building on ubuntu-latest (amd64) would force QEMU emulation on
-    # EC2 at runtime, which is 5–50× slower than native execution and
-    # was a hidden contributor to the previous deploy slowness.
-    runs-on: ubuntu-24.04-arm
+    # Native amd64 runner so the Docker image builds for the same
+    # architecture the Contabo VPS runs on (x86_64). The old EC2 box
+    # was Graviton/arm64 and used ubuntu-24.04-arm; an arm64 image
+    # would fail to start here with "exec format error".
+    runs-on: ubuntu-24.04
     permissions:
       # checkout
       contents: read
@@ -114,12 +115,21 @@ jobs:
             docker pull "$IMAGE_TAG"
             docker stop playground-server || true
             docker rm playground-server || true
-            mkdir -p /home/ubuntu/videos
+            # Persistent data lives on the host so it survives
+            # container recreation: world snapshot, recipes, asset
+            # index + uploaded assets. Previously these sat inside the
+            # container and were wiped on every deploy.
+            # Bind to loopback only — Docker publishes ports past ufw,
+            # and Caddy is the only thing that should reach the server.
             docker run -d \
               --name playground-server \
-              -p 8080:8080 \
+              -p 127.0.0.1:8080:8080 \
               --restart unless-stopped \
-              -v /home/ubuntu/videos:/home/appuser/videos \
+              -v /srv/playground/data:/home/appuser/data \
+              -v /srv/playground/videos:/home/appuser/videos \
+              -e STATE_FILE=/home/appuser/data/state.json \
+              -e RECIPES_FILE=/home/appuser/data/recipes.json \
+              -e ASSETS_DIR=/home/appuser/data/assets \
               -e ADMIN_TOKEN="$ADMIN_TOKEN" \
               -e VIDEOS_PUBLIC_PREFIX="$VIDEOS_PUBLIC_PREFIX" \
               "$IMAGE_TAG"

@@ -203,8 +203,8 @@ pub async fn process_video(
     }
 
     let safe_name = sanitize_name(&job.name);
-    let download_template = tmp_dir.join(format!("{}_raw.%(ext)s", &safe_name));
-    let final_path = videos_dir.join(format!("{}.mp4", &safe_name));
+    let download_template = tmp_dir.join(format!("{}_raw.%(ext)s", safe_name));
+    let final_path = videos_dir.join(format!("{}.mp4", safe_name));
 
     // --- Step 1: yt-dlp download ---
     store.update_status(&job_id, JobStatus::Downloading).await;
