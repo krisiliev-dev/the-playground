@@ -10,6 +10,7 @@ import {
   computeSpinAngle,
   computeTiltAngle,
   computeTrajectoryProgress,
+  isFinitePose,
   computeVisualScale,
   smoothstep,
 } from '@/components/scene/reveal/swordPhases';
@@ -209,5 +210,40 @@ describe('computeOrientationPhase', () => {
     const past = computeOrientationPhase(POST_END + 1, TURN);
     expect(past.phase).toBe('mid-to-end');
     expect(past.alpha).toBe(1);
+  });
+});
+
+describe('isFinitePose', () => {
+  const pos = (x: number, y: number, z: number): { x: number; y: number; z: number } => ({
+    x,
+    y,
+    z,
+  });
+  const quat = (
+    x: number,
+    y: number,
+    z: number,
+    w: number,
+  ): { x: number; y: number; z: number; w: number } => ({ x, y, z, w });
+  const IDENTITY = quat(0, 0, 0, 1);
+
+  it('accepts a normal pose', () => {
+    expect(isFinitePose(pos(1, -2, 300), IDENTITY, 1.5)).toBe(true);
+  });
+
+  it('rejects NaN or infinite position components', () => {
+    expect(isFinitePose(pos(NaN, 0, 0), IDENTITY, 1)).toBe(false);
+    expect(isFinitePose(pos(0, Infinity, 0), IDENTITY, 1)).toBe(false);
+    expect(isFinitePose(pos(0, 0, -Infinity), IDENTITY, 1)).toBe(false);
+  });
+
+  it('rejects a non-finite quaternion', () => {
+    expect(isFinitePose(pos(0, 0, 0), quat(NaN, 0, 0, 1), 1)).toBe(false);
+    expect(isFinitePose(pos(0, 0, 0), quat(0, 0, 0, Infinity), 1)).toBe(false);
+  });
+
+  it('rejects a non-finite scale', () => {
+    expect(isFinitePose(pos(0, 0, 0), IDENTITY, NaN)).toBe(false);
+    expect(isFinitePose(pos(0, 0, 0), IDENTITY, Infinity)).toBe(false);
   });
 });

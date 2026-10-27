@@ -45,6 +45,7 @@ import {
   computeTiltAngle,
   computeTrajectoryProgress,
   computeVisualScale,
+  isFinitePose,
 } from './swordPhases';
 import {
   computeImpactFlashFrame,
@@ -240,6 +241,9 @@ export function Sword({ slot, staggerIndex = 0, context }: SwordProps): JSX.Elem
   );
 
   const stateEnteredAt = useRef(0);
+  /** Dev-only: whether this sword has already reported a skipped
+   *  non-finite pose (see the guard at the end of useFrame). */
+  const warnedNonFinite = useRef(false);
   const previousState = useRef(revealState);
   /** Per-sword flying-audio loop handle. Created when this sword's
    *  swing begins, position-updated each frame to track the mesh,
@@ -714,9 +718,32 @@ export function Sword({ slot, staggerIndex = 0, context }: SwordProps): JSX.Elem
         break;
     }
 
-    obj.position.copy(targetPos);
-    obj.quaternion.copy(targetQuat);
-    obj.scale.setScalar(calibratedScale.current * visualScale);
+    // Never hand the group (and therefore the <Trail> that samples its
+    // world position) a non-finite pose: NaN points in the trail's
+    // buffer make it log bounding-sphere errors every frame. Keep the
+    // last good pose instead, and warn once in dev with the inputs so
+    // the upstream cause can be traced.
+    const nextScale = calibratedScale.current * visualScale;
+    if (isFinitePose(targetPos, targetQuat, nextScale)) {
+      obj.position.copy(targetPos);
+      obj.quaternion.copy(targetQuat);
+      obj.scale.setScalar(nextScale);
+    } else if (import.meta.env.DEV && !warnedNonFinite.current) {
+      warnedNonFinite.current = true;
+      console.warn('[Sword] skipped non-finite pose', {
+        slot: slot.id,
+        revealState,
+        isRemote,
+        context,
+        targetPos: targetPos.toArray(),
+        targetQuat: targetQuat.toArray(),
+        scale: nextScale,
+        clickCamPos: clickCamPos.toArray(),
+        clickCamQuat: clickCamQuat.toArray(),
+        hitPoint: hitPoint.toArray(),
+        hitNormal: hitNormal.toArray(),
+      });
+    }
 
     // Drive the flying loop's volume/pitch/dither from per-frame
     // motion derivatives, and stash the linear speed so the next-frame

@@ -17,20 +17,6 @@ vi.mock('@react-three/drei', () => ({
   Stars: () => null,
 }));
 
-// SkyBackground calls the video API on mount. Return a ready video.
-vi.mock('@/api/videos', () => ({
-  listReadyVideos: vi.fn().mockResolvedValue([
-    {
-      id: 'test-id',
-      youtube_url: 'https://example.com/x',
-      name: 'test',
-      status: { state: 'ready', url: '/videos/test.mp4' },
-      created_at: '',
-      updated_at: '',
-    },
-  ]),
-}));
-
 import { SkyBackground } from '@/components/scene/SkyBackground';
 
 const TEST_DIMS: Vector3Tuple = [80, 80, 80];

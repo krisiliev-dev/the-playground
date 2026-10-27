@@ -470,7 +470,8 @@ export function App(): JSX.Element {
             <SectionRoutes />
             {multiplayerEnabled && (
               <>
-                <MultiplayerDebugHud />
+                {/* Dev-only: shows every player's id + position. */}
+                {import.meta.env.DEV && <MultiplayerDebugHud />}
                 <MultiplayerEffectsReceiver />
                 <ColorFlashOverlay />
                 <AdminStatusOverlay />
