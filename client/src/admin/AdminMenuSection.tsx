@@ -22,9 +22,8 @@ import { AssetUploader } from './AssetUploader';
 import { RecipeEditor } from './RecipeEditor';
 import { QuickEventTrigger } from './QuickEventTrigger';
 import { PlayersPanel } from './PlayersPanel';
-import { VideoJobs } from './VideoJobs';
 
-type Tab = 'recipes' | 'assets' | 'trigger' | 'players' | 'videos';
+type Tab = 'recipes' | 'assets' | 'trigger' | 'players';
 
 export function AdminMenuSection(): JSX.Element | null {
   const { token, clearToken } = useAdminToken();
@@ -58,9 +57,6 @@ export function AdminMenuSection(): JSX.Element | null {
           <TabButton current={tab} value="trigger" onClick={setTab}>
             Trigger
           </TabButton>
-          <TabButton current={tab} value="videos" onClick={setTab}>
-            Videos
-          </TabButton>
         </nav>
         <div style={styles.headerRight}>
           <NoClipToggle />
@@ -74,7 +70,6 @@ export function AdminMenuSection(): JSX.Element | null {
         {tab === 'recipes' && <RecipeEditor client={client} onAuthError={clearToken} />}
         {tab === 'assets' && <AssetUploader client={client} onAuthError={clearToken} />}
         {tab === 'trigger' && <QuickEventTrigger client={client} onAuthError={clearToken} />}
-        {tab === 'videos' && <VideoJobs token={token} />}
       </main>
     </div>
   );
