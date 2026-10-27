@@ -193,11 +193,7 @@ export interface AdminClient {
   teleportPlayer(id: string, position: [number, number, number]): Promise<void>;
   /** Set a player's cursor color and/or model. Pass `null`
    *  for either field to leave it unchanged; `""` to clear it. */
-  setCursor(
-    id: string,
-    color: string | null,
-    modelUrl: string | null,
-  ): Promise<void>;
+  setCursor(id: string, color: string | null, modelUrl: string | null): Promise<void>;
 }
 
 /**

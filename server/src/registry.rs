@@ -34,6 +34,7 @@ impl EntityRegistry {
         id
     }
 
+    #[cfg(test)]
     pub fn get(&self, id: &EntityId) -> Option<&Entity> {
         self.entities.get(id)
     }
@@ -55,6 +56,7 @@ impl EntityRegistry {
         }
     }
 
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.entities.len()
     }

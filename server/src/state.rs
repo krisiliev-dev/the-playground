@@ -10,6 +10,7 @@
 //! the tick loop, and the snapshot writer can all touch state
 //! concurrently.
 use std::collections::HashMap;
+use std::net::IpAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -39,6 +40,10 @@ pub const BROADCAST_CAPACITY: usize = 256;
 pub struct AppState {
     pub registry: Arc<RwLock<EntityRegistry>>,
     pub connections_per_ip: Arc<RwLock<HashMap<String, usize>>>,
+    /// Reverse proxies whose `X-Forwarded-For` we believe when
+    /// resolving the client IP (see `client_ip`). Empty ⇒ the
+    /// socket peer is always the client.
+    pub trusted_proxies: Arc<Vec<IpAddr>>,
     pub broadcast_tx: broadcast::Sender<ServerMessage>,
     /// Bearer token required on the `?token=` query param at WS
     /// upgrade for the connection to receive admin permissions.
@@ -92,6 +97,7 @@ impl AppState {
         Self {
             registry: Arc::new(RwLock::new(EntityRegistry::new())),
             connections_per_ip: Arc::new(RwLock::new(HashMap::new())),
+            trusted_proxies: Arc::new(Vec::new()),
             broadcast_tx,
             admin_token,
             event_rate: Arc::new(RwLock::new(RateTracker::new())),
@@ -102,6 +108,13 @@ impl AppState {
             recipes_path,
             kick_signals: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         }
+    }
+
+    /// Set the trusted reverse proxies (builder-style, so the
+    /// many test call sites of `new` stay untouched).
+    pub fn with_trusted_proxies(mut self, proxies: Vec<IpAddr>) -> Self {
+        self.trusted_proxies = Arc::new(proxies);
+        self
     }
 
     /// Total live connections (counted across all IPs).

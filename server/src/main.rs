@@ -10,6 +10,7 @@
 //! lifecycle so the rest can build on a compiling foundation.
 mod assets;
 mod auth;
+mod client_ip;
 mod config;
 mod entity;
 mod handlers;
@@ -95,7 +96,11 @@ async fn main() {
         assets_dir.clone(),
         asset_index_path.clone(),
         recipes_path.clone(),
-    );
+    )
+    .with_trusted_proxies(client_ip::trusted_proxies_from_env());
+    if !state.trusted_proxies.is_empty() {
+        tracing::info!(proxies = ?state.trusted_proxies, "trusting X-Forwarded-For from proxies");
+    }
 
     // Restore the asset registry from disk. Same graceful policy
     // as the entity snapshot — missing file is cold start, parse

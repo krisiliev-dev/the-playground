@@ -150,23 +150,15 @@ describe('presenceEqual', () => {
 
   it('compares click hit point referentially', () => {
     const point: [number, number, number] = [10, 5, -3];
-    expect(
-      presenceEqual({ click_hit_point: point }, { click_hit_point: point }),
-    ).toBe(true);
-    expect(
-      presenceEqual(
-        { click_hit_point: [10, 5, -3] },
-        { click_hit_point: [10, 5, -3] },
-      ),
-    ).toBe(false);
+    expect(presenceEqual({ click_hit_point: point }, { click_hit_point: point })).toBe(true);
+    expect(presenceEqual({ click_hit_point: [10, 5, -3] }, { click_hit_point: [10, 5, -3] })).toBe(
+      false,
+    );
   });
 
   it('returns false when reveal_state_entered_at diverges', () => {
     expect(
-      presenceEqual(
-        { reveal_state_entered_at: 1000 },
-        { reveal_state_entered_at: 1001 },
-      ),
+      presenceEqual({ reveal_state_entered_at: 1000 }, { reveal_state_entered_at: 1001 }),
     ).toBe(false);
   });
 });

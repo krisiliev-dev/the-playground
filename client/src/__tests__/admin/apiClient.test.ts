@@ -9,11 +9,7 @@
  * the network and can assert on the recorded calls.
  */
 import { describe, it, expect, vi } from 'vitest';
-import {
-  AdminApiError,
-  AdminAuthError,
-  createAdminClient,
-} from '@/admin/apiClient';
+import { AdminApiError, AdminAuthError, createAdminClient } from '@/admin/apiClient';
 
 interface CallRecord {
   url: string;
@@ -26,12 +22,13 @@ function makeStubFetch(responses: Array<{ status: number; body?: unknown }>): {
 } {
   const calls: CallRecord[] = [];
   let idx = 0;
-  const fetchImpl = (async (input: RequestInfo | URL, init: RequestInit = {}) => {
-    calls.push({ url: String(input), init });
+  const fetchImpl = ((input: RequestInfo | URL, init: RequestInit = {}) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    calls.push({ url, init });
     const r = responses[idx] ?? { status: 200, body: {} };
     idx += 1;
     const text = r.body === undefined ? '' : JSON.stringify(r.body);
-    return new Response(text, { status: r.status });
+    return Promise.resolve(new Response(text, { status: r.status }));
   }) as typeof fetch;
   return { fetchImpl, calls };
 }

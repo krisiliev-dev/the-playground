@@ -31,10 +31,7 @@ export function TextPopups(): JSX.Element {
 
   useSceneEvent('text_popup', (event) => {
     nextId += 1;
-    setActive((prev) => [
-      ...prev,
-      { id: nextId, event, startedAt: performance.now() / 1000 },
-    ]);
+    setActive((prev) => [...prev, { id: nextId, event, startedAt: performance.now() / 1000 }]);
   });
 
   // Sweep expired popups. Lifetime is in ms; we compare in
@@ -43,9 +40,7 @@ export function TextPopups(): JSX.Element {
   useFrame(() => {
     const now = performance.now() / 1000;
     setActive((prev) => {
-      const next = prev.filter(
-        (p) => now - p.startedAt < p.event.lifetime_ms / 1000,
-      );
+      const next = prev.filter((p) => now - p.startedAt < p.event.lifetime_ms / 1000);
       return next.length === prev.length ? prev : next;
     });
   });
@@ -88,11 +83,7 @@ function Popup({ popup }: { popup: ActivePopup }): JSX.Element {
 
   return (
     <Billboard
-      position={[
-        popup.event.position[0],
-        popup.event.position[1],
-        popup.event.position[2],
-      ]}
+      position={[popup.event.position[0], popup.event.position[1], popup.event.position[2]]}
     >
       <Text
         ref={meshRef}

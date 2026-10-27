@@ -47,7 +47,7 @@ interface RevealPresence {
  *  state is idle. Defensive — a remote client could send a
  *  partial bag and we shouldn't crash. Exported for tests. */
 export function readRevealPresence(entity: Entity): RevealPresence | null {
-  const p = entity.props as Record<string, unknown>;
+  const p = entity.props;
   const state = p.reveal_state;
   if (typeof state !== 'string' || state === 'idle') {
     return null;

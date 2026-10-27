@@ -343,7 +343,7 @@ function buildExitHole(exit: PortalEndpoint, bobY: number): PortalHole {
  *  props, or null if they're not currently revealing. Tolerant
  *  of missing fields. */
 function readRemoteClickHit(ent: Entity): ClickHit | null {
-  const p = ent.props as Record<string, unknown>;
+  const p = ent.props;
   const state = p.reveal_state;
   if (typeof state !== 'string' || state === 'idle') {
     return null;
@@ -767,8 +767,7 @@ function ActiveCursor(): JSX.Element {
   // but the user might switch focus to the menu and never
   // release. Result: avatar walks indefinitely while paused.
   const movementChromeFlags = useWorldStore(
-    (s) =>
-      (s.menuOpen ? 1 : 0) | (s.documentMode ? 2 : 0) | (s.localPlayerFrozen ? 4 : 0),
+    (s) => (s.menuOpen ? 1 : 0) | (s.documentMode ? 2 : 0) | (s.localPlayerFrozen ? 4 : 0),
   );
   useEffect(() => {
     if (movementChromeFlags !== 0) {

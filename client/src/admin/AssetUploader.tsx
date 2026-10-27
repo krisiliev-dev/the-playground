@@ -108,28 +108,17 @@ export function AssetUploader({ client, onAuthError }: Props): JSX.Element {
         onDragLeave={() => setDragOver(false)}
         onDrop={onDrop}
       >
-        <p style={styles.dropzoneText}>
-          {uploading ? 'Uploading…' : 'Drag a file here, or'}
-        </p>
+        <p style={styles.dropzoneText}>{uploading ? 'Uploading…' : 'Drag a file here, or'}</p>
         <label style={styles.pickButton}>
           Choose file
-          <input
-            type="file"
-            onChange={onPick}
-            disabled={uploading}
-            style={{ display: 'none' }}
-          />
+          <input type="file" onChange={onPick} disabled={uploading} style={{ display: 'none' }} />
         </label>
       </section>
       {error && <div style={styles.error}>{error}</div>}
       <section style={styles.list}>
-        <h2 style={styles.listTitle}>
-          Assets {assets ? `(${assets.length})` : ''}
-        </h2>
+        <h2 style={styles.listTitle}>Assets {assets ? `(${assets.length})` : ''}</h2>
         {assets === null && <div style={styles.muted}>Loading…</div>}
-        {assets && assets.length === 0 && (
-          <div style={styles.muted}>No assets uploaded yet.</div>
-        )}
+        {assets && assets.length === 0 && <div style={styles.muted}>No assets uploaded yet.</div>}
         {assets && assets.length > 0 && (
           <table style={styles.table}>
             <thead>
@@ -149,11 +138,7 @@ export function AssetUploader({ client, onAuthError }: Props): JSX.Element {
                   <td style={styles.td}>{a.extension}</td>
                   <td style={styles.td}>{formatBytes(a.size)}</td>
                   <td style={styles.td}>
-                    <button
-                      type="button"
-                      style={styles.copyBtn}
-                      onClick={() => onCopy(a.url)}
-                    >
+                    <button type="button" style={styles.copyBtn} onClick={() => onCopy(a.url)}>
                       {copiedUrl === a.url ? 'Copied!' : a.url}
                     </button>
                   </td>

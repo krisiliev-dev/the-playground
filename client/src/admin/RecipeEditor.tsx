@@ -323,13 +323,9 @@ export function RecipeEditor({ client, onAuthError }: Props): JSX.Element {
         <button type="button" style={styles.newBtn} onClick={onNewRecipe}>
           + New recipe
         </button>
-        <h3 style={styles.sidebarHeading}>
-          Recipes {recipes ? `(${recipes.length})` : ''}
-        </h3>
+        <h3 style={styles.sidebarHeading}>Recipes {recipes ? `(${recipes.length})` : ''}</h3>
         {recipes === null && <div style={styles.muted}>Loading…</div>}
-        {recipes && recipes.length === 0 && (
-          <div style={styles.muted}>No recipes yet.</div>
-        )}
+        {recipes && recipes.length === 0 && <div style={styles.muted}>No recipes yet.</div>}
         {recipes &&
           recipes.map((r) => (
             <div
@@ -339,11 +335,7 @@ export function RecipeEditor({ client, onAuthError }: Props): JSX.Element {
                 ...(editingId === r.id ? styles.recipeRowActive : null),
               }}
             >
-              <button
-                type="button"
-                style={styles.recipeRowName}
-                onClick={() => onSelectRecipe(r)}
-              >
+              <button type="button" style={styles.recipeRowName} onClick={() => onSelectRecipe(r)}>
                 <div style={styles.recipeName}>{r.name}</div>
                 <code style={styles.recipeId}>
                   {r.id} · {r.steps.length} step{r.steps.length === 1 ? '' : 's'}
