@@ -158,3 +158,26 @@ export function computeOrientationPhase(t: number, orientationTurnTime: number):
   const ot = Math.min(1, (t - SWING_PRE - SWING_MID) / SWING_POST);
   return { phase: 'mid-to-end', alpha: smoothstep(ot) };
 }
+
+/** Whether a sword pose is safe to write to its group. A single
+ *  non-finite component (NaN / ±Infinity) in the position or scale
+ *  reaches drei's `<Trail>` point buffer, which then logs
+ *  `computeBoundingSphere(): Computed radius is NaN` every frame.
+ *  Sword.tsx skips writing a pose that fails this check and keeps the
+ *  last good one instead. */
+export function isFinitePose(
+  position: { x: number; y: number; z: number },
+  quaternion: { x: number; y: number; z: number; w: number },
+  scale: number,
+): boolean {
+  return (
+    Number.isFinite(position.x) &&
+    Number.isFinite(position.y) &&
+    Number.isFinite(position.z) &&
+    Number.isFinite(quaternion.x) &&
+    Number.isFinite(quaternion.y) &&
+    Number.isFinite(quaternion.z) &&
+    Number.isFinite(quaternion.w) &&
+    Number.isFinite(scale)
+  );
+}
