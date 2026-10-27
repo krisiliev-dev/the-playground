@@ -343,7 +343,7 @@ function buildExitHole(exit: PortalEndpoint, bobY: number): PortalHole {
  *  props, or null if they're not currently revealing. Tolerant
  *  of missing fields. */
 function readRemoteClickHit(ent: Entity): ClickHit | null {
-  const p = ent.props as Record<string, unknown>;
+  const p = ent.props;
   const state = p.reveal_state;
   if (typeof state !== 'string' || state === 'idle') {
     return null;

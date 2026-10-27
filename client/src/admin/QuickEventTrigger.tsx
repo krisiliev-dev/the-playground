@@ -62,7 +62,7 @@ export function QuickEventTrigger({ client, onAuthError }: Props): JSX.Element {
     cursorWorldPosition.z,
   ];
 
-  const useCursorFor = (set: (pos: [number, number, number]) => void): void => {
+  const applyCursorTo = (set: (pos: [number, number, number]) => void): void => {
     set(cursorPos());
   };
 
@@ -131,7 +131,7 @@ export function QuickEventTrigger({ client, onAuthError }: Props): JSX.Element {
             position={audio.position}
             onChange={(p) => setAudio((s) => ({ ...s, position: p }))}
             onUseCursor={() =>
-              useCursorFor((p) => setAudio((s) => ({ ...s, position: p })))
+              applyCursorTo((p) => setAudio((s) => ({ ...s, position: p })))
             }
           />
         </section>
@@ -174,7 +174,7 @@ export function QuickEventTrigger({ client, onAuthError }: Props): JSX.Element {
             position={shake.position}
             onChange={(p) => setShake((s) => ({ ...s, position: p }))}
             onUseCursor={() =>
-              useCursorFor((p) => setShake((s) => ({ ...s, position: p })))
+              applyCursorTo((p) => setShake((s) => ({ ...s, position: p })))
             }
           />
         </section>
@@ -301,7 +301,7 @@ export function QuickEventTrigger({ client, onAuthError }: Props): JSX.Element {
             position={particles.position}
             onChange={(p) => setParticles((s) => ({ ...s, position: p }))}
             onUseCursor={() =>
-              useCursorFor((p) => setParticles((s) => ({ ...s, position: p })))
+              applyCursorTo((p) => setParticles((s) => ({ ...s, position: p })))
             }
           />
         </section>

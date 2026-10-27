@@ -159,14 +159,11 @@ impl RecipeStore {
         self.recipes.iter().find(|r| r.id == id)
     }
 
-    pub fn list(&self) -> &[Recipe] {
-        &self.recipes
-    }
-
     pub fn len(&self) -> usize {
         self.recipes.len()
     }
 
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.recipes.is_empty()
     }

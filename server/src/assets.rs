@@ -64,14 +64,11 @@ impl AssetRegistry {
         true
     }
 
-    pub fn list(&self) -> &[AssetMeta] {
-        &self.assets
-    }
-
     pub fn len(&self) -> usize {
         self.assets.len()
     }
 
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.assets.is_empty()
     }

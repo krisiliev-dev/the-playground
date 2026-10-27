@@ -31,7 +31,6 @@ import { useFrame } from '@react-three/fiber';
 import { useGLTF } from '@react-three/drei';
 import {
   type BufferAttribute,
-  type BufferGeometry,
   Color,
   type InstancedMesh as InstancedMeshT,
   type Material,
@@ -62,10 +61,7 @@ export function ParticleBursts(): JSX.Element {
 
   useSceneEvent('particle_burst', (event) => {
     nextId += 1;
-    setActive((prev) => [
-      ...prev,
-      { id: nextId, event, startedAt: performance.now() / 1000 },
-    ]);
+    setActive((prev) => [...prev, { id: nextId, event, startedAt: performance.now() / 1000 }]);
   });
 
   // Sweep expired bursts. Each burst lives for `lifetime_ms`
@@ -74,9 +70,7 @@ export function ParticleBursts(): JSX.Element {
   useFrame(() => {
     const now = performance.now() / 1000;
     setActive((prev) => {
-      const next = prev.filter(
-        (b) => now - b.startedAt < b.event.lifetime_ms / 1000,
-      );
+      const next = prev.filter((b) => now - b.startedAt < b.event.lifetime_ms / 1000);
       return next.length === prev.length ? prev : next;
     });
   });
@@ -104,9 +98,7 @@ interface BurstProps {
  *  = `spread * π/2`) at a magnitude in `[0.5×, 1×] * speed`,
  *  plus a colour picked from the palette. Pure — keeps the
  *  rendering components thin. */
-function seedParticles(
-  event: ParticleBurstEvent,
-): {
+function seedParticles(event: ParticleBurstEvent): {
   positions: Float32Array;
   velocities: Float32Array;
   colors: Color[];
@@ -241,12 +233,12 @@ function ModelBurst({ event, startedAt }: BurstProps): JSX.Element | null {
       return { geometry: null, material: null };
     }
     const m = foundMesh as Mesh;
-    const geom = m.geometry as BufferGeometry;
+    const geom = m.geometry;
     let mat: Material;
     if (Array.isArray(m.material)) {
       mat = (m.material[0] as Material).clone();
     } else {
-      mat = (m.material as Material).clone();
+      mat = m.material.clone();
     }
     if (mat instanceof MeshStandardMaterial) {
       mat.transparent = true;
@@ -335,10 +327,7 @@ function ModelBurst({ event, startedAt }: BurstProps): JSX.Element | null {
       // Step rotation — initial quat, then add `spin * dt`
       // around a per-particle fixed axis.
       rotState.currentAngles[i]! += event.spin * delta;
-      scratch.spinQ.setFromAxisAngle(
-        rotState.spinAxes[i]!,
-        rotState.currentAngles[i]!,
-      );
+      scratch.spinQ.setFromAxisAngle(rotState.spinAxes[i]!, rotState.currentAngles[i]!);
       scratch.quat.copy(rotState.initialQuats[i]!).multiply(scratch.spinQ);
 
       scratch.pos.set(pos[idx]!, pos[idx + 1]!, pos[idx + 2]!);
@@ -361,10 +350,6 @@ function ModelBurst({ event, startedAt }: BurstProps): JSX.Element | null {
     return null;
   }
   return (
-    <instancedMesh
-      ref={meshRef}
-      args={[geometry, material, event.count]}
-      frustumCulled={false}
-    />
+    <instancedMesh ref={meshRef} args={[geometry, material, event.count]} frustumCulled={false} />
   );
 }

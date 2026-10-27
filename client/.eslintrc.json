@@ -85,7 +85,12 @@
           "attach",
           "quaternion",
           "toneMapped",
-          "frustumCulled"
+          "frustumCulled",
+          "array",
+          "count",
+          "itemSize",
+          "vertexColors",
+          "sizeAttenuation"
         ]
       }
     ]
